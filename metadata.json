@@ -1,0 +1,10 @@
+{
+  "name": "Remix: BloomCore",
+  "description": "Plateforme globale de gestion communautaire pour Bloom Church et Bloom Light",
+  "requestFramePermissions": [
+    "geolocation"
+  ],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

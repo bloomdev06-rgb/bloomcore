@@ -1,0 +1,122 @@
+@import url('https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;600;700;800;900&family=Georgia&display=swap');
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Montserrat", system-ui, -apple-system, sans-serif;
+  --font-serif: "Georgia", serif;
+  --font-mono: "JetBrains Mono", monospace;
+  --font-ui: "Montserrat", system-ui, -apple-system, sans-serif;
+  
+  --color-bc-white: #FFFFFF;
+  --color-bc-green: #006C67; 
+  --color-bc-green-hover: #005852; 
+  --color-bc-green-dark: #075E54; 
+  --color-bc-warmgrey: #D6D1CB; 
+  --color-bc-gold: #D2AF1F; 
+  
+  --color-bc-fushia: #D62766;
+  --color-bc-cerulean: #009BDE;
+  --color-bc-turquoise: #00A7B5;
+  --color-bc-anis: #A6B340;
+  --color-bc-orange: #F38B36;
+  --color-bc-purple: #B21E28; 
+  
+  --color-bc-canvas: #FFFFFF;
+  --color-bc-surface: #FFFFFF;
+  --color-bc-border: #E7E3DD;
+  --color-bc-text: #0F172A;
+  --color-bc-text-secondary: #5B6470;
+}
+
+@utility ease-out-spring {
+  transition-timing-function: cubic-bezier(0.23, 1, 0.32, 1);
+}
+
+@utility active-scale {
+  &:active {
+    transform: scale(0.97);
+  }
+}
+
+:root {
+  /* Design system tokens */
+  --radius-input: 6px;
+  --radius-card: 12px;
+  --radius-pill: 999px;
+  --ease-standard: cubic-bezier(0.4, 0, 0.2, 1);
+  --dur: 200ms;
+}
+
+/* Custom styles */
+body {
+  font-family: var(--font-sans);
+  background-color: var(--color-bc-canvas);
+  color: var(--color-bc-text);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Scrollbar customizations */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: #D6D1CB;
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #006C67;
+}
+
+/* Branch color sweep animation */
+.color-sweep {
+  position: relative;
+  overflow: hidden;
+}
+
+.color-sweep::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: -100%;
+  width: 100%;
+  height: 100%;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    rgba(255, 255, 255, 0.2),
+    transparent
+  );
+  transition: left 0.5s cubic-bezier(0.23, 1, 0.32, 1);
+}
+
+.color-sweep-active::after {
+  left: 100%;
+}
+
+/* Neon Glow for active states */
+.active-glow-church {
+  box-shadow: 0 0 15px rgba(0, 155, 222, 0.15);
+}
+
+.active-glow-light {
+  box-shadow: 0 0 15px rgba(243, 139, 54, 0.15);
+}
+
+/* Skeleton Loading Pulsation */
+@keyframes skeleton-pulse {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: .4;
+  }
+}
+
+.animate-skeleton {
+  animation: skeleton-pulse 1.5s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
