@@ -6,3 +6,6 @@ coverage/
 *.log
 .env*
 !.env.example
+
+# Generated knowledge graph (regenerable via /graphify)
+graphify-out/

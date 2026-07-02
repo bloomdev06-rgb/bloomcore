@@ -9,15 +9,14 @@ interface ThemeToggleProps {
 }
 
 export function ThemeToggle({ className }: ThemeToggleProps) {
-  const [isDark, setIsDark] = useState(false)
+  const [isDark, setIsDark] = useState(
+    () => document.documentElement.classList.contains('dark') || localStorage.getItem('bc_theme') === 'dark'
+  )
 
-  // Sync with document element on mount and state change
+  // Sync document element + persist choice across reloads.
   useEffect(() => {
-    if (isDark) {
-      document.documentElement.classList.add('dark')
-    } else {
-      document.documentElement.classList.remove('dark')
-    }
+    document.documentElement.classList.toggle('dark', isDark)
+    localStorage.setItem('bc_theme', isDark ? 'dark' : 'light')
   }, [isDark])
 
   return (

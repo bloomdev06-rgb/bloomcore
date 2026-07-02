@@ -1,7 +1,32 @@
-import { Member, Department, Ministry, BloomBusEntity, AuditLog, AppNotification, Event, Report, PermissionMatrix, Project } from './types';
+import { Member, Department, Ministry, BloomBusEntity, AuditLog, AppNotification, Event, Report, PermissionMatrix, Project, Activity } from './types';
 
 export const INITIAL_PROJECTS: Project[] = [
-  { id: 'proj_nss', name: 'Nouvelle Semaine Spirituelle (NSS)', scope: 'both', status: 'En cours', pmo: 'Non assigné' },
+  {
+    id: 'proj_nss',
+    name: 'Nouvelle Semaine Spirituelle (NSS)',
+    scope: 'both',
+    status: 'En cours',
+    pmo: 'Esther Bamba',
+    startDate: '2026-06-01',
+    endDate: '2026-08-15',
+    team: [
+      { member: 'Esther Bamba', role: 'PMO' },
+      { member: 'Jean Kouassi', role: 'Responsable COM' },
+      { member: 'Paul Adjé', role: 'Logistique' },
+    ],
+    objectives: [
+      { id: 'o1', label: 'Réserver la salle principale', done: true },
+      { id: 'o2', label: 'Valider le programme des 7 soirées', done: true },
+      { id: 'o3', label: 'Mobiliser 500 participants', done: false },
+      { id: 'o4', label: 'Boucler le budget sono/lumière', done: false },
+    ],
+    actions: [
+      { id: 'a1', title: 'Contrat prestataire son', assignee: 'Paul Adjé', due: '2026-07-10', status: 'doing' },
+      { id: 'a2', title: 'Visuels réseaux sociaux', assignee: 'Jean Kouassi', due: '2026-07-05', status: 'todo' },
+      { id: 'a3', title: 'Liste des orateurs', assignee: 'Esther Bamba', due: '2026-06-20', status: 'done' },
+      { id: 'a4', title: 'Plan de salle & protocole', assignee: 'Paul Adjé', status: 'todo' },
+    ],
+  },
   { id: 'proj_rsa', name: 'RSA', scope: 'both', status: 'En cours', pmo: 'Non assigné' },
   { id: 'proj_game_changers', name: 'Game Changers', scope: 'both', status: 'En cours', pmo: 'Non assigné' },
   { id: 'proj_finances', name: 'Les Finances', scope: 'both', status: 'En cours', pmo: 'Non assigné' },
@@ -66,6 +91,13 @@ export const INITIAL_DEPARTMENTS: Department[] = [
   { id: 'dept_reunion_cl', name: 'Réunion des C&L', type: 'service', ministryId: 'min_affermissement', description: '' },
   { id: 'dept_bible_coffee', name: 'Bible Coffee', type: 'service', ministryId: 'min_affermissement', description: '' },
   { id: 'dept_bapteme', name: 'Baptême', type: 'spécial', ministryId: 'min_affermissement', description: 'Parcours étapes' },
+];
+
+export const INITIAL_ACTIVITIES: Activity[] = [
+  { id: 'act_1', departmentId: 'dept_adn', title: 'Réunion de département', recurrence: 'Hebdomadaire', day: 'Samedi', time: '16:00' },
+  { id: 'act_2', departmentId: 'dept_adn', title: 'Temps de prière', recurrence: 'Hebdomadaire', day: 'Mardi', time: '19:00' },
+  { id: 'act_3', departmentId: 'dept_louange', title: 'Répétition', recurrence: 'Hebdomadaire', day: 'Jeudi', time: '18:30' },
+  { id: 'act_4', departmentId: 'dept_louange', title: 'RSA', recurrence: 'Hebdomadaire', day: 'Vendredi', time: '20:00' },
 ];
 
 export const INITIAL_BUS_LINES: BloomBusEntity[] = [
@@ -183,6 +215,7 @@ export const INITIAL_MEMBERS: Member[] = [
     bloomBusId: 'bus_yop_niangon',
     entryDate: '2026-06-24', // registered 1 day ago (Safe)
     integrationState: 'En attente',
+    receptionValidated: false, // §6.2 — demo: awaits Responsable's reception validation
     integrationDateRegistered: '2026-06-24',
     ojFlag: true,
     integrationNotes: 'A exprimé une grande envie de s\'impliquer dans la chorale. Très bon contact initial.',
@@ -417,7 +450,8 @@ export const INITIAL_AUDITS: AuditLog[] = [
     actionType: 'MEMBER_REGISTERED_ADN',
     operatorName: 'Kady Bamba',
     operatorId: 'mem_3',
-    details: 'Enregistrement initial du nouveau Moustapha Diomandé par l\'ADN.'
+    details: 'Enregistrement initial du nouveau Moustapha Diomandé par l\'ADN.',
+    branch: 'church'
   },
   {
     id: 'aud_2',
@@ -427,7 +461,8 @@ export const INITIAL_AUDITS: AuditLog[] = [
     operatorId: 'system',
     details: 'Transfert de branche de Cocody Angré - Ligne 3 vers Bloom Light.',
     previousValue: 'Bloom Church',
-    newValue: 'Bloom Light'
+    newValue: 'Bloom Light',
+    branch: 'light'
   },
   {
     id: 'aud_3',

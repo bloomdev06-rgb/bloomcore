@@ -1,6 +1,7 @@
-import React from 'react';
-import { Shield, Check, X, Sliders, AlertCircle, Info } from 'lucide-react';
+import React, { useState } from 'react';
+import { Shield, Check, X, Sliders, AlertCircle, Info, UserCheck, Plus, GitBranch } from 'lucide-react';
 import { PermissionMatrix, Branch } from '../types';
+import { load, save } from '../data';
 import { motion, AnimatePresence } from 'motion/react';
 
 interface GovernanceViewProps {
@@ -42,6 +43,41 @@ export default function GovernanceView({
   ];
 
   const roles = ['Pasteur', 'Admin', 'Responsable', 'Coach', 'Membre'];
+  // §11.2 — config réservée à Admin / Pasteur Principal / Super Admin (pas 'Pasteur' générique).
+  const canEditGov = ['Admin', 'Pasteur Principal', 'Super Admin'].includes(simulatedRole);
+  const capLabel = (key: string) => capabilitiesList.find(c => c.key === key)?.label ?? key;
+
+  // ponytail: local state, no persistence yet — wire to ./data + audit log when the backend lands.
+  const [specials, setSpecials] = useState<{ member: string; capability: string }[]>([
+    { member: 'Marie Koffi', capability: 'consulter_situation_financiere' },
+  ]);
+  const [newMember, setNewMember] = useState('');
+  const [newCap, setNewCap] = useState(capabilitiesList[0].key);
+  const addSpecial = () => {
+    if (!newMember.trim()) return;
+    setSpecials(prev => [{ member: newMember.trim(), capability: newCap }, ...prev]);
+    setNewMember('');
+  };
+
+  // §11.3 — délégation par un Responsable dans son département. On ne délègue JAMAIS
+  // l'accès au rapport spirituel (consulter_rapports_de_vie exclu des capacités déléguables).
+  const DELEGABLE_CAPS = capabilitiesList.filter(c => c.key !== 'consulter_rapports_de_vie');
+  const [delegations, setDelegations] = useState<{ id: string; from: string; to: string; scope: string; right: string }[]>(
+    () => load('bc_delegations', [
+      { id: 'del_1', from: 'Resp. Louange (Jean K.)', to: 'Adjoint (Paul A.)', scope: 'Département Louange', right: 'modifier_jalons_bapteme_integration' },
+    ])
+  );
+  React.useEffect(() => { save('bc_delegations', delegations); }, [delegations]);
+  const [delFrom, setDelFrom] = useState('');
+  const [delTo, setDelTo] = useState('');
+  const [delScope, setDelScope] = useState('');
+  const [delRight, setDelRight] = useState(DELEGABLE_CAPS[0].key);
+  const addDelegation = () => {
+    if (!delFrom.trim() || !delTo.trim()) return;
+    setDelegations(prev => [{ id: `del_${Date.now()}`, from: delFrom.trim(), to: delTo.trim(), scope: delScope.trim() || 'Son département', right: delRight }, ...prev]);
+    setDelFrom(''); setDelTo(''); setDelScope('');
+  };
+  const removeDelegation = (id: string) => setDelegations(prev => prev.filter(d => d.id !== id));
 
   return (
     <motion.div 
@@ -98,8 +134,8 @@ export default function GovernanceView({
                   </td>
                   {roles.map(role => {
                     const isAllowed = permissionMatrix[cap.key]?.[role] || false;
-                    const canEdit = simulatedRole === 'Pasteur' || (simulatedRole === 'Admin' || simulatedRole === 'Super Admin');
-                    
+                    const canEdit = canEditGov;
+
                     return (
                       <td key={role} className="p-4 text-center">
                         <motion.button
@@ -141,8 +177,80 @@ export default function GovernanceView({
         </div>
       </motion.div>
 
+      {/* Special authorizations */}
+      <motion.div variants={rowVariants} className="bg-white border border-bc-border shadow-sm rounded-[2rem] p-6">
+        <h3 className="text-sm font-ui font-bold text-bc-text flex items-center gap-2 mb-1">
+          <UserCheck size={16} /> Autorisations spéciales
+        </h3>
+        <p className="text-xs text-bc-text-secondary mb-4">Accorder une capacité à un membre nommément (exception à la matrice).</p>
+
+        {canEditGov && (
+          <div className="flex flex-wrap gap-2 items-center mb-4">
+            <input
+              value={newMember}
+              onChange={e => setNewMember(e.target.value)}
+              placeholder="Nom du membre"
+              className="flex-1 min-w-[160px] border border-bc-border rounded-full px-3 py-2 text-xs focus:outline-none focus:border-bc-green"
+            />
+            <select value={newCap} onChange={e => setNewCap(e.target.value)} className="border border-bc-border rounded-full px-3 py-2 text-xs bg-white">
+              {capabilitiesList.map(c => <option key={c.key} value={c.key}>{c.label}</option>)}
+            </select>
+            <button onClick={addSpecial} className="flex items-center gap-1.5 bg-bc-green text-white rounded-full px-4 py-2 text-xs font-bold hover:opacity-90">
+              <Plus size={14} /> Accorder
+            </button>
+          </div>
+        )}
+
+        <div className="space-y-2">
+          {specials.length === 0 && <p className="text-xs text-bc-text-secondary italic">Aucune autorisation spéciale.</p>}
+          {specials.map((s, i) => (
+            <div key={i} className="flex items-center justify-between bg-bc-canvas/40 border border-bc-border rounded-full px-4 py-2 text-xs">
+              <span><span className="font-bold text-bc-text">{s.member}</span> — {capLabel(s.capability)}</span>
+              {canEditGov && (
+                <button onClick={() => setSpecials(prev => prev.filter((_, j) => j !== i))} className="text-bc-text-secondary hover:text-red-500">
+                  <X size={14} />
+                </button>
+              )}
+            </div>
+          ))}
+        </div>
+      </motion.div>
+
+      {/* Delegations (read-only) */}
+      <motion.div variants={rowVariants} className="bg-white border border-bc-border shadow-sm rounded-[2rem] p-6">
+        <h3 className="text-sm font-ui font-bold text-bc-text flex items-center gap-2 mb-1">
+          <GitBranch size={16} /> Délégations
+        </h3>
+        <p className="text-xs text-bc-text-secondary mb-4">Droits délégués par les responsables, dans leur département uniquement. Le rapport spirituel n'est jamais déléguable.</p>
+        <div className="space-y-2">
+          {delegations.length === 0 && <p className="text-xs text-bc-text-secondary italic">Aucune délégation active.</p>}
+          {delegations.map((d) => (
+            <div key={d.id} className="bg-bc-canvas/40 border border-bc-border rounded-2xl px-4 py-2.5 text-xs flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1">
+              <span><span className="font-bold text-bc-text">{d.from}</span> → {d.to}</span>
+              <span className="flex items-center gap-2">
+                <span className="text-bc-text-secondary">{capLabel(d.right)} · <span className="italic">{d.scope}</span></span>
+                {canEditGov && <button onClick={() => removeDelegation(d.id)} className="text-bc-text-secondary hover:text-red-500"><X size={12} /></button>}
+              </span>
+            </div>
+          ))}
+        </div>
+        {canEditGov && (
+          <div className="mt-4 pt-4 border-t border-bc-border grid grid-cols-1 sm:grid-cols-2 gap-2">
+            <input value={delFrom} onChange={e => setDelFrom(e.target.value)} placeholder="Délégant (Responsable)…" className="border border-bc-border rounded-full px-3 py-1.5 text-xs focus:outline-none focus:border-bc-green" />
+            <input value={delTo} onChange={e => setDelTo(e.target.value)} placeholder="Délégataire…" className="border border-bc-border rounded-full px-3 py-1.5 text-xs focus:outline-none focus:border-bc-green" />
+            <input value={delScope} onChange={e => setDelScope(e.target.value)} placeholder="Périmètre (département)…" className="border border-bc-border rounded-full px-3 py-1.5 text-xs focus:outline-none focus:border-bc-green" />
+            <div className="flex gap-2">
+              <select value={delRight} onChange={e => setDelRight(e.target.value)} className="flex-1 min-w-0 border border-bc-border rounded-full px-3 py-1.5 text-xs bg-white">
+                {DELEGABLE_CAPS.map(c => <option key={c.key} value={c.key}>{c.label}</option>)}
+              </select>
+              <button onClick={addDelegation} disabled={!delFrom.trim() || !delTo.trim()} className="px-3 py-1.5 bg-bc-green text-white rounded-full text-xs font-bold disabled:opacity-40 shrink-0"><Plus size={13} /></button>
+            </div>
+          </div>
+        )}
+      </motion.div>
+
       {/* Notice info */}
-      <motion.div 
+      <motion.div
         variants={rowVariants}
         className="bg-bc-canvas/50 border border-bc-border rounded-[2rem] p-4 flex gap-3 items-start"
       >

@@ -37,9 +37,13 @@ export default function ReportsView({
     // Type filter
     if (filterType !== 'all' && rep.reportType !== filterType) return false;
 
-    // Confidentiality filter: 'rapport_pastoral' is reserved to Pasteur or Admin simulated roles
-    if (rep.confidential && !['Pasteur', 'Admin', 'Super Admin'].includes(simulatedRole)) {
-      return false;
+    // §8.3 — confidentialité du rapport pastoral :
+    // visible au corps pastoral (Pasteur/Pasteur Principal/Ministre/Admin/Super Admin) toujours ;
+    // à un Coach/Responsable uniquement si le secret est explicitement partagé (partagerAvecResponsableDept).
+    if (rep.confidential) {
+      const pastoralCorps = ['Pasteur', 'Pasteur Principal', 'Ministre', 'Admin', 'Super Admin'].includes(simulatedRole);
+      const coachWithShare = ['Coach', 'Responsable'].includes(simulatedRole) && !!rep.partagerAvecResponsableDept;
+      if (!pastoralCorps && !coachWithShare) return false;
     }
 
     return true;
@@ -303,6 +307,34 @@ export default function ReportsView({
                       <p className="font-serif italic text-bc-text-secondary leading-relaxed mt-2 pt-2 border-t">
                         "{selectedReport.content.notes}"
                       </p>
+                    )}
+                  </div>
+                )}
+
+                {selectedReport.reportType === 'rapport_portiers' && (
+                  <div className="grid grid-cols-3 gap-3 text-xs">
+                    <div className="p-2 bg-white border border-bc-border rounded-full text-center">
+                      <span className="text-[9px] text-bc-text-secondary block">Hommes</span>
+                      <span className="font-ui font-bold">{selectedReport.content.men}</span>
+                    </div>
+                    <div className="p-2 bg-white border border-bc-border rounded-full text-center">
+                      <span className="text-[9px] text-bc-text-secondary block">Femmes</span>
+                      <span className="font-ui font-bold">{selectedReport.content.women}</span>
+                    </div>
+                    <div className="p-2 bg-bc-green/10 border border-bc-border rounded-full text-center">
+                      <span className="text-[9px] text-bc-text-secondary block">Total</span>
+                      <span className="font-ui font-bold">{selectedReport.content.total}</span>
+                    </div>
+                  </div>
+                )}
+
+                {/* Fallback — types sans bloc dédié (service, rsa…) : jamais de panneau vide */}
+                {!['rapport_culte', 'rapport_adn', 'rapport_bloom_bus_life', 'rapport_bloom_bus_member', 'rapport_pastoral', 'rapport_portiers'].includes(selectedReport.reportType) && (
+                  <div className="text-xs text-bc-text-secondary">
+                    {selectedReport.content?.notes ? (
+                      <p className="font-serif italic leading-relaxed">"{selectedReport.content.notes}"</p>
+                    ) : (
+                      <p className="italic">Détails du rapport non structurés.</p>
                     )}
                   </div>
                 )}

@@ -1,6 +1,19 @@
 @import url('https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;600;700;800;900&family=Georgia&display=swap');
 @import "tailwindcss";
 
+/* Tailwind v4: drive the dark: variant from the .dark class (not the OS preference). */
+@custom-variant dark (&:where(.dark, .dark *));
+
+/* ponytail: partial dark mode — flips the bc-* semantic tokens only. Cards using
+   bg-white literally stay light until refactored to bc-surface (full dark mode). */
+html.dark {
+  --color-bc-canvas: #0F172A;
+  --color-bc-surface: #1E293B;
+  --color-bc-border: #334155;
+  --color-bc-text: #F1F5F9;
+  --color-bc-text-secondary: #94A3B8;
+}
+
 @theme {
   --font-sans: "Montserrat", system-ui, -apple-system, sans-serif;
   --font-serif: "Georgia", serif;

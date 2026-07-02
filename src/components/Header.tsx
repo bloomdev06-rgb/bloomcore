@@ -6,6 +6,7 @@ import { motion, AnimatePresence } from 'motion/react';
 
 interface HeaderProps {
   activeTab: string;
+  setActiveTab: (tab: string) => void;
   activeBranch: Branch;
   setActiveBranch: (branch: Branch) => void;
   notifications: AppNotification[];
@@ -16,6 +17,7 @@ interface HeaderProps {
 
 export default function Header({
   activeTab,
+  setActiveTab,
   activeBranch,
   setActiveBranch,
   notifications,
@@ -221,12 +223,10 @@ export default function Header({
 
         {/* Operator Profile */}
         <div className="flex items-center gap-3 pl-4 border-l border-bc-border relative">
-          <button 
+          {/* Avatar → directly opens Mon Profil (préférences/logout live there) */}
+          <button
             className="flex items-center gap-3 text-left focus:outline-none"
-            onClick={() => {
-              const dropdown = document.getElementById('avatar-dropdown');
-              if (dropdown) dropdown.classList.toggle('hidden');
-            }}
+            onClick={() => setActiveTab('profile')}
           >
             <div className="w-10 h-10 rounded-full bg-slate-100 flex items-center justify-center overflow-hidden hover:bg-slate-200 transition-colors">
               <span className="font-ui font-bold text-slate-600">AG</span>
@@ -236,16 +236,6 @@ export default function Header({
               <p className="text-xs text-bc-text-secondary">{simulatedRole}</p>
             </div>
           </button>
-
-          {/* Avatar Dropdown */}
-          <div id="avatar-dropdown" className="hidden absolute right-0 top-full mt-2 w-48 bg-white rounded-2xl shadow-xl border border-bc-border overflow-hidden z-50">
-            <div className="py-1">
-              <button className="w-full text-left px-4 py-2 text-xs font-bold text-slate-700 hover:bg-bc-canvas">Mon Profil</button>
-              <button className="w-full text-left px-4 py-2 text-xs font-bold text-slate-700 hover:bg-bc-canvas">Préférences</button>
-              <div className="border-t border-bc-border my-1"></div>
-              <button className="w-full text-left px-4 py-2 text-xs font-bold text-red-600 hover:bg-red-50">Déconnexion</button>
-            </div>
-          </div>
         </div>
       </div>
 

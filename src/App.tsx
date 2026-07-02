@@ -1,12 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { 
-  INITIAL_MEMBERS, 
-  INITIAL_EVENTS, 
-  INITIAL_REPORTS, 
-  INITIAL_AUDITS, 
-  INITIAL_NOTIFICATIONS, 
-  DEFAULT_PERMISSION_MATRIX 
-} from './mockData';
+import { load, save, seeds, useDepartments } from './data';
+
+const CULT_TYPES = ['Culte du Dimanche', 'Culte de Prière', 'Veillée', 'Culte des Jeunes', 'Réunion de Maison'];
 import { 
   Member, 
   Event, 
@@ -38,71 +33,33 @@ import PermissionsView from './components/PermissionsView';
 import AuditView from './components/AuditView';
 import ProjectsView from './components/ProjectsView';
 import CursusView from './components/CursusView';
+import ProfileView from './components/ProfileView';
 
 import { UserCheck, Sparkles, X, Heart } from 'lucide-react';
 
 export default function App() {
   // Navigation states
   const [activeTab, setActiveTab] = useState('dashboard');
+  const [selectedDept, setSelectedDept] = useState<string | null>(null); // département sélectionné depuis la Sidebar
   const [activeBranch, setActiveBranch] = useState<Branch>('church');
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [simulatedRole, setSimulatedRole] = useState('Pasteur');
 
   // Persistence States
-  const [members, setMembers] = useState<Member[]>(() => {
-    const local = localStorage.getItem('bc_members');
-    return local ? JSON.parse(local) : INITIAL_MEMBERS;
-  });
+  const [members, setMembers] = useState<Member[]>(() => load('bc_members', seeds.members));
+  const [events, setEvents] = useState<Event[]>(() => load('bc_events', seeds.events));
+  const [reports, setReports] = useState<Report[]>(() => load('bc_reports', seeds.reports));
+  const [audits, setAudits] = useState<AuditLog[]>(() => load('bc_audits', seeds.audits));
+  const [notifications, setNotifications] = useState<AppNotification[]>(() => load('bc_notifications', seeds.notifications));
+  const [permissionMatrix, setPermissionMatrix] = useState<PermissionMatrix>(() => load('bc_permissions', seeds.permissions));
 
-  const [events, setEvents] = useState<Event[]>(() => {
-    const local = localStorage.getItem('bc_events');
-    return local ? JSON.parse(local) : INITIAL_EVENTS;
-  });
-
-  const [reports, setReports] = useState<Report[]>(() => {
-    const local = localStorage.getItem('bc_reports');
-    return local ? JSON.parse(local) : INITIAL_REPORTS;
-  });
-
-  const [audits, setAudits] = useState<AuditLog[]>(() => {
-    const local = localStorage.getItem('bc_audits');
-    return local ? JSON.parse(local) : INITIAL_AUDITS;
-  });
-
-  const [notifications, setNotifications] = useState<AppNotification[]>(() => {
-    const local = localStorage.getItem('bc_notifications');
-    return local ? JSON.parse(local) : INITIAL_NOTIFICATIONS;
-  });
-
-  const [permissionMatrix, setPermissionMatrix] = useState<PermissionMatrix>(() => {
-    const local = localStorage.getItem('bc_permissions');
-    return local ? JSON.parse(local) : DEFAULT_PERMISSION_MATRIX;
-  });
-
-  // Sync state with localStorage on changes
-  useEffect(() => {
-    localStorage.setItem('bc_members', JSON.stringify(members));
-  }, [members]);
-
-  useEffect(() => {
-    localStorage.setItem('bc_events', JSON.stringify(events));
-  }, [events]);
-
-  useEffect(() => {
-    localStorage.setItem('bc_reports', JSON.stringify(reports));
-  }, [reports]);
-
-  useEffect(() => {
-    localStorage.setItem('bc_audits', JSON.stringify(audits));
-  }, [audits]);
-
-  useEffect(() => {
-    localStorage.setItem('bc_notifications', JSON.stringify(notifications));
-  }, [notifications]);
-
-  useEffect(() => {
-    localStorage.setItem('bc_permissions', JSON.stringify(permissionMatrix));
-  }, [permissionMatrix]);
+  // Persist on change — single swap point lives in ./data.
+  useEffect(() => { save('bc_members', members); }, [members]);
+  useEffect(() => { save('bc_events', events); }, [events]);
+  useEffect(() => { save('bc_reports', reports); }, [reports]);
+  useEffect(() => { save('bc_audits', audits); }, [audits]);
+  useEffect(() => { save('bc_notifications', notifications); }, [notifications]);
+  useEffect(() => { save('bc_permissions', permissionMatrix); }, [permissionMatrix]);
 
   // Global Quick Form State (ADN)
   const [showGlobalQuickForm, setShowGlobalQuickForm] = useState(false);
@@ -110,7 +67,14 @@ export default function App() {
   const [quickLastname, setQuickLastname] = useState('');
   const [quickPhone, setQuickPhone] = useState('');
   const [quickCommune, setQuickCommune] = useState('Cocody');
-  const [quickOj, setQuickOj] = useState(false);
+  const [quickOj, setQuickOj] = useState(false); // true = OJ, false = Nouveau (NV)
+  const [quickWish, setQuickWish] = useState<'Membre' | 'Visiteur'>('Membre');
+  const [quickActivityDate, setQuickActivityDate] = useState(new Date().toISOString().split('T')[0]);
+  const [quickCultType, setQuickCultType] = useState('Culte du Dimanche');
+  const [quickGender, setQuickGender] = useState<'H' | 'F'>('H');
+  const [quickBirthDate, setQuickBirthDate] = useState('');
+  const [quickDept, setQuickDept] = useState('dept_louange');
+  const departmentOptions = useDepartments();
 
   const handleAddMember = (m: Member) => {
     setMembers(prev => [m, ...prev]);
@@ -122,7 +86,8 @@ export default function App() {
       actionType: m.level === 'Nouveau' ? 'MEMBER_REGISTERED_ADN' : 'MEMBER_CREATED_MANUAL',
       operatorName: 'Affeny Grah',
       operatorId: 'mem_1',
-      details: `Création du profil de ${m.firstName} ${m.lastName} (${m.level}).`
+      details: `Création du profil de ${m.firstName} ${m.lastName} (${m.level}).`,
+      branch: m.branch
     };
     handleAddAuditLog(log);
   };
@@ -137,7 +102,8 @@ export default function App() {
       actionType: 'MEMBER_PROFILE_UPDATED',
       operatorName: 'Affeny Grah',
       operatorId: 'mem_1',
-      details: `Mise à jour des coordonnées/axes de ${m.firstName} ${m.lastName}.`
+      details: `Mise à jour des coordonnées/axes de ${m.firstName} ${m.lastName}.`,
+      branch: m.branch
     };
     handleAddAuditLog(log);
   };
@@ -152,7 +118,8 @@ export default function App() {
       actionType: 'REPORT_SUBMITTED',
       operatorName: r.authorName,
       operatorId: r.authorId,
-      details: `Soumission d'un rapport de type ${r.reportType} pour la branche ${r.targetBranch}.`
+      details: `Soumission d'un rapport de type ${r.reportType} pour la branche ${r.targetBranch}.`,
+      branch: r.targetBranch
     };
     handleAddAuditLog(log);
   };
@@ -221,17 +188,21 @@ export default function App() {
       lastName: quickLastname,
       phone: quickPhone,
       email: `${quickFirstname.toLowerCase()}.${quickLastname.toLowerCase()}@gmail.com`,
-      gender: 'H',
-      birthDate: '1998-05-15',
+      gender: quickGender,
+      birthDate: quickBirthDate || '2000-01-01',
       maritalStatus: 'Célibataire',
       profession: 'Étudiant',
       branch: activeBranch,
       level: 'Nouveau',
       pastoralCursus: 'Aucun',
-      departments: { 'dept_louange': 'Membre' },
-      entryDate: new Date().toISOString().split('T')[0],
+      departments: { [quickDept]: 'Membre' },
+      entryDate: quickActivityDate,
       integrationState: 'En attente',
-      integrationDateRegistered: new Date().toISOString().split('T')[0],
+      receptionValidated: false, // §6.2 — awaits Responsable's reception validation
+      membershipWish: quickWish,
+      integrationDateRegistered: quickActivityDate, // date d'activité (culte) = date de saisie ADN
+      // ponytail: type de culte stocké en note tant que l'entité Événement/rapport ADN n'est pas branchée
+      integrationNotes: `Culte : ${quickCultType}`,
       ojFlag: quickOj,
       hasPassedToBossForm: false,
       gps: {
@@ -258,6 +229,12 @@ export default function App() {
     setQuickLastname('');
     setQuickPhone('');
     setQuickOj(false);
+    setQuickWish('Membre');
+    setQuickGender('H');
+    setQuickBirthDate('');
+    setQuickDept('dept_louange');
+    setQuickCultType('Culte du Dimanche');
+    setQuickActivityDate(new Date().toISOString().split('T')[0]);
 
     alert('Nouveau membre enregistré avec succès par l\'ADN (Accueil des Nouveaux) !');
     setActiveTab('integration');
@@ -268,10 +245,11 @@ export default function App() {
     switch (activeTab) {
       case 'dashboard':
         return (
-          <DashboardView 
-            members={members} 
-            events={events} 
-            activeBranch={activeBranch} 
+          <DashboardView
+            members={members}
+            events={events}
+            activeBranch={activeBranch}
+            simulatedRole={simulatedRole}
             setActiveTab={setActiveTab}
             onOpenQuickNewForm={() => setShowGlobalQuickForm(true)}
           />
@@ -288,9 +266,8 @@ export default function App() {
         );
       case 'integration':
         return (
-          <NouveauxView 
-            members={members} 
-            onAddMember={handleAddMember} 
+          <NouveauxView
+            members={members}
             onUpdateMember={handleUpdateMember}
             activeBranch={activeBranch}
             simulatedRole={simulatedRole}
@@ -308,9 +285,10 @@ export default function App() {
         );
       case 'events':
         return (
-          <EventsView 
-            events={events} 
-            onAddEvent={handleAddEvent} 
+          <EventsView
+            events={events}
+            reports={reports}
+            onAddEvent={handleAddEvent}
             onAddReport={handleAddReport}
             activeBranch={activeBranch}
             simulatedRole={simulatedRole}
@@ -325,35 +303,39 @@ export default function App() {
         );
       case 'cursus':
         return (
-          <CursusView 
-            activeBranch={activeBranch} 
+          <CursusView
+            activeBranch={activeBranch}
             simulatedRole={simulatedRole}
             members={members}
+            onUpdateMember={handleUpdateMember}
           />
         );
       case 'ministeres':
-        return <MinisteresView activeBranch={activeBranch} simulatedRole={simulatedRole} />;
+        return <MinisteresView activeBranch={activeBranch} simulatedRole={simulatedRole} members={members} />;
       case 'departments':
-        return <DepartmentsView activeBranch={activeBranch} simulatedRole={simulatedRole} members={members} />;
+        return <DepartmentsView activeBranch={activeBranch} simulatedRole={simulatedRole} members={members} onUpdateMember={handleUpdateMember} selectedDept={selectedDept} setSelectedDept={setSelectedDept} />;
       case 'formations':
-        return <FormationsView activeBranch={activeBranch} simulatedRole={simulatedRole} />;
+        return <FormationsView activeBranch={activeBranch} simulatedRole={simulatedRole} members={members} />;
       case 'permissions':
         return (
           <PermissionsView 
             activeBranch={activeBranch} 
             simulatedRole={simulatedRole} 
             permissionMatrix={permissionMatrix}
-            onTogglePermission={togglePermission}
+            onTogglePermission={handleTogglePermission}
           />
         );
       case 'accounts':
-        return <AccountsView activeBranch={activeBranch} simulatedRole={simulatedRole} />;
+        return <AccountsView activeBranch={activeBranch} simulatedRole={simulatedRole} members={members} audits={audits} onAddAuditLog={handleAddAuditLog} />;
       case 'settings':
         return <SettingsView activeBranch={activeBranch} simulatedRole={simulatedRole} />;
       case 'formbuilder':
         return <FormBuilderView activeBranch={activeBranch} simulatedRole={simulatedRole} />;
       case 'audit':
         return <AuditView audits={audits} activeBranch={activeBranch} />;
+      case 'profile':
+        // ponytail: operator is the logged-in user; hardcoded to mem_1 until auth lands
+        return <ProfileView operator={members.find(m => m.id === 'mem_1') ?? members[0]} simulatedRole={simulatedRole} onUpdateMember={handleUpdateMember} />;
       default:
         return <div className="p-8">Section en cours de construction.</div>;
     }
@@ -362,22 +344,25 @@ export default function App() {
   return (
     <div className="flex h-dvh overflow-hidden bg-bc-canvas">
       {/* Sidebar navigation */}
-      <Sidebar 
-        activeTab={activeTab} 
-        setActiveTab={setActiveTab} 
-        collapsed={sidebarCollapsed} 
+      <Sidebar
+        activeTab={activeTab}
+        setActiveTab={setActiveTab}
+        collapsed={sidebarCollapsed}
         setCollapsed={setSidebarCollapsed}
         activeBranch={activeBranch}
         simulatedRole={simulatedRole}
         setSimulatedRole={setSimulatedRole}
+        selectedDept={selectedDept}
+        setSelectedDept={setSelectedDept}
       />
 
       {/* Main content viewport */}
       <div className="flex-1 flex flex-col h-full overflow-hidden">
         {/* Header toolbar */}
         <Header 
-          activeTab={activeTab} 
-          activeBranch={activeBranch} 
+          activeTab={activeTab}
+          setActiveTab={setActiveTab}
+          activeBranch={activeBranch}
           setActiveBranch={setActiveBranch}
           notifications={notifications}
           markNotificationAsRead={markNotificationAsRead}
@@ -439,6 +424,53 @@ export default function App() {
             </h3>
 
             <form onSubmit={handleSaveQuickNouveau} className="space-y-4">
+              {/* Type de membre (OJ / Nouveau) */}
+              <div>
+                <label className="block text-xs font-bold text-bc-text mb-1">Type de membre *</label>
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setQuickOj(true)}
+                    className={`text-left p-3 rounded-2xl border transition-colors ${quickOj ? 'bg-bc-green/10 border-bc-green' : 'bg-white border-bc-border hover:bg-bc-canvas'}`}
+                  >
+                    <span className="block text-xs font-bold text-bc-text">Oui Jésus (OJ)</span>
+                    <span className="block text-[10px] text-bc-text-secondary">A donné sa vie à Jésus aujourd'hui</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setQuickOj(false)}
+                    className={`text-left p-3 rounded-2xl border transition-colors ${!quickOj ? 'bg-bc-green/10 border-bc-green' : 'bg-white border-bc-border hover:bg-bc-canvas'}`}
+                  >
+                    <span className="block text-xs font-bold text-bc-text">Nouveau (NV)</span>
+                    <span className="block text-[10px] text-bc-text-secondary">Premier(s) passage(s) à l'église</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* Date d'activité (culte) + Type de culte */}
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-bold text-bc-text mb-1">Date d'activité (culte) *</label>
+                  <input
+                    type="date"
+                    required
+                    value={quickActivityDate}
+                    onChange={(e) => setQuickActivityDate(e.target.value)}
+                    className="w-full border border-bc-border rounded-full px-3 py-2 text-xs bg-white focus:outline-none focus:border-bc-green"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-bc-text mb-1">Type de culte</label>
+                  <select
+                    value={quickCultType}
+                    onChange={(e) => setQuickCultType(e.target.value)}
+                    className="w-full border border-bc-border rounded-full px-3 py-2 text-xs bg-white focus:outline-none"
+                  >
+                    {CULT_TYPES.map(c => <option key={c} value={c}>{c}</option>)}
+                  </select>
+                </div>
+              </div>
+
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="block text-xs font-bold text-bc-text mb-1">Prénom *</label>
@@ -464,48 +496,89 @@ export default function App() {
                 </div>
               </div>
 
-              <div>
-                <label className="block text-xs font-bold text-bc-text mb-1">Téléphone de contact *</label>
-                <input
-                  id="quick-phone"
-                  type="text"
-                  required
-                  placeholder="+225..."
-                  value={quickPhone}
-                  onChange={(e) => setQuickPhone(e.target.value)}
-                  className="w-full border border-bc-border rounded-full px-3 py-2 text-xs focus:outline-none focus:border-bc-green font-mono"
-                />
+              {/* Contact + Genre */}
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-bold text-bc-text mb-1">Contact *</label>
+                  <input
+                    id="quick-phone"
+                    type="text"
+                    required
+                    placeholder="+225..."
+                    value={quickPhone}
+                    onChange={(e) => setQuickPhone(e.target.value)}
+                    className="w-full border border-bc-border rounded-full px-3 py-2 text-xs focus:outline-none focus:border-bc-green font-mono"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-bc-text mb-1">Genre</label>
+                  <select
+                    value={quickGender}
+                    onChange={(e) => setQuickGender(e.target.value as 'H' | 'F')}
+                    className="w-full border border-bc-border rounded-full px-3 py-2 text-xs bg-white focus:outline-none"
+                  >
+                    <option value="H">Homme</option>
+                    <option value="F">Femme</option>
+                  </select>
+                </div>
               </div>
 
+              {/* Date de naissance + Commune */}
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-bold text-bc-text mb-1">Date de naissance</label>
+                  <input
+                    type="date"
+                    value={quickBirthDate}
+                    onChange={(e) => setQuickBirthDate(e.target.value)}
+                    className="w-full border border-bc-border rounded-full px-3 py-2 text-xs bg-white focus:outline-none focus:border-bc-green"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-bc-text mb-1">Commune / Quartier</label>
+                  <select
+                    id="quick-commune-select"
+                    value={quickCommune}
+                    onChange={(e) => setQuickCommune(e.target.value)}
+                    className="w-full border border-bc-border rounded-full px-3 py-2 text-xs bg-white focus:outline-none"
+                  >
+                    <option value="Cocody">Cocody</option>
+                    <option value="Yopougon">Yopougon</option>
+                    <option value="Abobo">Abobo</option>
+                    <option value="Koumassi">Koumassi</option>
+                  </select>
+                </div>
+              </div>
+
+              {/* Souhaites-tu être… (membre vs simple visiteur) */}
               <div>
-                <label className="block text-xs font-bold text-bc-text mb-1">Commune d'Abidjan</label>
+                <label className="block text-xs font-bold text-bc-text mb-1">Souhaites-tu être…</label>
+                <div className="grid grid-cols-2 gap-2">
+                  {(['Membre', 'Visiteur'] as const).map(opt => (
+                    <button
+                      key={opt}
+                      type="button"
+                      onClick={() => setQuickWish(opt)}
+                      className={`px-3 py-2 rounded-full text-xs font-bold border transition-colors ${
+                        quickWish === opt ? 'bg-bc-green text-white border-bc-green' : 'bg-white text-bc-text-secondary border-bc-border hover:bg-bc-canvas'
+                      }`}
+                    >
+                      {opt === 'Membre' ? 'Membre' : 'Simple visiteur'}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Département d'intérêt */}
+              <div>
+                <label className="block text-xs font-bold text-bc-text mb-1">Département d'intérêt</label>
                 <select
-                  id="quick-commune-select"
-                  value={quickCommune}
-                  onChange={(e) => setQuickCommune(e.target.value)}
+                  value={quickDept}
+                  onChange={(e) => setQuickDept(e.target.value)}
                   className="w-full border border-bc-border rounded-full px-3 py-2 text-xs bg-white focus:outline-none"
                 >
-                  <option value="Cocody">Cocody</option>
-                  <option value="Yopougon">Yopougon</option>
-                  <option value="Abobo">Abobo</option>
-                  <option value="Koumassi">Koumassi</option>
+                  {departmentOptions.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
                 </select>
-              </div>
-
-              {/* Oui à Jésus */}
-              <div className="p-3 border border-bc-border rounded-full bg-bc-gold/10 flex items-center justify-between">
-                <div>
-                  <span className="text-xs font-bold text-bc-text block">Déclaration "Oui à Jésus" (OJ)</span>
-                  <span className="text-[10px] text-bc-text-secondary">Don de sa vie au Christ aujourd'hui.</span>
-                </div>
-                <button
-                  id="quick-oj-toggle"
-                  type="button"
-                  onClick={() => setQuickOj(!quickOj)}
-                  className={`w-12 h-6 rounded-full p-1 transition-colors duration-200 ${quickOj ? 'bg-bc-green' : 'bg-bc-warmgrey'}`}
-                >
-                  <div className={`w-4 h-4 rounded-full bg-white transition-transform duration-200 ${quickOj ? 'translate-x-6' : ''}`} />
-                </button>
               </div>
 
               <div className="flex gap-3 justify-end pt-3 border-t border-bc-border">

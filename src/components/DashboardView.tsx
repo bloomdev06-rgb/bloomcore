@@ -1,26 +1,111 @@
 import React, { useState } from 'react';
-import { Branch } from '../types';
-import { LayoutDashboard, Users, Bus, TrendingUp, AlertCircle, Calendar, Smile, Meh, Star, Frown } from 'lucide-react';
+import { Branch, Member, Event } from '../types';
+import { LayoutDashboard, Users, Bus, TrendingUp, AlertCircle, Calendar, Clock, Smile, Meh, Star, Frown } from 'lucide-react';
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip } from 'recharts';
 import { ResponsiveChart } from './ui/ResponsiveChart';
 import { motion } from 'motion/react';
 import MiniCalendar from './MiniCalendar';
+import { dominantHealthLevel } from '../data/kpi';
 
 interface DashboardViewProps {
   activeBranch: Branch;
   simulatedRole: string;
+  members?: Member[];
+  events?: Event[];
+  setActiveTab?: (tab: string) => void;
+  onOpenQuickNewForm?: () => void;
 }
 
-export default function DashboardView({ activeBranch, simulatedRole }: DashboardViewProps) {
+// Health level 1..5 → face + colour for the "un smiley par critère" row.
+const FACE: Record<number, { Icon: typeof Smile; color: string }> = {
+  0: { Icon: Meh, color: 'text-slate-300' },
+  1: { Icon: Frown, color: 'text-red-500' },
+  2: { Icon: Frown, color: 'text-orange-500' },
+  3: { Icon: Meh, color: 'text-yellow-500' },
+  4: { Icon: Smile, color: 'text-emerald-400' },
+  5: { Icon: Star, color: 'text-emerald-600' },
+};
+
+const HEALTH_AXES = [
+  { key: 'spirituel', label: 'Spirituelle' },
+  { key: 'social', label: 'Sociale' },
+  { key: 'physique', label: 'Physique' },
+  { key: 'financier', label: 'Financière' },
+  { key: 'presenceCulte', label: 'Présence culte' },
+  { key: 'presenceService', label: 'Présence service' },
+] as const;
+
+export default function DashboardView({ activeBranch, simulatedRole, members = [], setActiveTab }: DashboardViewProps) {
+  const go = (tab: string) => setActiveTab?.(tab);
   const isChurch = activeBranch === 'church';
   const [period, setPeriod] = useState('month');
 
+  const branchMembers = members.filter(m => activeBranch === 'global' || m.branch === activeBranch);
+  const waitingCount = branchMembers.filter(m => m.integrationState === 'En attente').length;
+
+  // §13.3 — dashboard par profil. Encadrement = tableau décisionnel ; autres = tableau personnel.
+  const LEADERSHIP = ['Pasteur', 'Pasteur Principal', 'Ministre', 'Admin', 'Super Admin', 'Responsable', 'Coach', 'Leader'];
+  const isLeadership = LEADERSHIP.includes(simulatedRole);
+  const scopeLabel =
+    ['Pasteur', 'Pasteur Principal', 'Admin', 'Super Admin'].includes(simulatedRole) ? 'les deux branches'
+    : simulatedRole === 'Ministre' ? 'votre ministère'
+    : 'votre département';
+  const operator = members.find(m => m.id === 'mem_1') ?? members[0];
+
+  // --- Personal dashboard (profils non-encadrants) ---
+  if (!isLeadership && operator) {
+    return (
+      <div className="space-y-6">
+        <div className="bg-bc-green rounded-[2rem] p-6 text-white">
+          <h2 className="text-2xl font-ui font-extrabold tracking-tight">Bonjour, {operator.firstName}</h2>
+          <p className="text-white/80 text-sm mt-1">Voici votre tableau de bord personnel · {simulatedRole}</p>
+        </div>
+
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          {/* Ma santé — 6 axes */}
+          <div className="lg:col-span-2 bg-white rounded-[2rem] border border-bc-border p-6">
+            <h3 className="text-sm font-ui font-bold text-bc-text mb-4">Ma santé communautaire</h3>
+            <div className="space-y-3">
+              {HEALTH_AXES.map(axis => {
+                const v = (operator.healthKPIs as any)[axis.key] ?? 0;
+                return (
+                  <div key={axis.key} className="flex items-center gap-3">
+                    <span className="text-xs text-bc-text-secondary w-32 shrink-0">{axis.label}</span>
+                    <div className="flex-1 h-2.5 bg-bc-canvas rounded-full overflow-hidden">
+                      <div className="h-full bg-bc-green rounded-full" style={{ width: `${(v / 5) * 100}%` }} />
+                    </div>
+                    <span className="text-xs font-bold text-bc-text w-6 text-right">{v}/5</span>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* Mon parcours + actions */}
+          <div className="space-y-6">
+            <div className="bg-white rounded-[2rem] border border-bc-border p-6">
+              <h3 className="text-sm font-ui font-bold text-bc-text mb-3">Mon parcours</h3>
+              <div className="space-y-2">
+                <div className="flex justify-between text-xs"><span className="text-bc-text-secondary">Niveau</span><span className="font-bold text-bc-text">{operator.level}</span></div>
+                <div className="flex justify-between text-xs"><span className="text-bc-text-secondary">Cursus</span><span className="font-bold text-bc-text">{operator.pastoralCursus}</span></div>
+                <div className="flex justify-between text-xs"><span className="text-bc-text-secondary">Départements</span><span className="font-bold text-bc-text">{Object.keys(operator.departments ?? {}).length}</span></div>
+              </div>
+            </div>
+            <button onClick={() => go('profile')} className="w-full py-3 bg-bc-text text-white rounded-[2rem] text-xs font-ui font-bold hover:opacity-90">
+              Voir mon profil complet
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   // Dummy data for growth chart
   const growthData = [
-    { name: 'S1', nouveaux: 45 },
-    { name: 'S2', nouveaux: 52 },
-    { name: 'S3', nouveaux: 38 },
-    { name: 'S4', nouveaux: 65 },
+    { name: 'S1', nouveaux: 45, participants: 320 },
+    { name: 'S2', nouveaux: 52, participants: 340 },
+    { name: 'S3', nouveaux: 38, participants: 310 },
+    { name: 'S4', nouveaux: 65, participants: 380 },
   ];
 
   const containerVariants = {
@@ -55,8 +140,8 @@ export default function DashboardView({ activeBranch, simulatedRole }: Dashboard
             <div>
               <h2 className="text-2xl font-ui font-extrabold mb-1 tracking-tight">Bonjour, {simulatedRole}</h2>
               <p className="text-slate-400 text-sm">
-                Voici la synthèse globale pour {activeBranch === 'global' ? 'Bloom Church et Bloom Light' : isChurch ? 'Bloom Church' : 'Bloom Light'} au {new Date().toLocaleDateString('fr-FR')}. <br/>
-                <span className="text-emerald-400 font-bold">12 actions</span> nécessitent votre attention aujourd'hui.
+                Voici la synthèse pour {scopeLabel} au {new Date().toLocaleDateString('fr-FR')}. <br/>
+                <span className="text-emerald-400 font-bold">{waitingCount} nouveaux</span> en attente de suivi.
               </p>
             </div>
             
@@ -67,6 +152,7 @@ export default function DashboardView({ activeBranch, simulatedRole }: Dashboard
             >
               <option value="week">Cette Semaine</option>
               <option value="month">Ce Mois</option>
+              <option value="quarter">Ce Trimestre</option>
               <option value="year">Cette Année</option>
               <option value="custom">Personnalisé</option>
             </select>
@@ -121,6 +207,15 @@ export default function DashboardView({ activeBranch, simulatedRole }: Dashboard
 
           <div className="bg-white p-4 rounded-[1.5rem] border border-bc-border shadow-sm hover:shadow-md transition-shadow">
             <div className="flex items-center gap-2 text-bc-text-secondary mb-2">
+              <Clock size={14} />
+              <span className="text-[9px] font-bold uppercase tracking-wider">En attente</span>
+            </div>
+            <div className="text-xl font-ui font-extrabold text-orange-500 tracking-tight">{waitingCount}</div>
+            <p className="text-[9px] text-orange-400 mt-1">Réceptions à valider</p>
+          </div>
+
+          <div className="bg-white p-4 rounded-[1.5rem] border border-bc-border shadow-sm hover:shadow-md transition-shadow">
+            <div className="flex items-center gap-2 text-bc-text-secondary mb-2">
               <AlertCircle size={14} />
               <span className="text-[9px] font-bold uppercase tracking-wider">Au rouge</span>
             </div>
@@ -137,28 +232,18 @@ export default function DashboardView({ activeBranch, simulatedRole }: Dashboard
             <h3 className="font-ui font-bold text-bc-text mb-4 tracking-tight">Santé Spirituelle Globale</h3>
             <div className="flex flex-col h-full justify-center space-y-4">
               <div className="grid grid-cols-5 gap-1 w-full text-center">
-                <div className="min-w-0">
-                  <Smile className="w-6 h-6 text-emerald-400 mx-auto mb-1" strokeWidth={2.5} />
-                  <div className="text-[9px] sm:text-[10px] font-bold text-emerald-400 truncate">Spirituelle</div>
-                </div>
-                <div className="min-w-0">
-                  <Meh className="w-6 h-6 text-yellow-500 mx-auto mb-1" strokeWidth={2.5} />
-                  <div className="text-[9px] sm:text-[10px] font-bold text-yellow-500 truncate">Sociale</div>
-                </div>
-                <div className="min-w-0">
-                  <Star className="w-6 h-6 text-emerald-600 mx-auto mb-1" strokeWidth={2.5} />
-                  <div className="text-[9px] sm:text-[10px] font-bold text-emerald-600 truncate">Physique</div>
-                </div>
-                <div className="min-w-0">
-                  <Frown className="w-6 h-6 text-orange-500 mx-auto mb-1" strokeWidth={2.5} />
-                  <div className="text-[9px] sm:text-[10px] font-bold text-orange-500 truncate">Financière</div>
-                </div>
-                <div className="min-w-0">
-                  <Smile className="w-6 h-6 text-emerald-400 mx-auto mb-1" strokeWidth={2.5} />
-                  <div className="text-[9px] sm:text-[10px] font-bold text-emerald-400 truncate">Présence</div>
-                </div>
+                {HEALTH_AXES.map(axis => {
+                  const level = dominantHealthLevel(branchMembers, axis.key);
+                  const { Icon, color } = FACE[level] ?? FACE[0];
+                  return (
+                    <div key={axis.key} className="min-w-0">
+                      <Icon className={`w-6 h-6 ${color} mx-auto mb-1`} strokeWidth={2.5} />
+                      <div className={`text-[9px] sm:text-[10px] font-bold ${color} truncate`}>{axis.label}</div>
+                    </div>
+                  );
+                })}
               </div>
-              <p className="text-center text-[10px] text-slate-400">Niveau dominant par critère (Rapports Bloom Bus)</p>
+              <p className="text-center text-[10px] text-slate-400">Niveau dominant par critère (sur {branchMembers.length} membres)</p>
             </div>
           </div>
 
@@ -180,7 +265,7 @@ export default function DashboardView({ activeBranch, simulatedRole }: Dashboard
                   <XAxis dataKey="name" fontSize={10} axisLine={false} tickLine={false} />
                   <Tooltip cursor={{ fill: 'transparent' }} contentStyle={{ borderRadius: '1rem', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }} />
                   <Area type="monotone" dataKey="nouveaux" name="Nouveaux" stroke="#0F172A" strokeWidth={2} fillOpacity={1} fill="url(#colorNouveaux)" />
-                  <Area type="monotone" dataKey="nouveaux" name="Participants" stroke="#009BDE" strokeWidth={2} fillOpacity={1} fill="url(#colorParticipants)" />
+                  <Area type="monotone" dataKey="participants" name="Participants" stroke="#009BDE" strokeWidth={2} fillOpacity={1} fill="url(#colorParticipants)" />
                 </AreaChart>
               </ResponsiveChart>
             </div>
@@ -242,11 +327,11 @@ export default function DashboardView({ activeBranch, simulatedRole }: Dashboard
             À traiter aujourd'hui
           </h3>
           <div className="space-y-3">
-            <div className="p-4 bg-orange-50/50 rounded-2xl border border-orange-100 cursor-pointer hover:bg-orange-50 transition-colors">
+            <div onClick={() => go('integration')} className="p-4 bg-orange-50/50 rounded-2xl border border-orange-100 cursor-pointer hover:bg-orange-50 transition-colors">
               <p className="text-xs font-bold text-orange-700">8 Réceptions en attente</p>
               <p className="text-[10px] text-orange-500 mt-1">À valider par les départements</p>
             </div>
-            <div className="p-4 bg-bc-canvas/50 rounded-2xl border border-bc-border cursor-pointer hover:bg-bc-canvas transition-colors">
+            <div onClick={() => go('events')} className="p-4 bg-bc-canvas/50 rounded-2xl border border-bc-border cursor-pointer hover:bg-bc-canvas transition-colors">
               <p className="text-xs font-bold text-slate-700">3 Rapports de culte manquants</p>
             </div>
           </div>
@@ -257,7 +342,7 @@ export default function DashboardView({ activeBranch, simulatedRole }: Dashboard
             Alertes système
           </h3>
           <div className="space-y-3">
-            <div className="p-4 bg-red-50/50 rounded-2xl border border-red-100 cursor-pointer hover:bg-red-50 transition-colors">
+            <div onClick={() => go('integration')} className="p-4 bg-red-50/50 rounded-2xl border border-red-100 cursor-pointer hover:bg-red-50 transition-colors">
               <p className="text-xs font-bold text-red-700">14 Membres au rouge</p>
               <p className="text-[10px] text-red-500 mt-1">Délais d'intégration dépassés (&gt;7 jours)</p>
             </div>

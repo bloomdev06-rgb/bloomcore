@@ -1,169 +1,164 @@
-import React, { useState } from 'react';
-import { 
-  GraduationCap, 
-  Award, 
-  ExternalLink, 
-  Sliders, 
-  Code, 
-  Send, 
-  CheckCircle,
-  HelpCircle,
-  Clock,
-  RefreshCw
-} from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { GraduationCap, Award, Plug, Clock, Plus, X, Check } from 'lucide-react';
 import { Member, Branch } from '../types';
+import { load, save } from '../data';
 
 interface FormationsViewProps {
-  members: Member[];
+  members?: Member[];
   activeBranch: Branch;
   simulatedRole: string;
 }
 
-export default function FormationsView({
-  members,
-  activeBranch,
-  simulatedRole
-}: FormationsViewProps) {
-  const [webhookUrl, setWebhookUrl] = useState('https://bloom-school.api/v1/sync-formation');
-  const [syncStatus, setSyncStatus] = useState<'idle' | 'loading' | 'success'>('idle');
+interface Certification { id: string; memberId: string; memberName: string; formation: string; date: string }
 
-  const isChurch = activeBranch === 'church';
+const FORMATIONS = [
+  "Fondements de la foi (Eden 0)",
+  "Classes de Maturité (Vases d'Honneur)",
+  "Cursus du Ministre Appelé",
+];
 
-  // Academic static paths simulation
-  const academies = [
-    { title: "Fondements de la foi (Eden 0)", enrolled: 12, certified: 45 },
-    { title: "Classes de Maturité (Vases d'Honneur)", enrolled: 8, certified: 32 },
-    { title: "Cursus du Ministre Appelé", enrolled: 3, certified: 14 }
-  ];
+export default function FormationsView({ members = [], activeBranch, simulatedRole }: FormationsViewProps) {
+  const canCertify = ['Pasteur', 'Admin', 'Super Admin'].includes(simulatedRole);
+  const [certs, setCerts] = useState<Certification[]>(() => load('bc_certifications', [] as Certification[]));
+  const [adding, setAdding] = useState(false);
+  const [memberId, setMemberId] = useState('');
+  const [formation, setFormation] = useState(FORMATIONS[0]);
 
-  const handleSimulateWebhook = () => {
-    setSyncStatus('loading');
-    setTimeout(() => {
-      setSyncStatus('success');
-      setTimeout(() => {
-        setSyncStatus('idle');
-      }, 3000);
-    }, 1500);
+  useEffect(() => { save('bc_certifications', certs); }, [certs]);
+
+  const scoped = members.filter(m => activeBranch === 'global' || m.branch === activeBranch);
+  const countFor = (f: string) => certs.filter(c => c.formation === f).length;
+
+  const addCertification = () => {
+    const m = members.find(x => x.id === memberId);
+    if (!m) return;
+    setCerts(prev => [
+      { id: `cert_${m.id}_${Date.now()}`, memberId: m.id, memberName: `${m.firstName} ${m.lastName}`, formation, date: new Date().toISOString().slice(0, 10) },
+      ...prev,
+    ]);
+    setAdding(false); setMemberId(''); setFormation(FORMATIONS[0]);
   };
 
   return (
     <div className="space-y-6">
-      {/* Top Header */}
+      {/* Header */}
       <div className="bg-white p-5 rounded-[2rem] border border-bc-border shadow-sm flex flex-col md:flex-row gap-4 items-center justify-between">
         <div>
-          <h3 className="text-sm font-ui font-bold text-bc-text">
-            Académie Bloom & Intégrations Vases d'Honneur
+          <h3 className="text-sm font-ui font-bold text-bc-text flex items-center gap-2">
+            <GraduationCap size={18} /> Académie Bloom — Certifications
           </h3>
           <p className="text-xs text-bc-text-secondary mt-0.5">
-            Gérez les classes de maturité, suivez les progrès académiques des serviteurs et raccordez l'école externe.
+            Enregistrement manuel des certifications (MVP). Les certifications autorisent la promotion Stagiaire → Boss / Leader par le corps pastoral.
           </p>
         </div>
-
-        <div className="flex gap-2">
-          <span className="text-[10px] bg-bc-cerulean/10 text-bc-cerulean border border-bc-cerulean/20 px-3 py-1 rounded-full font-bold">
-            Classe active : Eden 0
-          </span>
-        </div>
+        {canCertify && (
+          <button
+            onClick={() => setAdding(true)}
+            className="px-4 py-2 bg-bc-green text-white rounded-full text-xs font-ui font-bold flex items-center gap-1.5 hover:opacity-90 shrink-0"
+          >
+            <Plus size={14} /> Certification
+          </button>
+        )}
       </div>
 
-      {/* Main Grid */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-        
-        {/* VH Academies overview - 7 cols */}
-        <div className="bg-white p-5 rounded-[2rem] border border-bc-border shadow-sm lg:col-span-7 space-y-4">
-          <h4 className="text-xs uppercase font-bold tracking-wider text-bc-text-secondary">
-            📚 Classes de l'Académie gérées en interne
-          </h4>
+      {/* Formations + counts */}
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+        {FORMATIONS.map(f => (
+          <div key={f} className="bg-white border border-bc-border rounded-[2rem] p-5 shadow-sm text-center">
+            <div className="mx-auto w-10 h-10 rounded-full bg-slate-100 text-bc-text flex items-center justify-center mb-3">
+              <GraduationCap size={20} />
+            </div>
+            <h5 className="font-ui font-bold text-xs text-bc-text line-clamp-2 h-8">{f}</h5>
+            <div className="mt-3 bg-bc-canvas p-2 rounded-full border border-bc-border">
+              <span className="text-lg font-ui font-black block text-bc-anis">{countFor(f)}</span>
+              <span className="text-[9px] text-bc-text-secondary font-medium uppercase">Certifiés</span>
+            </div>
+          </div>
+        ))}
+      </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-            {academies.map((ac, idx) => (
-              <div key={idx} className="border border-bc-border rounded-full p-4 bg-bc-canvas/20 hover:bg-bc-canvas/40 transition-colors text-center">
-                <div className={`mx-auto w-10 h-10 rounded-full flex items-center justify-center mb-3 ${'bg-slate-100 text-bc-text'}`}>
-                  <GraduationCap size={20} />
-                </div>
-                <h5 className="font-ui font-bold text-xs text-bc-text line-clamp-1">{ac.title}</h5>
-                <div className="mt-3 grid grid-cols-2 gap-1.5 text-center">
-                  <div className="bg-white p-1.5 rounded-full border border-bc-border">
-                    <span className="text-[14px] font-ui font-black block text-bc-text">{ac.enrolled}</span>
-                    <span className="text-[8px] text-bc-text-secondary font-medium uppercase">Inscrits</span>
+      {/* Recorded certifications */}
+      <div className="bg-white p-6 rounded-[2rem] border border-bc-border shadow-sm">
+        <div className="flex items-center gap-2 mb-4">
+          <Award size={18} className="text-bc-text" />
+          <h3 className="font-ui font-bold text-bc-text">Certifications enregistrées</h3>
+        </div>
+        {certs.length === 0 ? (
+          <p className="text-xs text-bc-text-secondary p-6 text-center border border-bc-border rounded-2xl">
+            Aucune certification enregistrée. {canCertify ? 'Utilisez « + Certification ».' : ''}
+          </p>
+        ) : (
+          <div className="divide-y divide-slate-100 max-h-80 overflow-y-auto">
+            {certs.map(c => (
+              <div key={c.id} className="py-3 flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <div className="w-8 h-8 rounded-full bg-bc-anis/20 flex items-center justify-center">
+                    <Award size={14} className="text-bc-text" />
                   </div>
-                  <div className="bg-white p-1.5 rounded-full border border-bc-border">
-                    <span className="text-[14px] font-ui font-black block text-bc-anis">{ac.certified}</span>
-                    <span className="text-[8px] text-bc-text-secondary font-medium uppercase">Certifiés</span>
+                  <div>
+                    <p className="text-sm font-bold text-bc-text">{c.memberName}</p>
+                    <p className="text-[10px] text-bc-text-secondary">{c.formation}</p>
                   </div>
                 </div>
+                <span className="text-[10px] text-bc-text-secondary font-bold">{c.date}</span>
               </div>
             ))}
           </div>
+        )}
+      </div>
 
-          <div className="p-4 bg-bc-green/5 border border-bc-green/20 rounded-[2rem]">
-            <span className="text-[10px] uppercase font-bold tracking-wider text-bc-text block mb-1">Règle de promotion</span>
-            <p className="text-[10px] text-bc-text-secondary leading-relaxed font-serif">
-              Les certifications obtenues dans l'académie permettent la promotion manuelle des Stagiaires vers le statut de <span className="font-bold text-bc-text">Boss</span> ou de <span className="font-bold text-bc-text">Leader</span> par le corps pastoral d'Abidjan.
+      {/* External school integration — coming soon */}
+      <div className="bg-white p-6 rounded-[2rem] border border-dashed border-bc-border shadow-sm">
+        <div className="flex items-center gap-3">
+          <div className="w-10 h-10 rounded-full bg-slate-100 flex items-center justify-center shrink-0">
+            <Plug size={18} className="text-bc-text-secondary" />
+          </div>
+          <div className="flex-1">
+            <div className="flex items-center gap-2">
+              <h3 className="font-ui font-bold text-bc-text">Raccordement École Externe Bloom</h3>
+              <span className="text-[10px] bg-bc-cerulean/10 text-bc-cerulean border border-bc-cerulean/20 px-2 py-0.5 rounded-full font-bold flex items-center gap-1">
+                <Clock size={10} /> Bientôt disponible
+              </span>
+            </div>
+            <p className="text-xs text-bc-text-secondary mt-1">
+              La synchronisation automatique avec l'école externe (webhook, certificats importés) arrive en Phase 2 (Abidjan, découplage). D'ici là, la saisie manuelle ci-dessus fait foi.
             </p>
           </div>
         </div>
+      </div>
 
-        {/* Outer School Webhook Contract - 5 cols */}
-        <div className="bg-white p-5 rounded-[2rem] border border-bc-border shadow-sm lg:col-span-5 flex flex-col justify-between">
-          <div>
-            <div className="flex justify-between items-start">
-              <div>
-                <h4 className="text-xs uppercase font-bold tracking-wider text-bc-text-secondary">
-                  🔌 Raccordement École Externe Bloom
-                </h4>
-                <p className="text-[10px] text-bc-text-secondary mt-1">
-                  Contrat d'intégration pour la phase 2 d'Abidjan (découplage).
-                </p>
-              </div>
-              <Code size={16} className="text-bc-cerulean" />
-            </div>
-
-            {/* Simulated Webhook Config Panel */}
-            <div className="space-y-3 mt-4">
-              <div>
-                <label className="block text-[10px] font-bold text-bc-text mb-1">Endpoint API entrant sécurisé</label>
-                <input
-                  id="formation-webhook-url"
-                  type="text"
-                  value={webhookUrl}
-                  onChange={(e) => setWebhookUrl(e.target.value)}
-                  className="w-full border border-bc-border rounded-full px-2.5 py-1.5 text-xs font-mono bg-bc-canvas/40"
-                />
-              </div>
-
-              <div className="bg-bc-canvas p-3 rounded-full border border-bc-border font-mono text-[9px] text-bc-text-secondary">
-                <span className="font-bold text-bc-text block mb-1">POST /api/webhook/school-sync</span>
-                {`{
-  "memberPhone": "+2250707...",
-  "classCompleted": "Maturite_VH_Niveau1",
-  "score": 85,
-  "certificateIssued": true
-}`}
-              </div>
-            </div>
-          </div>
-
-          {/* Test connection trigger */}
-          <div className="pt-4 mt-4 border-t border-bc-border">
-            <button
-              id="formation-test-sync-btn"
-              onClick={handleSimulateWebhook}
-              disabled={syncStatus === 'loading'}
-              className={`w-full px-4 py-2 rounded-full font-ui font-bold text-xs text-white shadow-sm flex items-center justify-center space-x-2 cursor-pointer ${
-                syncStatus === 'success' ? 'bg-bc-anis' : 'bg-bc-green'
-              }`}
-            >
-              {syncStatus === 'loading' && <RefreshCw size={14} className="animate-spin mr-1" />}
-              {syncStatus === 'success' && <CheckCircle size={14} />}
-              <span>
-                {syncStatus === 'loading' ? 'Synchronisation...' : syncStatus === 'success' ? 'Synchronisation validée (200 OK)' : 'Simuler Webhook d\'école externe'}
-              </span>
+      {/* Add certification modal */}
+      {adding && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4" onClick={() => setAdding(false)}>
+          <div className="bg-white rounded-[2rem] w-full max-w-md p-6 border border-bc-border shadow-2xl relative" onClick={e => e.stopPropagation()}>
+            <button onClick={() => setAdding(false)} className="absolute top-4 right-4 p-2 text-bc-text-secondary hover:text-bc-text transition-colors">
+              <X size={20} />
             </button>
+            <div className="flex items-center gap-2 mb-4">
+              <Award size={20} className="text-bc-text" />
+              <h3 className="text-base font-ui font-bold text-bc-text">Enregistrer une certification</h3>
+            </div>
+
+            <label className="text-xs font-bold text-slate-700 block mb-1">Membre</label>
+            <select value={memberId} onChange={e => setMemberId(e.target.value)} className="w-full p-2 border border-bc-border rounded-lg text-sm bg-white mb-4">
+              <option value="">— Sélectionner —</option>
+              {scoped.map(m => <option key={m.id} value={m.id}>{m.firstName} {m.lastName}</option>)}
+            </select>
+
+            <label className="text-xs font-bold text-slate-700 block mb-1">Formation</label>
+            <select value={formation} onChange={e => setFormation(e.target.value)} className="w-full p-2 border border-bc-border rounded-lg text-sm bg-white mb-4">
+              {FORMATIONS.map(f => <option key={f} value={f}>{f}</option>)}
+            </select>
+
+            <div className="flex gap-3 justify-end pt-3 border-t border-bc-border">
+              <button onClick={() => setAdding(false)} className="px-4 py-2 border border-bc-border text-bc-text-secondary rounded-full text-xs hover:bg-bc-canvas">Annuler</button>
+              <button onClick={addCertification} disabled={!memberId} className="px-5 py-2 bg-bc-green text-white rounded-full text-xs font-ui font-bold hover:opacity-90 disabled:opacity-40 flex items-center gap-1.5">
+                <Check size={14} /> Enregistrer
+              </button>
+            </div>
           </div>
         </div>
-
-      </div>
+      )}
     </div>
   );
 }

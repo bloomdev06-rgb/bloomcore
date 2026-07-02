@@ -1,486 +1,342 @@
-import React, { useState } from 'react';
-import { 
-  UserCheck, 
-  Plus, 
-  MapPin, 
-  Clock, 
-  ShieldAlert, 
-  Sparkles, 
-  CheckCircle, 
-  AlertCircle,
-  X,
-  ChevronRight,
-  RefreshCw,
-  Phone,
-  Flame
-} from 'lucide-react';
-import { Member, Branch, IntegrationState, CommunityLevel } from '../types';
-import { INITIAL_DEPARTMENTS, INITIAL_BUS_LINES } from '../mockData';
+import React, { useState, useEffect } from 'react';
+import { Member, Branch, IntegrationFollowStatus } from '../types';
+import { useDepartments, load, save } from '../data';
+import { Search, Filter, ClipboardCheck, Phone, ChevronRight, Check, Send } from 'lucide-react';
+
+// Integrator follow-up report (Espace Intégrateur).
+interface IntegrationReport {
+  id: string;
+  memberId: string;
+  authorName: string;
+  date: string;
+  status: IntegrationFollowStatus;
+  contactEstablished: boolean;
+  visitDone: boolean;
+  notes: string;
+  motif: string;
+}
+
+const STATUSES: { key: IntegrationFollowStatus; card: string; badge: string; text: string }[] = [
+  { key: 'Non suivi', card: 'bg-bc-text text-white border-bc-text', badge: 'bg-slate-100 text-slate-600', text: 'text-bc-text' },
+  { key: 'En attente', card: 'bg-white border-bc-border', badge: 'bg-slate-100 text-slate-600', text: 'text-bc-text' },
+  { key: 'En cours', card: 'bg-white border-amber-300', badge: 'bg-amber-100 text-amber-700', text: 'text-amber-600' },
+  { key: 'À recontacter', card: 'bg-white border-sky-300', badge: 'bg-sky-100 text-sky-700', text: 'text-sky-600' },
+  { key: 'Intégré', card: 'bg-white border-emerald-300', badge: 'bg-emerald-100 text-emerald-700', text: 'text-emerald-600' },
+  { key: 'Non intégré', card: 'bg-white border-red-300', badge: 'bg-red-100 text-red-700', text: 'text-red-600' },
+];
+const statusMeta = (s: IntegrationFollowStatus) => STATUSES.find(x => x.key === s) ?? STATUSES[0];
 
 interface NouveauxViewProps {
   members: Member[];
-  onAddMember: (member: Member) => void;
   onUpdateMember: (member: Member) => void;
   activeBranch: Branch;
   simulatedRole: string;
 }
 
-export default function NouveauxView({
-  members,
-  onAddMember,
-  onUpdateMember,
-  activeBranch,
-  simulatedRole
-}: NouveauxViewProps) {
-  const [showNouveauModal, setShowNouveauModal] = useState(false);
-  const isChurch = activeBranch === 'church';
+export default function NouveauxView({ members, onUpdateMember, activeBranch }: NouveauxViewProps) {
+  const INITIAL_DEPARTMENTS = useDepartments();
 
-  // Form Fields State
-  const [firstName, setFirstName] = useState('');
-  const [lastName, setLastName] = useState('');
-  const [phone, setPhone] = useState('');
-  const [phoneParent, setPhoneParent] = useState('');
-  const [email, setEmail] = useState('');
-  const [gender, setGender] = useState<'H' | 'F'>('H');
-  const [birthDate, setBirthDate] = useState('2000-01-01');
-  const [commune, setCommune] = useState('Cocody');
-  const [ojFlag, setOjFlag] = useState(false);
-  const [targetDept, setTargetDept] = useState('dept_louange');
-  const [notes, setNotes] = useState('');
+  const [reports, setReports] = useState<IntegrationReport[]>(() => load('bc_integration_reports', [] as IntegrationReport[]));
+  useEffect(() => { save('bc_integration_reports', reports); }, [reports]);
+  const reportsFor = (id: string) => reports.filter(r => r.memberId === id);
 
-  // Get only nouveaux of active branch
-  const nouveaux = members.filter(m => m.level === 'Nouveau' && (activeBranch === 'global' || m.branch === activeBranch));
+  // Filters
+  const [search, setSearch] = useState('');
+  const [deptFilter, setDeptFilter] = useState('all');
+  const [statusFilter, setStatusFilter] = useState<IntegrationFollowStatus | null>('Non suivi');
+  const [regFrom, setRegFrom] = useState('');
+  const [regTo, setRegTo] = useState('');
+  const [culteFrom, setCulteFrom] = useState('');
+  const [culteTo, setCulteTo] = useState('');
 
-  // Helper to calculate days since registration
-  const getDaysSinceRegistered = (dateStr?: string) => {
-    if (!dateStr) return 0;
-    const regDate = new Date(dateStr);
-    const today = new Date();
-    const diffTime = Math.abs(today.getTime() - regDate.getTime());
-    return Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+  // Selection + report draft
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [draftStatus, setDraftStatus] = useState<IntegrationFollowStatus>('En cours');
+  const [draftContact, setDraftContact] = useState(false);
+  const [draftVisit, setDraftVisit] = useState(false);
+  const [draftNotes, setDraftNotes] = useState('');
+  const [draftMotif, setDraftMotif] = useState('');
+
+  const statusOf = (m: Member): IntegrationFollowStatus => m.integrationFollowStatus ?? 'Non suivi';
+  const deptNameOf = (m: Member) => {
+    const id = Object.keys(m.departments ?? {})[0];
+    return id ? (INITIAL_DEPARTMENTS.find(d => d.id === id)?.name ?? id) : null;
   };
 
-  const handleSaveNouveau = (e: React.FormEvent) => {
-    e.preventDefault();
+  // Pool = registered nouveaux (+ those already processed), branch-scoped.
+  const pool = members.filter(m =>
+    (m.level === 'Nouveau' || (m.integrationFollowStatus && m.integrationFollowStatus !== 'Non suivi')) &&
+    (activeBranch === 'global' || m.branch === activeBranch)
+  );
 
-    if (!firstName || !lastName || !phone) {
-      alert('Veuillez remplir les informations obligatoires.');
-      return;
-    }
+  const counts = STATUSES.reduce((acc, s) => {
+    acc[s.key] = pool.filter(m => statusOf(m) === s.key).length;
+    return acc;
+  }, {} as Record<IntegrationFollowStatus, number>);
 
-    const newNouveau: Member = {
-      id: `new_custom_${Date.now()}`,
-      firstName,
-      lastName,
-      phone,
-      phoneParent,
-      email,
-      gender,
-      birthDate,
-      maritalStatus: 'Célibataire',
-      profession: 'Étudiant',
-      branch: activeBranch,
-      level: 'Nouveau',
-      pastoralCursus: 'Aucun',
-      departments: { [targetDept]: 'Membre' },
-      entryDate: new Date().toISOString().split('T')[0],
-      integrationState: 'En attente',
-      integrationDateRegistered: new Date().toISOString().split('T')[0],
-      ojFlag,
-      integrationNotes: notes,
-      hasPassedToBossForm: false,
-      gps: {
-        lat: 5.3854,
-        lng: -3.9781,
-        commune
-      },
-      healthKPIs: {
-        spirituel: 2,
-        social: 2,
-        financier: 2,
-        physique: 3,
-        presenceCulte: 1,
-        presenceService: 1
-      },
-      baptismStatus: 'Non baptisé'
-    };
+  const deptOptions = INITIAL_DEPARTMENTS.filter(d => pool.some(m => m.departments?.[d.id]));
 
-    onAddMember(newNouveau);
-    setShowNouveauModal(false);
-    
-    // Clear fields
-    setFirstName('');
-    setLastName('');
-    setPhone('');
-    setPhoneParent('');
-    setEmail('');
-    setOjFlag(false);
-    setNotes('');
+  const inRange = (date: string | undefined, from: string, to: string) => {
+    if (!date) return !from && !to;
+    if (from && date < from) return false;
+    if (to && date > to) return false;
+    return true;
   };
 
-  const handleTransitionState = (nouveau: Member, newState: IntegrationState) => {
-    const updated: Member = {
-      ...nouveau,
-      integrationState: newState
-    };
-
-    // If Nouveau reaches "Intégré", they are automatically ready to be promoted to Stagiaire or Boss!
-    if (newState === 'Intégré') {
-      updated.level = 'Stagiaire';
-      updated.hasPassedToBossForm = true; // Mark graduation
+  const filtered = pool.filter(m => {
+    if (statusFilter && statusOf(m) !== statusFilter) return false;
+    if (deptFilter !== 'all' && !m.departments?.[deptFilter]) return false;
+    if (search) {
+      const q = search.toLowerCase();
+      if (!`${m.firstName} ${m.lastName}`.toLowerCase().includes(q) && !m.phone.includes(q)) return false;
     }
+    if ((regFrom || regTo) && !inRange(m.entryDate, regFrom, regTo)) return false;
+    if ((culteFrom || culteTo) && !inRange(m.integrationDateRegistered, culteFrom, culteTo)) return false;
+    return true;
+  });
 
-    onUpdateMember(updated);
+  const selected = selectedId ? members.find(m => m.id === selectedId) : undefined;
+
+  const selectMember = (m: Member) => {
+    setSelectedId(m.id);
+    setDraftStatus(statusOf(m) === 'Non suivi' ? 'En cours' : statusOf(m));
+    setDraftContact(false);
+    setDraftVisit(false);
+    setDraftNotes('');
+    setDraftMotif('');
+  };
+
+  const saveReport = () => {
+    if (!selected) return;
+    const report: IntegrationReport = {
+      id: `ir_${selected.id}_${Date.now()}`,
+      memberId: selected.id,
+      authorName: 'Affeny Grah',
+      date: new Date().toISOString().slice(0, 10),
+      status: draftStatus,
+      contactEstablished: draftContact,
+      visitDone: draftVisit,
+      notes: draftNotes.trim(),
+      motif: draftMotif.trim(),
+    };
+    setReports(prev => [report, ...prev]);
+    onUpdateMember({ ...selected, integrationFollowStatus: draftStatus });
+    setDraftNotes('');
+    setDraftMotif('');
   };
 
   return (
     <div className="space-y-6">
-      {/* Overview stats panel */}
-      <div className="bg-white p-5 rounded-[2rem] border border-bc-border shadow-sm flex flex-col sm:flex-row gap-4 items-center justify-between">
-        <div>
-          <h3 className="text-sm font-ui font-bold text-bc-text">
-            Pipeline d'intégration ADN (Accueil & Suivi)
-          </h3>
-          <p className="text-xs text-bc-text-secondary mt-0.5">
-            Gérez les nouveaux arrivants et les déclarations OJ "Oui à Jésus" pour {activeBranch === 'global' ? 'les deux branches' : isChurch ? 'Bloom Church' : 'Bloom Light'}.
-          </p>
-        </div>
-        
-        <button
-          id="nouveau-register-btn"
-          onClick={() => setShowNouveauModal(true)}
-          className={`w-full sm:w-auto px-4 py-2.5 rounded-full font-ui font-bold text-xs text-white shadow-sm flex items-center justify-center space-x-1.5 transition-transform hover:scale-105 active:scale-95 cursor-pointer ${
-            'bg-bc-green'
-          }`}
-        >
-          <Plus size={16} />
-          <span>Fiche ADN Nouveau & OJ</span>
-        </button>
+      {/* Header */}
+      <div>
+        <p className="text-xs font-ui font-black uppercase tracking-wider text-bc-purple">Espace Intégrateur</p>
+        <h2 className="text-2xl font-ui font-extrabold text-bc-text">Suivi de l'intégration</h2>
+        <p className="text-xs text-bc-text-secondary mt-0.5">Sélectionne un membre pour ajouter ou mettre à jour son rapport d'intégration.</p>
       </div>
 
-      {/* Integration Board Columns */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        
-        {/* Column 1: En attente */}
-        <div className="bg-bc-canvas/50 border border-bc-border rounded-[2rem] p-4 space-y-4">
-          <div className="flex justify-between items-center">
-            <span className="text-xs font-ui font-bold text-bc-text flex items-center gap-1.5">
-              <span className="w-2.5 h-2.5 rounded-full bg-bc-green" />
-              1. En attente ({nouveaux.filter(n => n.integrationState === 'En attente').length})
-            </span>
-            <span className="text-[10px] bg-bc-green/10 text-bc-text font-bold px-2 py-0.5 rounded-full">Relance</span>
+      {/* Status stat cards (clickable filters) */}
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+        {STATUSES.map(s => {
+          const active = statusFilter === s.key;
+          return (
+            <button
+              key={s.key}
+              onClick={() => setStatusFilter(active ? null : s.key)}
+              className={`text-left rounded-2xl border p-4 transition-all ${active ? s.card + ' shadow-md' : 'bg-white border-bc-border hover:border-slate-300'}`}
+            >
+              <div className={`text-[11px] font-bold ${active && s.key === 'Non suivi' ? 'text-white/80' : s.text}`}>{s.key}</div>
+              <div className={`text-2xl font-ui font-black mt-1 ${active && s.key === 'Non suivi' ? 'text-white' : 'text-bc-text'}`}>{counts[s.key]}</div>
+            </button>
+          );
+        })}
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-5 gap-6">
+        {/* Left: filters + list */}
+        <div className="lg:col-span-2 bg-white rounded-[2rem] border border-bc-border p-4 space-y-4">
+          <div className="relative">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-bc-text-secondary" size={16} />
+            <input
+              value={search}
+              onChange={e => setSearch(e.target.value)}
+              placeholder="Rechercher un membre..."
+              className="pl-9 pr-4 py-2.5 w-full border border-bc-border rounded-full text-xs focus:outline-none focus:border-bc-green"
+            />
           </div>
 
-          <div className="space-y-3 max-h-[60vh] overflow-y-auto">
-            {nouveaux.filter(n => n.integrationState === 'En attente').length === 0 ? (
-              <p className="text-xs text-bc-text-secondary italic text-center py-6">Aucun nouveau en attente.</p>
+          <div className="flex items-center gap-2">
+            <Filter size={15} className="text-bc-text-secondary shrink-0" />
+            <select
+              value={deptFilter}
+              onChange={e => setDeptFilter(e.target.value)}
+              className="flex-1 border border-bc-border rounded-full px-3 py-2 text-xs bg-white focus:outline-none"
+            >
+              <option value="all">Tous les départements</option>
+              {deptOptions.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
+            </select>
+          </div>
+
+          <div className="bg-bc-canvas/50 rounded-2xl border border-bc-border p-3 space-y-2">
+            <p className="text-[10px] font-black uppercase tracking-wider text-bc-text-secondary">Filtres de date</p>
+            <div>
+              <label className="text-[10px] text-bc-text-secondary font-bold">Enregistrement (du / au)</label>
+              <div className="grid grid-cols-2 gap-2 mt-1">
+                <input type="date" value={regFrom} onChange={e => setRegFrom(e.target.value)} className="border border-bc-border rounded-lg px-2 py-1.5 text-[11px] bg-white" />
+                <input type="date" value={regTo} onChange={e => setRegTo(e.target.value)} className="border border-bc-border rounded-lg px-2 py-1.5 text-[11px] bg-white" />
+              </div>
+            </div>
+            <div>
+              <label className="text-[10px] text-bc-text-secondary font-bold">Date du culte (du / au)</label>
+              <div className="grid grid-cols-2 gap-2 mt-1">
+                <input type="date" value={culteFrom} onChange={e => setCulteFrom(e.target.value)} className="border border-bc-border rounded-lg px-2 py-1.5 text-[11px] bg-white" />
+                <input type="date" value={culteTo} onChange={e => setCulteTo(e.target.value)} className="border border-bc-border rounded-lg px-2 py-1.5 text-[11px] bg-white" />
+              </div>
+            </div>
+          </div>
+
+          {/* Member list */}
+          <div className="divide-y divide-slate-100 max-h-[50vh] overflow-y-auto -mx-1 px-1">
+            {filtered.length === 0 ? (
+              <p className="text-xs text-bc-text-secondary text-center py-8">Aucun membre pour ces filtres.</p>
             ) : (
-              nouveaux.filter(n => n.integrationState === 'En attente').map(nouveau => {
-                const days = getDaysSinceRegistered(nouveau.integrationDateRegistered);
-                const isOverdue3Days = days >= 3 && days < 7;
-                const isOverdue7Days = days >= 7;
-
+              filtered.map(m => {
+                const st = statusOf(m);
+                const meta = statusMeta(st);
                 return (
-                  <div 
-                    key={nouveau.id}
-                    className={`p-4 rounded-full border bg-white shadow-sm transition-all relative ${
-                      isOverdue7Days 
-                        ? 'border-bc-purple bg-bc-purple/5' 
-                        : isOverdue3Days 
-                          ? 'border-bc-orange/50 bg-bc-green/5' 
-                          : 'border-bc-border'
-                    }`}
+                  <button
+                    key={m.id}
+                    onClick={() => selectMember(m)}
+                    className={`w-full flex items-center gap-3 py-3 text-left transition-colors ${selectedId === m.id ? 'bg-bc-canvas' : 'hover:bg-bc-canvas/60'} rounded-xl px-2`}
                   >
-                    {/* Alerter Indicator */}
-                    {isOverdue7Days && (
-                      <div className="absolute top-2 right-2 text-bc-purple flex items-center gap-1 animate-pulse">
-                        <ShieldAlert size={14} />
-                        <span className="text-[8px] font-black uppercase">CRITIQUE (Pas de suivi)</span>
-                      </div>
-                    )}
-                    {isOverdue3Days && !isOverdue7Days && (
-                      <div className="absolute top-2 right-2 text-bc-text flex items-center gap-1">
-                        <Clock size={14} />
-                        <span className="text-[8px] font-bold uppercase">Relance &gt; 3j</span>
-                      </div>
-                    )}
-
-                    <h4 className="font-ui font-bold text-bc-text text-xs">{nouveau.lastName} {nouveau.firstName}</h4>
-                    <p className="text-[10px] text-bc-text-secondary font-mono mt-1">Tél: {nouveau.phone}</p>
-                    
-                    <div className="flex flex-wrap gap-1.5 mt-2">
-                      <span className="text-[8px] bg-bc-canvas text-bc-text-secondary px-1.5 py-0.2 rounded font-medium">📍 {nouveau.gps?.commune}</span>
-                      {nouveau.ojFlag && (
-                        <span className="text-[8px] bg-bc-gold/20 text-bc-text px-1.5 py-0.2 rounded font-black flex items-center"><Flame size={10} className="mr-0.5 inline text-orange-500" /> OJ (Oui à Jésus)</span>
-                      )}
+                    <div className="w-9 h-9 rounded-full bg-bc-purple/10 flex items-center justify-center text-bc-purple font-bold text-[10px] uppercase shrink-0">
+                      {m.firstName[0]}{m.lastName[0]}
                     </div>
-
-                    <div className="border-t border-bc-border/60 pt-2.5 mt-3 flex justify-between items-center">
-                      <span className="text-[9px] text-bc-text-secondary">Inscrit il y a {days} jour(s)</span>
-                      <button
-                        id={`transition-suivi-btn-${nouveau.id}`}
-                        onClick={() => handleTransitionState(nouveau, 'Suivi')}
-                        className={`px-2.5 py-1 rounded text-[9px] font-ui font-bold text-white flex items-center gap-1 ${
-                          'bg-bc-green'
-                        }`}
-                      >
-                        Valider contact <ChevronRight size={10} />
-                      </button>
+                    <div className="min-w-0 flex-1">
+                      <p className="text-sm font-bold text-bc-text truncate">{m.lastName} {m.firstName}</p>
+                      <p className="text-[10px] text-bc-text-secondary truncate">{deptNameOf(m) ?? 'Sans département'} · {m.ojFlag ? 'OJ' : 'NV'}</p>
                     </div>
-                  </div>
+                    <span className={`text-[9px] font-bold px-2 py-1 rounded-full ${meta.badge} shrink-0`}>{st}</span>
+                    <ChevronRight size={14} className="text-slate-300 shrink-0" />
+                  </button>
                 );
               })
             )}
           </div>
         </div>
 
-        {/* Column 2: En cours de Suivi */}
-        <div className="bg-bc-canvas/50 border border-bc-border rounded-[2rem] p-4 space-y-4">
-          <div className="flex justify-between items-center">
-            <span className="text-xs font-ui font-bold text-bc-text flex items-center gap-1.5">
-              <span className="w-2.5 h-2.5 rounded-full bg-bc-cerulean" />
-              2. En cours de Suivi ({nouveaux.filter(n => n.integrationState === 'Suivi').length})
-            </span>
-            <span className="text-[10px] bg-bc-cerulean/10 text-bc-cerulean font-bold px-2 py-0.5 rounded-full">Actif</span>
-          </div>
-
-          <div className="space-y-3 max-h-[60vh] overflow-y-auto">
-            {nouveaux.filter(n => n.integrationState === 'Suivi').length === 0 ? (
-              <p className="text-xs text-bc-text-secondary italic text-center py-6">Aucun nouveau en suivi actif.</p>
-            ) : (
-              nouveaux.filter(n => n.integrationState === 'Suivi').map(nouveau => (
-                <div key={nouveau.id} className="p-4 rounded-full border border-bc-border bg-white shadow-sm">
-                  <h4 className="font-ui font-bold text-bc-text text-xs">{nouveau.lastName} {nouveau.firstName}</h4>
-                  <p className="text-[10px] text-bc-text-secondary font-mono mt-1">Tél: {nouveau.phone}</p>
-                  
-                  {nouveau.integrationNotes && (
-                    <p className="text-[10px] bg-bc-canvas p-1.5 rounded text-bc-text-secondary italic mt-2 font-serif">
-                      "{nouveau.integrationNotes}"
-                    </p>
-                  )}
-
-                  <div className="border-t border-bc-border/60 pt-2.5 mt-3 flex justify-between items-center">
-                      <span className="text-[9px] text-bc-text-secondary">Assiduité en cours</span>
-                      <button
-                        id={`transition-integre-btn-${nouveau.id}`}
-                        onClick={() => handleTransitionState(nouveau, 'Intégré')}
-                        className="px-2.5 py-1 rounded text-[9px] font-ui font-bold text-white bg-bc-anis flex items-center gap-1"
-                      >
-                        Intégrer comme Boss <CheckCircle size={10} />
-                      </button>
-                  </div>
-                </div>
-              ))
-            )}
-          </div>
-        </div>
-
-        {/* Column 3: Intégré / Nouveau Membre diplômé */}
-        <div className="bg-bc-canvas/50 border border-bc-border rounded-[2rem] p-4 space-y-4">
-          <div className="flex justify-between items-center">
-            <span className="text-xs font-ui font-bold text-bc-text flex items-center gap-1.5">
-              <span className="w-2.5 h-2.5 rounded-full bg-bc-anis" />
-              3. Intégré (Diplômé)
-            </span>
-            <span className="text-[10px] bg-bc-anis/10 text-bc-anis font-bold px-2 py-0.5 rounded-full">Succès</span>
-          </div>
-
-          <div className="space-y-3 max-h-[60vh] overflow-y-auto">
-            <div className="p-4 bg-bc-anis/5 border border-bc-anis rounded-full text-center">
-              <Sparkles className="mx-auto text-bc-anis mb-1.5" size={20} />
-              <p className="text-[10px] text-bc-text-secondary font-medium">
-                Les nouveaux atteignant ce statut sont automatiquement intégrés dans le répertoire actif en tant que <span className="font-bold text-bc-text">Stagiaires</span>.
-              </p>
+        {/* Right: report editor / empty state */}
+        <div className="lg:col-span-3 bg-white rounded-[2rem] border border-bc-border p-6">
+          {!selected ? (
+            <div className="h-full min-h-[300px] flex flex-col items-center justify-center text-center">
+              <ClipboardCheck size={40} className="text-slate-300 mb-4" />
+              <h3 className="font-ui font-bold text-bc-text">Sélectionne un membre à gauche</h3>
+              <p className="text-xs text-bc-text-secondary mt-1 max-w-xs">Tu pourras enregistrer un rapport de suivi : statut d'intégration, contact établi, visite effectuée, notes et motif.</p>
             </div>
-            
-            {members.filter(m => m.level !== 'Nouveau' && (activeBranch === 'global' || m.branch === activeBranch) && m.hasPassedToBossForm).slice(0, 3).map(grad => (
-              <div key={grad.id} className="p-3.5 rounded-full border border-bc-border bg-white shadow-sm opacity-80">
-                <div className="flex items-center space-x-2.5">
-                  <div className="w-7 h-7 rounded-full bg-bc-anis/20 text-bc-anis font-ui font-black text-[10px] flex items-center justify-center">
-                    {grad.firstName[0]}{grad.lastName[0]}
-                  </div>
-                  <div>
-                    <h4 className="font-ui font-bold text-bc-text text-xs">{grad.lastName} {grad.firstName}</h4>
-                    <p className="text-[9px] text-bc-anis font-bold">🎓 Diplômé le {grad.entryDate}</p>
-                  </div>
+          ) : (
+            <div className="space-y-5">
+              {/* Member header */}
+              <div className="flex items-center gap-3 pb-4 border-b border-bc-border">
+                <div className="w-12 h-12 rounded-full bg-bc-purple/10 flex items-center justify-center text-bc-purple font-bold uppercase">
+                  {selected.firstName[0]}{selected.lastName[0]}
                 </div>
-              </div>
-            ))}
-          </div>
-        </div>
-
-      </div>
-
-      {/* Formulaire ADN Nouveau Modal */}
-      {showNouveauModal && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-[2.5rem] max-w-lg w-full p-6 border border-bc-border shadow-2xl relative max-h-[90vh] overflow-y-auto">
-            <button
-              id="close-nouveau-modal-btn"
-              onClick={() => setShowNouveauModal(false)}
-              className="absolute top-4 right-4 p-2 text-bc-text-secondary hover:text-bc-purple transition-colors"
-            >
-              <X size={20} />
-            </button>
-
-            <h3 className="text-base font-ui font-bold text-bc-text flex items-center gap-2 mb-4">
-              <UserCheck size={18} className={'text-bc-text'} />
-              Formulaire ADN (Nouveau & Oui à Jésus)
-            </h3>
-
-            <form onSubmit={handleSaveNouveau} className="space-y-4">
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-xs font-bold text-bc-text mb-1">Prénom *</label>
-                  <input
-                    id="nouveau-firstname"
-                    type="text"
-                    required
-                    value={firstName}
-                    onChange={(e) => setFirstName(e.target.value)}
-                    className="w-full border border-bc-border rounded-full px-3 py-2 text-xs focus:outline-none focus:border-bc-green"
-                  />
+                <div className="flex-1">
+                  <h3 className="text-lg font-ui font-bold text-bc-text">{selected.lastName} {selected.firstName}</h3>
+                  <p className="text-xs text-bc-text-secondary flex items-center gap-2">
+                    <span>{deptNameOf(selected) ?? 'Sans département'} · {selected.ojFlag ? 'OJ' : 'NV'}</span>
+                    <span className="flex items-center gap-1"><Phone size={11} /> {selected.phone}</span>
+                  </p>
                 </div>
-                <div>
-                  <label className="block text-xs font-bold text-bc-text mb-1">Nom *</label>
-                  <input
-                    id="nouveau-lastname"
-                    type="text"
-                    required
-                    value={lastName}
-                    onChange={(e) => setLastName(e.target.value)}
-                    className="w-full border border-bc-border rounded-full px-3 py-2 text-xs focus:outline-none focus:border-bc-green"
-                  />
-                </div>
+                <span className={`text-[10px] font-bold px-3 py-1 rounded-full ${statusMeta(statusOf(selected)).badge}`}>{statusOf(selected)}</span>
               </div>
 
+              {/* Report form */}
               <div>
-                <label className="block text-xs font-bold text-bc-text mb-1">Téléphone de contact *</label>
-                <input
-                  id="nouveau-phone"
-                  type="text"
-                  required
-                  placeholder="+225..."
-                  value={phone}
-                  onChange={(e) => setPhone(e.target.value)}
-                  className="w-full border border-bc-border rounded-full px-3 py-2 text-xs focus:outline-none focus:border-bc-green font-mono"
-                />
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-xs font-bold text-bc-text mb-1">Téléphone Parent/Proche</label>
-                  <input
-                    id="nouveau-parent-phone"
-                    type="text"
-                    placeholder="+225..."
-                    value={phoneParent}
-                    onChange={(e) => setPhoneParent(e.target.value)}
-                    className="w-full border border-bc-border rounded-full px-3 py-2 text-xs focus:outline-none focus:border-bc-green font-mono"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-bold text-bc-text mb-1">Commune</label>
-                  <select
-                    id="nouveau-commune"
-                    value={commune}
-                    onChange={(e) => setCommune(e.target.value)}
-                    className="w-full border border-bc-border rounded-full px-3 py-2 text-xs bg-white focus:outline-none"
-                  >
-                    <option value="Cocody">Cocody</option>
-                    <option value="Yopougon">Yopougon</option>
-                    <option value="Abobo">Abobo</option>
-                    <option value="Koumassi">Koumassi</option>
-                  </select>
+                <label className="text-xs font-bold text-bc-text block mb-2">Statut d'intégration</label>
+                <div className="flex flex-wrap gap-2">
+                  {STATUSES.filter(s => s.key !== 'Non suivi').map(s => (
+                    <button
+                      key={s.key}
+                      onClick={() => setDraftStatus(s.key)}
+                      className={`px-3 py-1.5 rounded-full text-xs font-bold border transition-colors ${draftStatus === s.key ? 'bg-bc-green text-white border-bc-green' : 'bg-white text-bc-text-secondary border-bc-border hover:bg-bc-canvas'}`}
+                    >
+                      {s.key}
+                    </button>
+                  ))}
                 </div>
               </div>
 
               <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-xs font-bold text-bc-text mb-1">Genre</label>
-                  <div className="flex space-x-2">
-                    <button
-                      id="nouveau-gender-h"
-                      type="button"
-                      onClick={() => setGender('H')}
-                      className={`flex-1 py-1.5 text-xs font-bold rounded-full border ${gender === 'H' ? 'bg-bc-green text-white border-bc-green' : 'border-bc-border'}`}
-                    >
-                      Homme
-                    </button>
-                    <button
-                      id="nouveau-gender-f"
-                      type="button"
-                      onClick={() => setGender('F')}
-                      className={`flex-1 py-1.5 text-xs font-bold rounded-full border ${gender === 'F' ? 'bg-bc-green text-white border-bc-green' : 'border-bc-border'}`}
-                    >
-                      Femme
-                    </button>
-                  </div>
-                </div>
-                <div>
-                  <label className="block text-xs font-bold text-bc-text mb-1">Département de Service Souhaité</label>
-                  <select
-                    id="nouveau-dept-target"
-                    value={targetDept}
-                    onChange={(e) => setTargetDept(e.target.value)}
-                    className="w-full border border-bc-border rounded-full px-3 py-2 text-xs bg-white focus:outline-none"
-                  >
-                    {INITIAL_DEPARTMENTS.filter(d => d.type === 'service').map(d => (
-                      <option key={d.id} value={d.id}>{d.name}</option>
-                    ))}
-                  </select>
-                </div>
-              </div>
-
-              {/* Oui à Jésus Toggles */}
-              <div className="p-3 border border-bc-border rounded-full bg-bc-gold/10 flex items-center justify-between">
-                <div>
-                  <span className="text-xs font-bold text-bc-text block">Déclaration "Oui à Jésus" (OJ)</span>
-                  <span className="text-[10px] text-bc-text-secondary">Cochez si la personne a donné sa vie au culte d'aujourd'hui.</span>
-                </div>
                 <button
-                  id="nouveau-oj-toggle"
-                  type="button"
-                  onClick={() => setOjFlag(!ojFlag)}
-                  className={`w-12 h-6 rounded-full p-1 transition-colors duration-200 ${ojFlag ? 'bg-bc-green' : 'bg-bc-warmgrey'}`}
+                  onClick={() => setDraftContact(v => !v)}
+                  className={`flex items-center gap-2 px-3 py-2.5 rounded-xl border text-xs font-bold transition-colors ${draftContact ? 'bg-bc-green/10 border-bc-green text-bc-text' : 'bg-white border-bc-border text-bc-text-secondary'}`}
                 >
-                  <div className={`w-4 h-4 rounded-full bg-white transition-transform duration-200 ${ojFlag ? 'translate-x-6' : ''}`} />
+                  <span className={`w-4 h-4 rounded flex items-center justify-center ${draftContact ? 'bg-bc-green text-white' : 'border border-bc-border'}`}>{draftContact && <Check size={11} />}</span>
+                  Contact établi
+                </button>
+                <button
+                  onClick={() => setDraftVisit(v => !v)}
+                  className={`flex items-center gap-2 px-3 py-2.5 rounded-xl border text-xs font-bold transition-colors ${draftVisit ? 'bg-bc-green/10 border-bc-green text-bc-text' : 'bg-white border-bc-border text-bc-text-secondary'}`}
+                >
+                  <span className={`w-4 h-4 rounded flex items-center justify-center ${draftVisit ? 'bg-bc-green text-white' : 'border border-bc-border'}`}>{draftVisit && <Check size={11} />}</span>
+                  Visite effectuée
                 </button>
               </div>
 
               <div>
-                <label className="block text-xs font-bold text-bc-text mb-1">Notes initiales</label>
+                <label className="text-xs font-bold text-bc-text block mb-1">Notes</label>
                 <textarea
-                  id="nouveau-notes"
-                  rows={2}
-                  value={notes}
-                  onChange={(e) => setNotes(e.target.value)}
-                  className="w-full border border-bc-border rounded-full px-3 py-2 text-xs focus:outline-none focus:border-bc-green"
-                  placeholder="Attentes, requêtes de prières..."
+                  value={draftNotes}
+                  onChange={e => setDraftNotes(e.target.value)}
+                  rows={3}
+                  placeholder="Compte-rendu du suivi…"
+                  className="w-full border border-bc-border rounded-xl px-3 py-2 text-xs focus:outline-none focus:border-bc-green resize-none"
                 />
               </div>
 
-              <div className="flex gap-3 justify-end pt-3 border-t border-bc-border">
-                <button
-                  id="nouveau-cancel-btn"
-                  type="button"
-                  onClick={() => setShowNouveauModal(false)}
-                  className="px-4 py-2 border border-bc-border text-bc-text-secondary rounded-full text-xs hover:bg-bc-canvas"
-                >
-                  Annuler
-                </button>
-                <button
-                  id="nouveau-submit-btn"
-                  type="submit"
-                  className={`px-5 py-2 text-white rounded-full text-xs font-ui font-bold hover:opacity-90 ${'bg-bc-green'}`}
-                >
-                  Enregistrer Nouveau
-                </button>
+              <div>
+                <label className="text-xs font-bold text-bc-text block mb-1">Motif (si à recontacter / non intégré)</label>
+                <input
+                  value={draftMotif}
+                  onChange={e => setDraftMotif(e.target.value)}
+                  placeholder="Motif…"
+                  className="w-full border border-bc-border rounded-full px-3 py-2 text-xs focus:outline-none focus:border-bc-green"
+                />
               </div>
-            </form>
-          </div>
+
+              <button
+                onClick={saveReport}
+                className="w-full py-2.5 bg-bc-green text-white rounded-full text-xs font-ui font-bold flex items-center justify-center gap-2 hover:opacity-90"
+              >
+                <Send size={14} /> Enregistrer le rapport
+              </button>
+
+              {/* Timeline */}
+              {reportsFor(selected.id).length > 0 && (
+                <div className="pt-4 border-t border-bc-border">
+                  <h4 className="text-xs font-bold text-bc-text mb-3">Historique des rapports</h4>
+                  <div className="space-y-2">
+                    {reportsFor(selected.id).map(r => (
+                      <div key={r.id} className="border border-bc-border rounded-2xl p-3">
+                        <div className="flex items-center justify-between mb-1">
+                          <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${statusMeta(r.status).badge}`}>{r.status}</span>
+                          <span className="text-[10px] text-bc-text-secondary">{r.date}</span>
+                        </div>
+                        <div className="flex flex-wrap gap-1.5 mb-1">
+                          {r.contactEstablished && <span className="text-[9px] font-bold text-emerald-600 flex items-center gap-0.5"><Check size={9} /> Contact établi</span>}
+                          {r.visitDone && <span className="text-[9px] font-bold text-emerald-600 flex items-center gap-0.5"><Check size={9} /> Visite effectuée</span>}
+                        </div>
+                        {r.notes && <p className="text-xs text-bc-text">{r.notes}</p>}
+                        {r.motif && <p className="text-[11px] text-amber-700 italic mt-0.5">Motif : {r.motif}</p>}
+                        <p className="text-[10px] text-bc-text-secondary mt-1">par {r.authorName}</p>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
         </div>
-      )}
+      </div>
     </div>
   );
 }

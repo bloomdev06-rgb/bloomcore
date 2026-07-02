@@ -8,9 +8,39 @@ import {
   ChevronDown,
   ChevronRight,
   Activity,
+  Plus,
+  X,
 } from "lucide-react";
 import { Member, Branch, BloomBusEntity, Report } from "../types";
-import { INITIAL_BUS_LINES } from "../mockData";
+import { useBusLines } from "../data";
+
+// Échelle de santé : choix parmi 5 niveaux (au lieu d'un curseur).
+const RATINGS = [
+  { v: 1, label: "Très mal" },
+  { v: 2, label: "Mal" },
+  { v: 3, label: "Moyen" },
+  { v: 4, label: "Bien" },
+  { v: 5, label: "Très bien" },
+];
+function RatingRow({ label, value, onChange }: { label: string; value: number; onChange: (v: number) => void }) {
+  return (
+    <div>
+      <label className="block text-xs font-bold text-slate-700 mb-1.5">{label}</label>
+      <div className="grid grid-cols-5 gap-1.5">
+        {RATINGS.map((r) => (
+          <button
+            key={r.v}
+            type="button"
+            onClick={() => onChange(r.v)}
+            className={`py-1.5 rounded-lg text-[10px] font-bold border transition-colors ${value === r.v ? "bg-bc-green text-white border-bc-green" : "bg-white text-bc-text-secondary border-bc-border hover:bg-bc-canvas"}`}
+          >
+            {r.label}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
 
 interface BloomBusViewProps {
   members: Member[];
@@ -20,6 +50,21 @@ interface BloomBusViewProps {
   simulatedRole: string;
 }
 
+// Real OpenStreetMap embed, bbox fitted to the selected territory (marker at centroid).
+function osmUrl(buses: BloomBusEntity[]): string {
+  const pts = buses.length ? buses : [{ centerLat: 5.35, centerLng: -4.02 } as BloomBusEntity];
+  const lats = pts.map((b) => b.centerLat);
+  const lngs = pts.map((b) => b.centerLng);
+  const pad = 0.02;
+  const minLat = Math.min(...lats) - pad;
+  const maxLat = Math.max(...lats) + pad;
+  const minLng = Math.min(...lngs) - pad;
+  const maxLng = Math.max(...lngs) + pad;
+  const mLat = (minLat + maxLat) / 2;
+  const mLng = (minLng + maxLng) / 2;
+  return `https://www.openstreetmap.org/export/embed.html?bbox=${minLng},${minLat},${maxLng},${maxLat}&layer=mapnik&marker=${mLat},${mLng}`;
+}
+
 export default function BloomBusView({
   members,
   onUpdateMember,
@@ -27,6 +72,10 @@ export default function BloomBusView({
   activeBranch,
   simulatedRole,
 }: BloomBusViewProps) {
+  const seedBus = useBusLines();
+  // ponytail: local session state; persist via ./data at backend time.
+  const [busLines, setBusLines] = useState<BloomBusEntity[]>(seedBus);
+  const [showAddBus, setShowAddBus] = useState(false);
   const [expandedCommunes, setExpandedCommunes] = useState<string[]>([
     "Cocody",
   ]);
@@ -56,7 +105,7 @@ export default function BloomBusView({
 
   // Grouping
   const busByCommune: Record<string, Record<string, BloomBusEntity[]>> = {};
-  INITIAL_BUS_LINES.forEach((bus) => {
+  busLines.forEach((bus) => {
     if (!busByCommune[bus.commune]) busByCommune[bus.commune] = {};
     if (!busByCommune[bus.commune][bus.zone])
       busByCommune[bus.commune][bus.zone] = [];
@@ -74,12 +123,12 @@ export default function BloomBusView({
 
   let activeBuses: BloomBusEntity[] = [];
   if (selectedLevel.type === "bus") {
-    const b = INITIAL_BUS_LINES.find((b) => b.id === selectedLevel.id);
+    const b = busLines.find((b) => b.id === selectedLevel.id);
     if (b) activeBuses = [b];
   } else if (selectedLevel.type === "zone") {
-    activeBuses = INITIAL_BUS_LINES.filter((b) => b.zone === selectedLevel.id);
+    activeBuses = busLines.filter((b) => b.zone === selectedLevel.id);
   } else {
-    activeBuses = INITIAL_BUS_LINES.filter(
+    activeBuses = busLines.filter(
       (b) => b.commune === selectedLevel.id,
     );
   }
@@ -87,7 +136,10 @@ export default function BloomBusView({
   const busIds = activeBuses.map((b) => b.id);
   const busMembers = members.filter(
     (m) =>
-      m.bloomBusId && busIds.includes(m.bloomBusId) && m.level !== "Nouveau",
+      m.bloomBusId &&
+      busIds.includes(m.bloomBusId) &&
+      m.level !== "Nouveau" &&
+      (activeBranch === "global" || m.branch === activeBranch), // étanchéité par branche §3
   );
 
   const canEdit = [
@@ -141,6 +193,7 @@ export default function BloomBusView({
 
   const handleSaveLifeReport = (e: React.FormEvent) => {
     e.preventDefault();
+    if (selectedLevel.type !== "bus") return; // rapport de vie = par bus uniquement
     onAddReport({
       id: `rep_bus_life_${Date.now()}`,
       authorId: "mem_1",
@@ -166,9 +219,14 @@ export default function BloomBusView({
     <div className="flex flex-col lg:flex-row gap-6 h-auto lg:h-full lg:overflow-hidden flex-1">
       {/* Sidebar / Accordion */}
       <div className="w-full lg:w-72 bg-white rounded-[2rem] border border-bc-border shadow-sm p-4 flex flex-col shrink-0 overflow-y-auto">
-        <h3 className="font-ui font-bold text-bc-text mb-4 px-2">
-          Territoires Bloom
-        </h3>
+        <div className="flex items-center justify-between mb-4 px-2">
+          <h3 className="font-ui font-bold text-bc-text">Territoires Bloom</h3>
+          {canEdit && (
+            <button onClick={() => setShowAddBus(true)} title="Ajouter un bus" className="p-1.5 rounded-full bg-bc-green text-white hover:opacity-90">
+              <Plus size={14} />
+            </button>
+          )}
+        </div>
         <div className="space-y-2">
           {Object.entries(busByCommune).map(([commune, zones]) => (
             <div key={commune} className="space-y-1">
@@ -245,7 +303,7 @@ export default function BloomBusView({
                 `Commune: ${selectedLevel.id}`}
               {selectedLevel.type === "zone" && `Zone: ${selectedLevel.id}`}
               {selectedLevel.type === "bus" &&
-                `Bus: ${INITIAL_BUS_LINES.find((b) => b.id === selectedLevel.id)?.name}`}
+                `Bus: ${busLines.find((b) => b.id === selectedLevel.id)?.name}`}
             </h2>
             <p className="text-xs text-bc-text-secondary mt-1">
               {activeBuses.length} ligne(s) couverte(s) - {busMembers.length}{" "}
@@ -253,30 +311,6 @@ export default function BloomBusView({
             </p>
           </div>
         </div>
-
-        {canEdit && (
-          <div className="fixed bottom-6 right-6 flex flex-col gap-3 z-40 items-end">
-            <button
-              onClick={() => {
-                if (busMembers.length === 0)
-                  return alert("Aucun membre actif.");
-                setTargetMemberId(busMembers[0].id);
-                setShowMemberReportModal(true);
-              }}
-              className="p-4 bg-emerald-600 text-white font-ui font-black text-xs uppercase tracking-wider rounded-full shadow-2xl hover:scale-105 flex items-center gap-2 transition-transform duration-200 ease-out-spring active-scale"
-              title="Rapport Spirituel"
-            >
-              <Heart size={22} /> <span className="pr-1">Rapport Spirituel</span>
-            </button>
-            <button
-              onClick={() => setShowLifeReportModal(true)}
-              className="p-4 bg-bc-green text-white font-ui font-black text-xs uppercase tracking-wider rounded-full shadow-2xl hover:scale-105 flex items-center gap-2 transition-transform duration-200 ease-out-spring active-scale"
-              title="Rapport d'Activité"
-            >
-              <Sliders size={22} /> <span className="pr-1">Rapport d'Activité</span>
-            </button>
-          </div>
-        )}
 
         {/* Dashboard Grid */}
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 shrink-0">
@@ -323,46 +357,23 @@ export default function BloomBusView({
           {/* MAP */}
           <div className="flex-1 bg-white p-5 rounded-[2rem] border border-bc-border shadow-sm flex flex-col">
             <h3 className="text-sm font-ui font-bold text-bc-text mb-4 flex items-center gap-2">
-              <MapIcon size={16} /> Carte Territoriale (Simulation)
+              <MapIcon size={16} /> Carte Territoriale (OpenStreetMap)
             </h3>
-            <div className="flex-1 bg-bc-canvas border border-bc-border rounded-2xl relative overflow-hidden flex items-center justify-center">
-              <svg
-                className="absolute inset-0 w-full h-full opacity-10"
-                xmlns="http://www.w3.org/2000/svg"
-              >
-                <line
-                  x1="0"
-                  y1="100"
-                  x2="1000"
-                  y2="100"
-                  stroke="#000"
-                  strokeWidth="4"
-                />
-                <line
-                  x1="250"
-                  y1="0"
-                  x2="250"
-                  y2="1000"
-                  stroke="#000"
-                  strokeWidth="4"
-                />
-              </svg>
-              {activeBuses.map((bus, idx) => (
-                <div
-                  key={bus.id}
-                  className="absolute flex flex-col items-center"
-                  style={{
-                    top: `${40 + idx * 15}%`,
-                    left: `${40 + idx * 10}%`,
-                  }}
-                >
-                  <div className="p-2 bg-bc-green text-white rounded-full shadow-lg border-2 border-white">
-                    <Bus size={14} />
-                  </div>
-                  <span className="text-[9px] font-bold bg-white text-bc-text px-2 py-1 mt-1 rounded border border-bc-border shadow-sm whitespace-nowrap">
-                    {bus.name}
-                  </span>
-                </div>
+            <div className="flex-1 bg-bc-canvas border border-bc-border rounded-2xl relative overflow-hidden min-h-[300px]">
+              <iframe
+                title="Carte OpenStreetMap"
+                src={osmUrl(activeBuses)}
+                className="absolute inset-0 w-full h-full border-0"
+                loading="lazy"
+              />
+            </div>
+            {/* ponytail: iframe embed centre le territoire (1 marqueur au centroïde) ; les pins par
+                bus/membre nécessitent leaflet — à ajouter si la fidélité géo devient prioritaire. */}
+            <div className="flex flex-wrap gap-1.5 mt-3">
+              {activeBuses.map((bus) => (
+                <span key={bus.id} className="inline-flex items-center gap-1 text-[10px] font-bold text-bc-text bg-white border border-bc-border rounded-full px-2 py-1">
+                  <Bus size={11} className="text-bc-green" /> {bus.name}
+                </span>
               ))}
             </div>
           </div>
@@ -370,9 +381,19 @@ export default function BloomBusView({
           {/* Member List (only shown when bus is selected) */}
           {selectedLevel.type === "bus" && (
             <div className="w-full xl:w-80 bg-white p-5 rounded-[2rem] border border-bc-border shadow-sm flex flex-col">
-              <h3 className="text-sm font-ui font-bold text-bc-text mb-4">
-                Membres du Bus
-              </h3>
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="text-sm font-ui font-bold text-bc-text">Membres du Bus</h3>
+                {canEdit && (
+                  <button
+                    onClick={() => setShowLifeReportModal(true)}
+                    className="text-[10px] font-bold text-bc-green flex items-center gap-1 px-2 py-1 rounded-full hover:bg-bc-green/10"
+                    title="Rapport d'activité du bus (Capitaine)"
+                  >
+                    <Sliders size={13} /> Rapport d'activité
+                  </button>
+                )}
+              </div>
+              <p className="text-[10px] text-bc-text-secondary mb-3">Clique un membre pour faire son rapport de suivi.</p>
               <div className="space-y-3 overflow-y-auto flex-1 pr-2">
                 {busMembers.length === 0 ? (
                   <div className="text-center py-8">
@@ -382,21 +403,24 @@ export default function BloomBusView({
                   </div>
                 ) : (
                   busMembers.map((m) => (
-                    <div
+                    <button
                       key={m.id}
-                      className="p-3 bg-bc-canvas border border-bc-border rounded-xl flex items-center gap-3 hover:bg-slate-100 transition-colors cursor-pointer"
+                      onClick={() => { if (canEdit) { setTargetMemberId(m.id); setShowMemberReportModal(true); } }}
+                      disabled={!canEdit}
+                      className="w-full text-left p-3 bg-bc-canvas border border-bc-border rounded-xl flex items-center gap-3 hover:bg-slate-100 transition-colors disabled:cursor-default"
                     >
-                      <div className="w-10 h-10 rounded-full bg-white border border-bc-border text-bc-text flex justify-center items-center font-bold text-xs shadow-sm">
+                      <div className="w-10 h-10 rounded-full bg-white border border-bc-border text-bc-text flex justify-center items-center font-bold text-xs shadow-sm shrink-0">
                         {m.firstName[0]}
                         {m.lastName[0]}
                       </div>
-                      <div>
-                        <p className="text-sm font-bold text-bc-text">
+                      <div className="min-w-0 flex-1">
+                        <p className="text-sm font-bold text-bc-text truncate">
                           {m.firstName} {m.lastName}
                         </p>
                         <p className="text-[10px] text-bc-text-secondary">{m.phone}</p>
                       </div>
-                    </div>
+                      {canEdit && <Heart size={14} className="text-bc-green shrink-0" />}
+                    </button>
                   ))
                 )}
               </div>
@@ -416,75 +440,18 @@ export default function BloomBusView({
               Évaluez la santé spirituelle (Rapport hebdomadaire).
             </p>
             <form onSubmit={handleSaveMemberHealth} className="space-y-5">
-              <div>
-                <label className="block text-xs font-bold text-slate-700 mb-2">
-                  Membre évalué
-                </label>
-                <select
-                  value={targetMemberId}
-                  onChange={(e) => setTargetMemberId(e.target.value)}
-                  className="w-full p-3 border border-bc-border rounded-xl text-sm font-bold bg-bc-canvas focus:bg-white focus:outline-none"
-                >
-                  {busMembers.map((m) => (
-                    <option key={m.id} value={m.id}>
-                      {m.firstName} {m.lastName}
-                    </option>
-                  ))}
-                </select>
+              <div className="p-3 rounded-xl bg-bc-canvas border border-bc-border">
+                <span className="text-[10px] text-bc-text-secondary font-bold uppercase block">Membre évalué</span>
+                <span className="text-sm font-bold text-bc-text">
+                  {(() => { const t = members.find((m) => m.id === targetMemberId); return t ? `${t.firstName} ${t.lastName}` : "—"; })()}
+                </span>
               </div>
-              <div className="grid grid-cols-2 gap-x-4 gap-y-4">
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1">
-                    Spiritualité
-                  </label>
-                  <input
-                    type="range"
-                    min="1"
-                    max="5"
-                    value={sprVal}
-                    onChange={(e) => setSprVal(Number(e.target.value))}
-                    className="w-full"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1">
-                    Social
-                  </label>
-                  <input
-                    type="range"
-                    min="1"
-                    max="5"
-                    value={socVal}
-                    onChange={(e) => setSocVal(Number(e.target.value))}
-                    className="w-full"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1">
-                    Physique
-                  </label>
-                  <input
-                    type="range"
-                    min="1"
-                    max="5"
-                    value={phyVal}
-                    onChange={(e) => setPhyVal(Number(e.target.value))}
-                    className="w-full"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1">
-                    Financier
-                  </label>
-                  <input
-                    type="range"
-                    min="1"
-                    max="5"
-                    value={finVal}
-                    onChange={(e) => setFinVal(Number(e.target.value))}
-                    className="w-full"
-                  />
-                </div>
+              <div className="space-y-4">
+                <RatingRow label="Spiritualité" value={sprVal} onChange={setSprVal} />
+                <RatingRow label="Social" value={socVal} onChange={setSocVal} />
+                <RatingRow label="Physique" value={phyVal} onChange={setPhyVal} />
+                <RatingRow label="Financier" value={finVal} onChange={setFinVal} />
+                <RatingRow label="Présence au culte" value={culVal} onChange={setCulVal} />
               </div>
               <div className="flex justify-end gap-3 pt-4">
                 <button
@@ -590,6 +557,65 @@ export default function BloomBusView({
           </div>
         </div>
       )}
+
+      {showAddBus && (
+        <AddBusModal
+          onClose={() => setShowAddBus(false)}
+          onAdd={(bus) => {
+            setBusLines((prev) => [...prev, bus]);
+            setShowAddBus(false);
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
+function AddBusModal({ onClose, onAdd }: { onClose: () => void; onAdd: (b: BloomBusEntity) => void }) {
+  const [name, setName] = useState("");
+  const [commune, setCommune] = useState("");
+  const [zone, setZone] = useState("");
+  const [lat, setLat] = useState("5.35");
+  const [lng, setLng] = useState("-4.02");
+
+  const submit = () => {
+    if (!name.trim() || !commune.trim() || !zone.trim()) return;
+    onAdd({
+      id: `bus_${Date.now()}`,
+      name: name.trim(),
+      commune: commune.trim(),
+      zone: zone.trim(),
+      centerLat: parseFloat(lat) || 5.35,
+      centerLng: parseFloat(lng) || -4.02,
+    });
+  };
+
+  return (
+    <div className="fixed inset-0 bg-bc-text/30 backdrop-blur-sm z-50 flex items-center justify-center p-4" onClick={onClose}>
+      <div className="bg-white rounded-[2rem] p-6 w-full max-w-md shadow-xl" onClick={(e) => e.stopPropagation()}>
+        <div className="flex justify-between items-center mb-4">
+          <h3 className="font-ui font-bold text-bc-text">Ajouter un bus</h3>
+          <button onClick={onClose} className="text-bc-text-secondary hover:text-bc-text"><X size={18} /></button>
+        </div>
+        <div className="space-y-3">
+          <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Nom du bus" className="w-full border border-bc-border rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-bc-green" />
+          <input value={commune} onChange={(e) => setCommune(e.target.value)} placeholder="Commune" className="w-full border border-bc-border rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-bc-green" />
+          <input value={zone} onChange={(e) => setZone(e.target.value)} placeholder="Zone" className="w-full border border-bc-border rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-bc-green" />
+          <div className="grid grid-cols-2 gap-2">
+            <div>
+              <label className="block text-[10px] font-bold uppercase tracking-wider text-bc-text-secondary mb-1">Centre — Latitude</label>
+              <input value={lat} onChange={(e) => setLat(e.target.value)} className="w-full border border-bc-border rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-bc-green" />
+            </div>
+            <div>
+              <label className="block text-[10px] font-bold uppercase tracking-wider text-bc-text-secondary mb-1">Centre — Longitude</label>
+              <input value={lng} onChange={(e) => setLng(e.target.value)} className="w-full border border-bc-border rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-bc-green" />
+            </div>
+          </div>
+        </div>
+        <button onClick={submit} disabled={!name.trim() || !commune.trim() || !zone.trim()} className="w-full mt-5 bg-bc-green text-white rounded-full py-2.5 text-sm font-bold hover:opacity-90 disabled:opacity-40">
+          Ajouter le bus
+        </button>
+      </div>
     </div>
   );
 }

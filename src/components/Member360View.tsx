@@ -1,16 +1,39 @@
 import React, { useState, useRef } from 'react';
 import { Member, Branch, Report, AuditLog } from '../types';
-import { INITIAL_DEPARTMENTS } from '../mockData';
-import { X, Edit, Phone, Mail, Compass, ShieldAlert, Activity, User, Briefcase, Calendar, MapPin, Database, ArrowRight, Clock, Smile, Meh, Star, Frown, CheckCircle2 } from 'lucide-react';
+import { useDepartments, useBusLines } from '../data';
+import { Radar, RadarChart, PolarGrid, PolarAngleAxis, ResponsiveContainer } from 'recharts';
+import { X, Edit, Phone, Mail, Compass, ShieldAlert, Activity, User, Briefcase, Calendar, MapPin, Database, ArrowRight, Clock, Smile, Meh, Star, Frown, CheckCircle2, Coins } from 'lucide-react';
+
+const COMMUNITY_LEVELS = ['Nouveau', 'Stagiaire', 'Boss', 'Leader', 'Coach'];
+const CURSUS_LEVELS = ['Aucun', 'Appelé', 'Serviteur', "Gagneur d'âme", 'Assistant Pasteur', 'Pasteur Assistant', 'Pasteur Titulaire'];
+
+function Stepper({ steps, current }: { steps: string[]; current: string }) {
+  const idx = steps.indexOf(current);
+  return (
+    <div className="flex flex-wrap items-center gap-1.5 text-xs font-bold">
+      {steps.map((s, i) => (
+        <React.Fragment key={s}>
+          <span className={`px-3 py-1 rounded-full ${i < idx ? 'bg-emerald-50 text-emerald-600' : i === idx ? 'bg-bc-green text-white' : 'text-slate-300'}`}>{s}</span>
+          {i < steps.length - 1 && <ArrowRight size={12} className={i < idx ? 'text-emerald-400' : 'text-slate-200'} />}
+        </React.Fragment>
+      ))}
+    </div>
+  );
+}
 
 interface Member360ViewProps {
   member: Member;
   onClose: () => void;
   onEdit: (member: Member) => void;
+  onUpdate?: (member: Member) => void;
   simulatedRole: string;
 }
 
-export default function Member360View({ member, onClose, onEdit, simulatedRole }: Member360ViewProps) {
+export default function Member360View({ member, onClose, onEdit, onUpdate, simulatedRole }: Member360ViewProps) {
+  const canManage = ['Pasteur', 'Ministre', 'Responsable', 'Coach', 'Admin', 'Super Admin'].includes(simulatedRole);
+  const INITIAL_DEPARTMENTS = useDepartments();
+  const BUS_LINES = useBusLines();
+  const busLine = BUS_LINES.find(b => b.id === member.bloomBusId);
   const [activeTab, setActiveTab] = useState('perso');
   const tabsRef = useRef<HTMLDivElement>(null);
 
@@ -62,16 +85,33 @@ export default function Member360View({ member, onClose, onEdit, simulatedRole }
                       <ShieldAlert size={10} /> Au rouge
                     </span>
                   )}
+                  {member.isDrachme && (
+                    <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 flex items-center gap-1">
+                      <Coins size={10} /> Drachme (perdu)
+                    </span>
+                  )}
                 </div>
               </div>
             </div>
 
-            <button 
-              onClick={() => onEdit(member)}
-              className="px-5 py-2 border border-bc-border rounded-full text-xs font-ui font-bold hover:bg-bc-canvas flex items-center gap-2"
-            >
-              <Edit size={14} /> Modifier Profil
-            </button>
+            <div className="flex items-center gap-2">
+              {canManage && onUpdate && (
+                <button
+                  onClick={() => onUpdate({ ...member, isDrachme: !member.isDrachme })}
+                  className={`px-4 py-2 rounded-full text-xs font-ui font-bold flex items-center gap-2 border transition-colors ${
+                    member.isDrachme ? 'bg-amber-100 border-amber-300 text-amber-800' : 'border-bc-border text-bc-text-secondary hover:bg-bc-canvas'
+                  }`}
+                >
+                  <Coins size={14} /> {member.isDrachme ? 'Retirer Drachme' : 'Marquer Drachme'}
+                </button>
+              )}
+              <button
+                onClick={() => onEdit(member)}
+                className="px-5 py-2 border border-bc-border rounded-full text-xs font-ui font-bold hover:bg-bc-canvas flex items-center gap-2"
+              >
+                <Edit size={14} /> Modifier Profil
+              </button>
+            </div>
           </div>
         </div>
 
@@ -84,6 +124,18 @@ export default function Member360View({ member, onClose, onEdit, simulatedRole }
               <Activity size={16} /> Santé 360°
             </h3>
             
+            <div className="mb-4 bg-bc-canvas p-2 rounded-2xl border border-bc-border">
+              <div className="h-48">
+                <ResponsiveContainer width="100%" height="100%">
+                  <RadarChart data={healthData} outerRadius="70%">
+                    <PolarGrid stroke="#e2e8f0" />
+                    <PolarAngleAxis dataKey="subject" tick={{ fontSize: 8, fill: '#64748b' }} />
+                    <Radar dataKey="A" stroke="#006C67" fill="#006C67" fillOpacity={0.3} />
+                  </RadarChart>
+                </ResponsiveContainer>
+              </div>
+            </div>
+
             <div className="mb-6 bg-bc-canvas p-4 rounded-2xl border border-bc-border">
               <div className="grid grid-cols-5 gap-1">
                 {healthData.map(axis => {
@@ -130,6 +182,7 @@ export default function Member360View({ member, onClose, onEdit, simulatedRole }
                   { id: 'appartenances', label: 'Appartenances & Ancrages' },
                   { id: 'mentorat', label: 'Mentorat & Encadrement' },
                   { id: 'rapports', label: 'Rapports' },
+                  { id: 'audit', label: "Historique d'audit" },
                 ].map(tab => (
                   <button
                     key={tab.id}
@@ -248,10 +301,13 @@ export default function Member360View({ member, onClose, onEdit, simulatedRole }
                         <div className="text-right">
                           <span className="text-sm font-bold text-bc-text block">{member.baptismStatus}</span>
                           {member.baptismStatus === 'Baptisé' && (
-                            <span className="text-[10px] text-emerald-600 font-bold">via dép. Classes, le 24 Mai 2023</span>
+                            <span className="text-[10px] text-emerald-600 font-bold">
+                              {member.baptismDate ? `le ${member.baptismDate}` : ''}
+                              {member.baptismViaDepartment === true ? ' · via dép. Baptême' : member.baptismViaDepartment === false ? ' · hors process' : ''}
+                            </span>
                           )}
                           {member.baptismStatus === 'Non baptisé' && (
-                            <span className="text-[10px] text-orange-500 font-bold">Parcours en cours (Étape 2/4)</span>
+                            <span className="text-[10px] text-orange-500 font-bold">Aucun baptême enregistré</span>
                           )}
                         </div>
                       </div>
@@ -264,17 +320,12 @@ export default function Member360View({ member, onClose, onEdit, simulatedRole }
                 <div className="space-y-6 max-w-2xl">
                   <div className="bg-white p-6 rounded-2xl border border-bc-border shadow-sm">
                     <h4 className="font-ui font-bold text-bc-text mb-4">Niveau Communautaire</h4>
-                    <div className="flex items-center gap-4 text-xs font-bold">
-                      <span className="text-slate-400">Nouveau</span> <ArrowRight size={14} className="text-slate-300" />
-                      <span className="text-slate-400">Stagiaire</span> <ArrowRight size={14} className="text-slate-300" />
-                      <span className="text-slate-400">Serviteur</span> <ArrowRight size={14} className="text-slate-300" />
-                      <span className="text-bc-text bg-slate-100 px-3 py-1 rounded-full">{member.level}</span>
-                    </div>
+                    <Stepper steps={COMMUNITY_LEVELS} current={member.level} />
                   </div>
 
                   <div className="bg-white p-6 rounded-2xl border border-bc-border shadow-sm">
                     <h4 className="font-ui font-bold text-bc-text mb-4">Cursus Pastoral</h4>
-                    <p className="text-sm font-bold text-bc-text">{member.pastoralCursus}</p>
+                    <Stepper steps={CURSUS_LEVELS} current={member.pastoralCursus} />
                   </div>
 
                   <div className="bg-white p-6 rounded-2xl border border-bc-border shadow-sm">
@@ -316,7 +367,7 @@ export default function Member360View({ member, onClose, onEdit, simulatedRole }
                       <div>
                         <p className="text-xs font-bold text-bc-text-secondary uppercase">Bloom Bus</p>
                         <div className="mt-2">
-                          <span className="px-3 py-1 bg-slate-100 text-slate-700 text-xs font-bold rounded-full">Zone Cocody Centre</span>
+                          <span className="px-3 py-1 bg-slate-100 text-slate-700 text-xs font-bold rounded-full">{busLine ? `${busLine.name} · ${busLine.zone}` : 'Non rattaché'}</span>
                         </div>
                       </div>
                     </div>

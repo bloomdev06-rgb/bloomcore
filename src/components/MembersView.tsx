@@ -15,11 +15,23 @@ import {
   Compass,
   LayoutGrid,
   List,
-  Wrench
+  Wrench,
+  Download
 } from "lucide-react";
 import { Member, Branch, CommunityLevel, PastoralCursus } from "../types";
-import { INITIAL_DEPARTMENTS, INITIAL_BUS_LINES } from "../mockData";
+import { useDepartments, useBusLines } from "../data";
 import Member360View from "./Member360View";
+
+function downloadCsv(filename: string, rows: string[][]) {
+  const cell = (v: string) => `"${(v ?? "").replace(/"/g, '""')}"`;
+  const csv = rows.map((r) => r.map(cell).join(",")).join("\n");
+  const url = URL.createObjectURL(new Blob([csv], { type: "text/csv" }));
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(url);
+}
 
 interface MembersViewProps {
   members: Member[];
@@ -36,11 +48,17 @@ export default function MembersView({
   activeBranch,
   simulatedRole,
 }: MembersViewProps) {
+  const INITIAL_DEPARTMENTS = useDepartments();
+  const INITIAL_BUS_LINES = useBusLines();
   const [searchTerm, setSearchTerm] = useState("");
   const [filterBranch, setFilterBranch] = useState<Branch | "all">("all");
   const [filterLevel, setFilterLevel] = useState<CommunityLevel | "all">("all");
   const [filterPastoralCursus, setFilterPastoralCursus] = useState<PastoralCursus | "all">("all");
   const [filterDept, setFilterDept] = useState<string>("all");
+  const [filterFunction, setFilterFunction] = useState<string>("all");
+  const [filterIntegration, setFilterIntegration] = useState<string>("all");
+  const [filterBaptism, setFilterBaptism] = useState<string>("all");
+  const [filterRed, setFilterRed] = useState(false);
   const [viewMode, setViewMode] = useState<"grid" | "list">("grid");
   const [selectedMember, setSelectedMember] = useState<Member | null>(null);
   const [showFormModal, setShowFormModal] = useState(false);
@@ -68,12 +86,29 @@ export default function MembersView({
   const [baptismStatus, setBaptismStatus] = useState<"Non baptisé" | "Baptisé">(
     "Non baptisé",
   );
+  const [baptismDate, setBaptismDate] = useState("");
+  const [baptismViaDepartment, setBaptismViaDepartment] = useState(false);
   const [deptName, setDeptName] = useState("dept_louange");
   const [deptRole, setDeptRole] = useState<
     "Responsable" | "Adjoint" | "Membre" | "Capitaine de Bus"
   >("Membre");
 
   const isChurch = activeBranch === "church";
+
+  // "Au rouge": integration reception/En attente past the 7-day threshold.
+  // ponytail: reuses the integration-delay rule used app-wide; revisit if "au rouge" gains its own flag.
+  const isRed = (m: Member) =>
+    m.integrationState === "En attente" &&
+    !!m.integrationDateRegistered &&
+    new Date(m.integrationDateRegistered).getTime() < Date.now() - 7 * 24 * 60 * 60 * 1000;
+
+  // Potential duplicates by phone (the spec's "dédoublonnage" signal).
+  const seenPhones = new Set<string>();
+  const dupPhones = new Set<string>();
+  members.forEach((m) => {
+    if (seenPhones.has(m.phone)) dupPhones.add(m.phone);
+    else seenPhones.add(m.phone);
+  });
 
   // Filter logic
   const filteredMembers = members
@@ -95,8 +130,15 @@ export default function MembersView({
 
       const matchesDept =
         filterDept === "all" || Object.keys(m.departments).includes(filterDept);
+      const matchesFunction =
+        filterFunction === "all" || Object.values(m.departments).includes(filterFunction as any);
+      const matchesIntegration =
+        filterIntegration === "all" || m.integrationState === filterIntegration;
+      const matchesBaptism =
+        filterBaptism === "all" || m.baptismStatus === filterBaptism;
+      const matchesRed = !filterRed || isRed(m);
 
-      return matchesSearch && matchesBranch && matchesLevel && matchesPastoralCursus && matchesDept;
+      return matchesSearch && matchesBranch && matchesLevel && matchesPastoralCursus && matchesDept && matchesFunction && matchesIntegration && matchesBaptism && matchesRed;
     })
     .sort((a, b) => {
       // Sort alphabetically by last name, then first name
@@ -128,6 +170,8 @@ export default function MembersView({
     setLevel("Stagiaire");
     setPastoralCursus("Aucun");
     setBaptismStatus("Non baptisé");
+    setBaptismDate("");
+    setBaptismViaDepartment(false);
     setDeptName("dept_louange");
     setDeptRole("Membre");
     setShowFormModal(true);
@@ -152,6 +196,8 @@ export default function MembersView({
     setLevel(member.level);
     setPastoralCursus(member.pastoralCursus);
     setBaptismStatus(member.baptismStatus);
+    setBaptismDate(member.baptismDate ?? "");
+    setBaptismViaDepartment(member.baptismViaDepartment ?? false);
 
     // Get first department key as default
     const firstDept = Object.keys(member.departments)[0] || "dept_louange";
@@ -198,6 +244,8 @@ export default function MembersView({
         level,
         pastoralCursus,
         baptismStatus,
+        baptismDate: baptismStatus === "Baptisé" ? baptismDate || undefined : undefined,
+        baptismViaDepartment: baptismStatus === "Baptisé" ? baptismViaDepartment : undefined,
         departments: updatedDepartments,
         hasPassedToBossForm: true,
       };
@@ -219,6 +267,8 @@ export default function MembersView({
         level,
         pastoralCursus,
         baptismStatus,
+        baptismDate: baptismStatus === "Baptisé" ? baptismDate || undefined : undefined,
+        baptismViaDepartment: baptismStatus === "Baptisé" ? baptismViaDepartment : undefined,
         departments: updatedDepartments,
         entryDate: new Date().toISOString().split("T")[0],
         hasPassedToBossForm: true,
@@ -327,6 +377,60 @@ export default function MembersView({
               </option>
             ))}
           </select>
+
+          {/* Function filter */}
+          <select
+            id="member-filter-function"
+            value={filterFunction}
+            onChange={(e) => setFilterFunction(e.target.value)}
+            className="border border-bc-border rounded-full text-xs py-2 px-3 bg-white focus:outline-none focus:border-bc-green"
+          >
+            <option value="all">Toutes les fonctions</option>
+            <option value="Responsable">Responsable</option>
+            <option value="Adjoint">Adjoint</option>
+            <option value="Membre">Membre</option>
+            <option value="Capitaine de Bus">Capitaine de Bus</option>
+            <option value="Responsable de Zone">Responsable de Zone</option>
+            <option value="Responsable de Commune">Responsable de Commune</option>
+          </select>
+
+          {/* Integration state filter */}
+          <select
+            id="member-filter-integration"
+            value={filterIntegration}
+            onChange={(e) => setFilterIntegration(e.target.value)}
+            className="border border-bc-border rounded-full text-xs py-2 px-3 bg-white focus:outline-none focus:border-bc-green"
+          >
+            <option value="all">Tout état d'intégration</option>
+            <option value="En attente">En attente</option>
+            <option value="Suivi">Suivi</option>
+            <option value="Intégré">Intégré</option>
+          </select>
+
+          {/* Baptism filter */}
+          <select
+            id="member-filter-baptism"
+            value={filterBaptism}
+            onChange={(e) => setFilterBaptism(e.target.value)}
+            className="border border-bc-border rounded-full text-xs py-2 px-3 bg-white focus:outline-none focus:border-bc-green"
+          >
+            <option value="all">Tout statut baptême</option>
+            <option value="Baptisé">Baptisé</option>
+            <option value="Non baptisé">Non baptisé</option>
+          </select>
+
+          {/* Au rouge toggle */}
+          <button
+            id="member-filter-red"
+            onClick={() => setFilterRed((v) => !v)}
+            className={`rounded-full text-xs py-2 px-3 font-bold border transition-colors ${
+              filterRed
+                ? "bg-red-500 text-white border-red-500"
+                : "bg-white text-red-500 border-bc-border hover:border-red-300"
+            }`}
+          >
+            ● Au rouge
+          </button>
         </div>
 
         {/* Action Button & View Toggle */}
@@ -347,6 +451,26 @@ export default function MembersView({
               <List size={16} />
             </button>
           </div>
+
+          <button
+            id="member-export-btn"
+            onClick={() =>
+              downloadCsv(
+                `membres-${new Date().toISOString().split("T")[0]}.csv`,
+                [
+                  ["nom", "prenom", "telephone", "email", "branche", "niveau", "cursus", "bapteme", "integration"],
+                  ...filteredMembers.map((m) => [
+                    m.lastName, m.firstName, m.phone, m.email ?? "", m.branch, m.level,
+                    m.pastoralCursus, m.baptismStatus, m.integrationState ?? "",
+                  ]),
+                ],
+              )
+            }
+            className="px-4 py-2.5 rounded-full font-ui font-bold text-xs text-bc-text border border-bc-border bg-white hover:bg-bc-canvas flex items-center gap-1.5 min-h-[48px]"
+          >
+            <Download size={16} />
+            <span className="hidden sm:inline">Export</span>
+          </button>
 
           {["Pasteur", "Admin", "Responsable", "Super Admin"].includes(
             simulatedRole,
@@ -377,6 +501,11 @@ export default function MembersView({
             Femmes : {filteredMembers.filter(m => m.gender === 'F').length}
           </div>
         </div>
+        {dupPhones.size > 0 && (
+          <span className="text-[11px] font-bold text-orange-600 bg-orange-50 border border-orange-200 px-3 py-1.5 rounded-full">
+            ⚠ {dupPhones.size} doublon(s) potentiel(s) (même téléphone)
+          </span>
+        )}
       </div>
 
       {/* Grid or List of Members */}
@@ -393,7 +522,9 @@ export default function MembersView({
               <div
                 key={member.id}
                 onClick={() => open360View(member)}
-                className="bg-white border border-bc-border shadow-sm rounded-2xl p-4 hover:shadow-md transition-shadow flex flex-col justify-between cursor-pointer group"
+                className={`bg-white shadow-sm rounded-2xl p-4 hover:shadow-md transition-shadow flex flex-col justify-between cursor-pointer group border ${
+                  isRed(member) ? "border-red-400 ring-1 ring-red-200" : "border-bc-border"
+                }`}
               >
                 <div>
                   <div className="flex justify-between items-start">
@@ -539,11 +670,16 @@ export default function MembersView({
                   {filteredMembers.map((member) => (
                     <tr
                       key={member.id}
-                      className="hover:bg-bc-canvas transition-colors group cursor-pointer"
+                      className={`hover:bg-bc-canvas transition-colors group cursor-pointer ${
+                        isRed(member) ? "bg-red-50/40" : ""
+                      }`}
                       onClick={() => open360View(member)}
                     >
                       <td className="px-4 py-3">
                         <div className="flex items-center space-x-3">
+                          {isRed(member) && (
+                            <span className="w-2 h-2 rounded-full bg-red-500 shrink-0" title="Au rouge" />
+                          )}
                           <div
                             className={`w-8 h-8 shrink-0 rounded-full font-ui font-black flex items-center justify-center border-2 text-[9px] ${
                               member.branch === "church"
@@ -659,6 +795,7 @@ export default function MembersView({
           member={selectedMember}
           onClose={() => setShowMember360(false)}
           simulatedRole={simulatedRole}
+          onUpdate={(m) => { onUpdateMember(m); setSelectedMember(m); }}
           onEdit={(m) => {
             setShowMember360(false);
             openEditForm(m);
@@ -987,6 +1124,41 @@ export default function MembersView({
                       <option value="Capitaine de Bus">Capitaine de Bus</option>
                     </select>
                   </div>
+                </div>
+              </div>
+
+              {/* Baptême (§7) — statut + date + via département / hors process */}
+              <div className="border-t border-bc-border pt-4">
+                <label className="block text-[10px] font-bold text-bc-text-secondary mb-2">
+                  Baptême
+                </label>
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  <select
+                    value={baptismStatus}
+                    onChange={(e) => setBaptismStatus(e.target.value as "Non baptisé" | "Baptisé")}
+                    className="w-full border border-bc-border rounded-full px-3 py-1.5 text-xs bg-white"
+                  >
+                    <option value="Non baptisé">Non baptisé</option>
+                    <option value="Baptisé">Baptisé</option>
+                  </select>
+                  {baptismStatus === "Baptisé" && (
+                    <>
+                      <input
+                        type="date"
+                        value={baptismDate}
+                        onChange={(e) => setBaptismDate(e.target.value)}
+                        className="w-full border border-bc-border rounded-full px-3 py-1.5 text-xs bg-white"
+                      />
+                      <select
+                        value={baptismViaDepartment ? "dep" : "hors"}
+                        onChange={(e) => setBaptismViaDepartment(e.target.value === "dep")}
+                        className="w-full border border-bc-border rounded-full px-3 py-1.5 text-xs bg-white"
+                      >
+                        <option value="dep">Via dép. Baptême</option>
+                        <option value="hors">Hors process</option>
+                      </select>
+                    </>
+                  )}
                 </div>
               </div>
 

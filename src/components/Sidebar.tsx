@@ -1,12 +1,13 @@
 import React, { useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Branch } from '../types';
-import { 
-  LayoutDashboard, Users, Grid, LayoutList, Bus, Calendar, 
-  Activity, Heart, GraduationCap, Shield, UserCog, Settings, 
-  FormInput, History, User, X
+import {
+  LayoutDashboard, Users, Grid, LayoutList, Bus, Calendar,
+  Activity, Heart, GraduationCap, Shield, UserCog, Settings,
+  FormInput, History, User, X, UserPlus
 } from 'lucide-react';
 import { useMediaQuery } from '../hooks/useMediaQuery';
+import { useDepartments } from '../data';
 
 interface SidebarProps {
   collapsed: boolean;
@@ -16,19 +17,24 @@ interface SidebarProps {
   setSimulatedRole: (role: string) => void;
   activeTab: string;
   setActiveTab: (tab: string) => void;
+  selectedDept: string | null;
+  setSelectedDept: (id: string | null) => void;
 }
 
-export default function Sidebar({ 
-  collapsed, 
-  setCollapsed, 
+export default function Sidebar({
+  collapsed,
+  setCollapsed,
   activeBranch,
   simulatedRole,
   setSimulatedRole,
   activeTab,
-  setActiveTab
+  setActiveTab,
+  selectedDept,
+  setSelectedDept
 }: SidebarProps) {
   const isChurch = activeBranch === 'church';
   const isDesktop = useMediaQuery('(min-width: 1024px)');
+  const departments = useDepartments();
 
   // On desktop, we might want to respect the collapsed state from the parent.
   // On mobile, 'collapsed' actually means 'drawer is closed' and !collapsed means 'drawer is open'.
@@ -46,6 +52,7 @@ export default function Sidebar({
     { id: 'members', label: 'Membres', icon: Users, roles: ['Pasteur', 'Ministre', 'Responsable', 'Coach', 'Leader'] },
     { id: 'ministeres', label: 'Ministères', icon: Grid, roles: ['Pasteur', 'Ministre'] },
     { id: 'departments', label: 'Départements', icon: LayoutList, roles: ['Pasteur', 'Ministre', 'Responsable', 'Coach', 'Leader', 'ADN', 'Portier', 'GDC', 'Intégration'] },
+    { id: 'integration', label: 'Intégration', icon: UserPlus, roles: ['Pasteur', 'Ministre', 'Responsable', 'Coach', 'Leader', 'ADN', 'Portier', 'GDC', 'Intégration'] },
     { id: 'bloombus', label: 'Bloom Bus', icon: Bus, roles: ['Pasteur', 'Ministre', 'Responsable', 'Coach', 'Capitaine'] },
     { id: 'events', label: 'Cultes & Événements', icon: Calendar, roles: ['Pasteur', 'Ministre', 'Responsable', 'ADN', 'Portier', 'GDC'] },
     { id: 'projects', label: 'Projets', icon: Activity, roles: ['Pasteur', 'Ministre', 'Responsable'] },
@@ -111,12 +118,12 @@ export default function Sidebar({
             const inactiveClass = 'text-bc-text-secondary hover:bg-bc-canvas hover:text-bc-text';
             
             return (
+              <React.Fragment key={item.id}>
               <button
-                key={item.id}
                 id={`sidebar-tab-${item.id}`}
                 onClick={() => {
                   setActiveTab(item.id);
-                  if (!isDesktop) setCollapsed(true);
+                  if (!isDesktop && item.id !== 'departments') setCollapsed(true);
                 }}
                 className={`w-full flex items-center min-h-[48px] space-x-3.5 px-3 py-2.5 rounded-full text-left transition-colors relative group ${
                   isActive ? 'text-bc-text font-bold' : inactiveClass
@@ -136,6 +143,24 @@ export default function Sidebar({
                   </span>
                 )}
               </button>
+
+              {/* Liste plate des départements (sous l'item Départements) */}
+              {item.id === 'departments' && isActive && (!collapsed || !isDesktop) && (
+                <div className="mt-1 mb-2 ml-4 pl-3 border-l-2 border-bc-border space-y-0.5">
+                  {departments.map(d => (
+                    <button
+                      key={d.id}
+                      onClick={() => { setSelectedDept(d.id); setActiveTab('departments'); if (!isDesktop) setCollapsed(true); }}
+                      className={`w-full text-left px-2 py-1.5 rounded-lg text-[11px] transition-colors truncate ${
+                        selectedDept === d.id ? 'bg-bc-green text-white font-bold' : 'text-bc-text-secondary hover:bg-bc-canvas'
+                      }`}
+                    >
+                      {d.name}
+                    </button>
+                  ))}
+                </div>
+              )}
+              </React.Fragment>
             );
           })}
         </div>
