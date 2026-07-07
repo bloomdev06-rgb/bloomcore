@@ -9,3 +9,6 @@ coverage/
 
 # Generated knowledge graph (regenerable via /graphify)
 graphify-out/
+
+# BloomCore API's local SQLite store (seeded/regenerable, see server/seed.ts)
+server/*.db

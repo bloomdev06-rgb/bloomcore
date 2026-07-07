@@ -1,46 +1,25 @@
-import React, { useState, useEffect } from 'react';
-import { Branch } from '../types';
-import { load, save } from '../data';
+import React from 'react';
+import { Branch, AppSettings, NotifChannels, NotifTrigger } from '../types';
 import { Settings, Bell, Clock, Globe, Palette, Check, Smartphone, Mail, MessageSquare, Phone } from 'lucide-react';
 
 interface SettingsViewProps {
   activeBranch: Branch;
   simulatedRole: string;
+  settings: AppSettings;
+  onUpdateSettings: (s: AppSettings) => void;
 }
 
-type Channels = { app: boolean; email: boolean; sms: boolean; whatsapp: boolean };
-interface Trigger { id: string; label: string; delayDays: number; channels: Channels }
-interface AppSettings {
-  branches: { church: { enabled: boolean; accent: string }; light: { enabled: boolean; accent: string } };
-  triggers: Trigger[];
-  timezone: string;
-  language: string;
-  periods: { activeMemberMonths: number; weekStart: string; fiscalStart: string };
-}
-
-const DEFAULT_SETTINGS: AppSettings = {
-  branches: {
-    church: { enabled: true, accent: 'green' },
-    light: { enabled: true, accent: 'orange' },
-  },
-  triggers: [
-    { id: 'integ1', label: 'Intégration — Étape 1 (Réception)', delayDays: 3, channels: { app: true, email: true, sms: false, whatsapp: false } },
-    { id: 'integ2', label: 'Intégration — Étape 2 (Au rouge)', delayDays: 7, channels: { app: true, email: true, sms: true, whatsapp: false } },
-    { id: 'birthday', label: 'Anniversaire d\'un membre', delayDays: 0, channels: { app: true, email: false, sms: false, whatsapp: true } },
-    { id: 'absence', label: 'Absence culte prolongée', delayDays: 14, channels: { app: true, email: false, sms: true, whatsapp: false } },
-  ],
-  timezone: 'Africa/Abidjan',
-  language: 'fr',
-  periods: { activeMemberMonths: 1, weekStart: 'Lundi', fiscalStart: 'Janvier' },
-};
-
+// P5.4 — les 6 couleurs de marque réelles (index.css), pas les 4 précédentes
+// (dont "vert" qui est la couleur de chrome de l'app, pas un accent de branche).
 const ACCENTS: { key: string; label: string; className: string }[] = [
-  { key: 'green', label: 'Vert', className: 'bg-bc-green' },
-  { key: 'orange', label: 'Orange', className: 'bg-bc-orange' },
-  { key: 'purple', label: 'Violet', className: 'bg-bc-purple' },
   { key: 'cerulean', label: 'Céruléen', className: 'bg-bc-cerulean' },
+  { key: 'orange', label: 'Orange', className: 'bg-bc-orange' },
+  { key: 'fushia', label: 'Fushia', className: 'bg-bc-fushia' },
+  { key: 'turquoise', label: 'Turquoise', className: 'bg-bc-turquoise' },
+  { key: 'anis', label: 'Anis', className: 'bg-bc-anis' },
+  { key: 'purple', label: 'Violet', className: 'bg-bc-purple' },
 ];
-const CHANNELS: { key: keyof Channels; label: string; icon: any }[] = [
+const CHANNELS: { key: keyof NotifChannels; label: string; icon: any }[] = [
   { key: 'app', label: 'App', icon: Smartphone },
   { key: 'email', label: 'Email', icon: Mail },
   { key: 'sms', label: 'SMS', icon: MessageSquare },
@@ -48,16 +27,16 @@ const CHANNELS: { key: keyof Channels; label: string; icon: any }[] = [
 ];
 const TIMEZONES = ['Africa/Abidjan', 'Africa/Lagos', 'Africa/Kinshasa', 'Europe/Paris', 'America/New_York', 'UTC'];
 
-export default function SettingsView({ activeBranch, simulatedRole }: SettingsViewProps) {
-  const canEdit = ['Pasteur', 'Admin', 'Super Admin'].includes(simulatedRole);
-  const [settings, setSettings] = useState<AppSettings>(() => load('bc_settings', DEFAULT_SETTINGS));
-  useEffect(() => { save('bc_settings', settings); }, [settings]);
+export default function SettingsView({ activeBranch, simulatedRole, settings, onUpdateSettings }: SettingsViewProps) {
+  // §11 — accès à l'onglet déjà restreint à Super Admin/Admin/Pasteur Principal (view_settings) ;
+  // 'Pasteur' seul n'atteint jamais cet écran, donc pas de rôle mort dans cette liste.
+  const canEdit = ['Admin', 'Super Admin', 'Pasteur Principal'].includes(simulatedRole);
 
-  const update = (patch: Partial<AppSettings>) => setSettings(prev => ({ ...prev, ...patch }));
-  const updateTrigger = (id: string, patch: Partial<Trigger>) =>
-    setSettings(prev => ({ ...prev, triggers: prev.triggers.map(t => (t.id === id ? { ...t, ...patch } : t)) }));
-  const toggleChannel = (id: string, ch: keyof Channels) =>
-    setSettings(prev => ({ ...prev, triggers: prev.triggers.map(t => (t.id === id ? { ...t, channels: { ...t.channels, [ch]: !t.channels[ch] } } : t)) }));
+  const update = (patch: Partial<AppSettings>) => onUpdateSettings({ ...settings, ...patch });
+  const updateTrigger = (id: string, patch: Partial<NotifTrigger>) =>
+    onUpdateSettings({ ...settings, triggers: settings.triggers.map(t => (t.id === id ? { ...t, ...patch } : t)) });
+  const toggleChannel = (id: string, ch: keyof NotifChannels) =>
+    onUpdateSettings({ ...settings, triggers: settings.triggers.map(t => (t.id === id ? { ...t, channels: { ...t.channels, [ch]: !t.channels[ch] } } : t)) });
 
   return (
     <div className="space-y-6">
@@ -87,9 +66,15 @@ export default function SettingsView({ activeBranch, simulatedRole }: SettingsVi
                 <button
                   disabled={!canEdit}
                   onClick={() => update({ branches: { ...settings.branches, [b]: { ...settings.branches[b], enabled: !settings.branches[b].enabled } } })}
-                  className={`w-11 h-6 rounded-full p-1 transition-colors disabled:opacity-50 ${settings.branches[b].enabled ? 'bg-bc-green' : 'bg-slate-300'}`}
+                  role="switch"
+                  aria-checked={settings.branches[b].enabled}
+                  aria-label={`Activer ${b === 'church' ? 'Bloom Church' : 'Bloom Light'}`}
+                  // P5.5 — p-3 -m-3 étend la cible tactile à 48px sans agrandir le switch visuel
+                  className="p-3 -m-3 rounded-full disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-bc-green focus-visible:ring-offset-2 active-scale"
                 >
-                  <span className={`block w-4 h-4 rounded-full bg-white transition-transform ${settings.branches[b].enabled ? 'translate-x-5' : ''}`} />
+                  <span className={`block w-11 h-6 rounded-full p-1 transition-colors ${settings.branches[b].enabled ? 'bg-bc-green' : 'bg-bc-border'}`}>
+                    <span className={`block w-4 h-4 rounded-full bg-white transition-transform ${settings.branches[b].enabled ? 'translate-x-5' : ''}`} />
+                  </span>
                 </button>
               </div>
               <p className="text-[10px] uppercase tracking-wide text-bc-text-secondary font-bold mb-2">Couleur d'accent</p>
@@ -100,9 +85,13 @@ export default function SettingsView({ activeBranch, simulatedRole }: SettingsVi
                     disabled={!canEdit}
                     onClick={() => update({ branches: { ...settings.branches, [b]: { ...settings.branches[b], accent: a.key } } })}
                     title={a.label}
-                    className={`w-7 h-7 rounded-full ${a.className} flex items-center justify-center ring-2 ring-offset-2 transition-all disabled:opacity-50 ${settings.branches[b].accent === a.key ? 'ring-bc-text' : 'ring-transparent'}`}
+                    aria-label={a.label}
+                    aria-pressed={settings.branches[b].accent === a.key}
+                    className="p-2.5 -m-2.5 rounded-full disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-bc-green focus-visible:ring-offset-2 active-scale"
                   >
-                    {settings.branches[b].accent === a.key && <Check size={13} className="text-white" />}
+                    <span className={`w-7 h-7 rounded-full ${a.className} flex items-center justify-center ring-2 ring-offset-2 transition-all ${settings.branches[b].accent === a.key ? 'ring-bc-text' : 'ring-transparent'}`}>
+                      {settings.branches[b].accent === a.key && <Check size={13} className="text-white" />}
+                    </span>
                   </button>
                 ))}
               </div>
@@ -143,7 +132,7 @@ export default function SettingsView({ activeBranch, simulatedRole }: SettingsVi
                       key={key}
                       disabled={!canEdit}
                       onClick={() => toggleChannel(t.id, key)}
-                      className={`px-3 py-1.5 rounded-full text-xs font-bold flex items-center gap-1.5 border transition-colors disabled:opacity-50 ${on ? 'bg-bc-green/10 border-bc-green/30 text-bc-text' : 'bg-slate-50 border-bc-border text-slate-400'}`}
+                      className={`px-3 py-1.5 rounded-full text-xs font-bold flex items-center gap-1.5 border transition-colors disabled:opacity-50 active-scale ${on ? 'bg-bc-green/10 border-bc-green/30 text-bc-text' : 'bg-bc-canvas border-bc-border text-bc-text-secondary'}`}
                     >
                       <Icon size={13} /> {label}
                     </button>
@@ -164,7 +153,7 @@ export default function SettingsView({ activeBranch, simulatedRole }: SettingsVi
           </div>
           <div className="space-y-4">
             <div>
-              <label className="text-xs font-bold text-slate-700 block mb-1">Fuseau horaire</label>
+              <label className="text-xs font-bold text-bc-text-secondary block mb-1">Fuseau horaire</label>
               <select
                 disabled={!canEdit}
                 value={settings.timezone}
@@ -175,7 +164,7 @@ export default function SettingsView({ activeBranch, simulatedRole }: SettingsVi
               </select>
             </div>
             <div>
-              <label className="text-xs font-bold text-slate-700 block mb-1">Langue de l'interface</label>
+              <label className="text-xs font-bold text-bc-text-secondary block mb-1">Langue de l'interface</label>
               <select
                 disabled={!canEdit}
                 value={settings.language}
@@ -197,7 +186,7 @@ export default function SettingsView({ activeBranch, simulatedRole }: SettingsVi
           </div>
           <div className="space-y-4">
             <div>
-              <label className="text-xs font-bold text-slate-700 block mb-1">Définition "Membre Actif"</label>
+              <label className="text-xs font-bold text-bc-text-secondary block mb-1">Définition "Membre Actif"</label>
               <select
                 disabled={!canEdit}
                 value={settings.periods.activeMemberMonths}
@@ -211,7 +200,7 @@ export default function SettingsView({ activeBranch, simulatedRole }: SettingsVi
             </div>
             <div className="grid grid-cols-2 gap-3">
               <div>
-                <label className="text-xs font-bold text-slate-700 block mb-1">Début de semaine</label>
+                <label className="text-xs font-bold text-bc-text-secondary block mb-1">Début de semaine</label>
                 <select
                   disabled={!canEdit}
                   value={settings.periods.weekStart}
@@ -223,7 +212,7 @@ export default function SettingsView({ activeBranch, simulatedRole }: SettingsVi
                 </select>
               </div>
               <div>
-                <label className="text-xs font-bold text-slate-700 block mb-1">Début d'exercice</label>
+                <label className="text-xs font-bold text-bc-text-secondary block mb-1">Début d'exercice</label>
                 <select
                   disabled={!canEdit}
                   value={settings.periods.fiscalStart}

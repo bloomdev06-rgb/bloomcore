@@ -1,13 +1,14 @@
 import React, { useState } from 'react';
-import { Branch } from '../types';
-import { FormInput, FileEdit, Plus, ArrowLeft, Trash2, ChevronUp, ChevronDown, X } from 'lucide-react';
+import { Branch, FieldType, FormDef } from '../types';
+import { FormInput, FileEdit, Plus, ArrowLeft, Trash2, ChevronUp, ChevronDown, X, ShieldAlert } from 'lucide-react';
 
 interface FormBuilderViewProps {
   activeBranch: Branch;
   simulatedRole: string;
+  forms: FormDef[];
+  onUpdateForms: (forms: FormDef[]) => void;
 }
 
-type FieldType = 'text' | 'number' | 'choice' | 'scale' | 'checkbox' | 'date';
 const FIELD_TYPES: { value: FieldType; label: string }[] = [
   { value: 'text', label: 'Texte' },
   { value: 'number', label: 'Nombre' },
@@ -17,48 +18,20 @@ const FIELD_TYPES: { value: FieldType; label: string }[] = [
   { value: 'date', label: 'Date' },
 ];
 
-interface Field { id: string; label: string; type: FieldType; required: boolean; }
-interface Step { id: string; label: string; validator: string; }
-interface FormDef { id: string; name: string; scope: string; version: number; kind: 'form' | 'steps'; fields: Field[]; steps?: Step[]; }
-
-// ponytail: seeded in-session with representative fields; back the collection with ./data + real
-// FormDefinition versions when the backend lands. Editor logic below is the real deliverable.
-const genFields = (labels: string[]): Field[] =>
-  labels.map((label, i) => ({ id: `f${i}`, label, type: 'text', required: i === 0 }));
-
-const INITIAL_FORMS: FormDef[] = [
-  { id: 'fd_nouveau', name: 'Formulaire Nouveau', scope: 'ADN', version: 1, kind: 'form', fields: genFields(['Nom', 'Prénom', 'Téléphone', 'Genre', 'Oui à Jésus']) },
-  { id: 'fd_membre', name: 'Formulaire Membre', scope: 'Responsable', version: 2, kind: 'form', fields: genFields(['Nom', 'Prénom', 'Téléphone', 'Email', 'Date de naissance', 'Commune']) },
-  { id: 'fd_service', name: 'Rapport de service', scope: 'Standard', version: 1, kind: 'form', fields: genFields(['Serviteurs présents', 'Observation', 'Culte / Événement']) },
-  { id: 'fd_rsa', name: 'Rapport RSA', scope: 'Standard', version: 1, kind: 'form', fields: genFields(['Actions confiées', 'Statut', 'Observation']) },
-  { id: 'fd_bus_sante', name: 'Rapport Bloom Bus (Santé)', scope: 'Capitaine / Leader', version: 1, kind: 'form', fields: [
-    { id: 'f0', label: 'Vie spirituelle', type: 'scale', required: true },
-    { id: 'f1', label: 'Vie sociale', type: 'scale', required: true },
-    { id: 'f2', label: 'Santé physique', type: 'scale', required: true },
-    { id: 'f3', label: 'Situation financière', type: 'scale', required: true },
-    { id: 'f4', label: 'Présence au culte', type: 'scale', required: true },
-  ] },
-  { id: 'fd_adn', name: 'Rapport ADN (Comptage)', scope: 'ADN', version: 1, kind: 'form', fields: [
-    { id: 'f0', label: 'Nouveaux (H)', type: 'number', required: true },
-    { id: 'f1', label: 'Nouveaux (F)', type: 'number', required: true },
-    { id: 'f2', label: 'OJ (H)', type: 'number', required: true },
-    { id: 'f3', label: 'OJ (F)', type: 'number', required: true },
-  ] },
-  { id: 'fd_bapteme', name: 'Parcours Baptême', scope: 'Parcours à étapes', version: 1, kind: 'steps', fields: [], steps: [
-    { id: 's0', label: 'Inscription au parcours', validator: 'Responsable' },
-    { id: 's1', label: 'Suivi des 3 cours', validator: 'Leader' },
-    { id: 's2', label: 'Entretien de baptême', validator: 'Responsable' },
-    { id: 's3', label: 'Baptême physique', validator: 'Pasteur' },
-  ] },
-];
-
-export default function FormBuilderView({ activeBranch, simulatedRole }: FormBuilderViewProps) {
-  const [forms, setForms] = useState<FormDef[]>(INITIAL_FORMS);
+// ponytail: P1.4 — persisted (bc_forms) and wired for fd_bus_sante/fd_adn: BloomBusView and
+// EventsView now read those two forms' field labels live instead of hardcoding them. The other
+// FormDefs (fd_nouveau/fd_membre/fd_service/fd_rsa/fd_bapteme) stay a documentary catalog — their
+// real modals already have richer custom widgets (multi-select members, event pickers, repeatable
+// lists) that don't map onto this simple Field schema; building those P2.9 field types into the
+// builder is the next step, out of scope here. Reordering/adding/removing fields on the two wired
+// forms only affects the builder's own display — the live modals keep fixed input positions bound
+// to fixed KPI/report fields, so only label text is actually consumed downstream.
+export default function FormBuilderView({ activeBranch, simulatedRole, forms, onUpdateForms }: FormBuilderViewProps) {
   const [editId, setEditId] = useState<string | null>(null);
   const editing = forms.find((f) => f.id === editId) ?? null;
 
   const update = (id: string, patch: Partial<FormDef>) =>
-    setForms((prev) => prev.map((f) => (f.id === id ? { ...f, ...patch, version: f.version + 1 } : f)));
+    onUpdateForms(forms.map((f) => (f.id === id ? { ...f, ...patch, version: f.version + 1 } : f)));
 
   const move = <T,>(arr: T[], i: number, dir: -1 | 1): T[] => {
     const j = i + dir;
@@ -67,6 +40,20 @@ export default function FormBuilderView({ activeBranch, simulatedRole }: FormBui
     [next[i], next[j]] = [next[j], next[i]];
     return next;
   };
+
+  // PROFILS-INTERFACES.md §1.2 — Constructeur de formulaires : section ADMINISTRATION, réservée
+  // à la ligne d'administration technique/gouvernance (pas aux profils opérationnels/terrain).
+  if (!['Super Admin', 'Admin', 'Pasteur Principal'].includes(simulatedRole)) {
+    return (
+      <div className="p-6 md:p-8 flex flex-col items-center justify-center text-center min-h-[60vh]">
+        <ShieldAlert size={40} className="text-bc-warmgrey mb-4" />
+        <h2 className="font-ui font-bold text-bc-text text-lg mb-1">Accès restreint</h2>
+        <p className="text-sm text-bc-text-secondary max-w-sm">
+          Le constructeur de formulaires est réservé à l'administration. Votre profil ({simulatedRole}) n'y a pas accès.
+        </p>
+      </div>
+    );
+  }
 
   // ---------- Field / Step editor ----------
   if (editing) {
@@ -102,15 +89,15 @@ export default function FormBuilderView({ activeBranch, simulatedRole }: FormBui
                   <input type="checkbox" checked={field.required} onChange={(e) => update(editing.id, { fields: editing.fields.map((f) => (f.id === field.id ? { ...f, required: e.target.checked } : f)) })} />
                   Requis
                 </label>
-                <button onClick={() => update(editing.id, { fields: move(editing.fields, i, -1) })} className="p-1 text-bc-text-secondary hover:text-bc-text"><ChevronUp size={14} /></button>
-                <button onClick={() => update(editing.id, { fields: move(editing.fields, i, 1) })} className="p-1 text-bc-text-secondary hover:text-bc-text"><ChevronDown size={14} /></button>
-                <button onClick={() => update(editing.id, { fields: editing.fields.filter((f) => f.id !== field.id) })} className="p-1 text-bc-text-secondary hover:text-red-500"><Trash2 size={14} /></button>
+                <button onClick={() => update(editing.id, { fields: move(editing.fields, i, -1) })} className="p-1 text-bc-text-secondary hover:text-bc-text active-scale"><ChevronUp size={14} /></button>
+                <button onClick={() => update(editing.id, { fields: move(editing.fields, i, 1) })} className="p-1 text-bc-text-secondary hover:text-bc-text active-scale"><ChevronDown size={14} /></button>
+                <button onClick={() => update(editing.id, { fields: editing.fields.filter((f) => f.id !== field.id) })} className="p-1 text-bc-text-secondary hover:text-bc-danger active-scale"><Trash2 size={14} /></button>
               </div>
             ))}
             {editing.fields.length === 0 && <p className="text-xs text-bc-text-secondary italic">Aucun champ.</p>}
             <button
               onClick={() => update(editing.id, { fields: [...editing.fields, { id: `f${Date.now()}`, label: 'Nouveau champ', type: 'text', required: false }] })}
-              className="flex items-center gap-1.5 text-xs font-bold text-bc-green hover:underline mt-2"
+              className="flex items-center gap-1.5 text-xs font-bold text-bc-green hover:underline mt-2 active-scale"
             >
               <Plus size={14} /> Ajouter un champ
             </button>
@@ -133,14 +120,14 @@ export default function FormBuilderView({ activeBranch, simulatedRole }: FormBui
                 >
                   {['Responsable', 'Adjoint', 'Coach', 'Leader', 'Pasteur', 'Ministre'].map((r) => <option key={r} value={r}>Valide : {r}</option>)}
                 </select>
-                <button onClick={() => update(editing.id, { steps: move(editing.steps ?? [], i, -1) })} className="p-1 text-bc-text-secondary hover:text-bc-text"><ChevronUp size={14} /></button>
-                <button onClick={() => update(editing.id, { steps: move(editing.steps ?? [], i, 1) })} className="p-1 text-bc-text-secondary hover:text-bc-text"><ChevronDown size={14} /></button>
-                <button onClick={() => update(editing.id, { steps: (editing.steps ?? []).filter((s) => s.id !== step.id) })} className="p-1 text-bc-text-secondary hover:text-red-500"><Trash2 size={14} /></button>
+                <button onClick={() => update(editing.id, { steps: move(editing.steps ?? [], i, -1) })} className="p-1 text-bc-text-secondary hover:text-bc-text active-scale"><ChevronUp size={14} /></button>
+                <button onClick={() => update(editing.id, { steps: move(editing.steps ?? [], i, 1) })} className="p-1 text-bc-text-secondary hover:text-bc-text active-scale"><ChevronDown size={14} /></button>
+                <button onClick={() => update(editing.id, { steps: (editing.steps ?? []).filter((s) => s.id !== step.id) })} className="p-1 text-bc-text-secondary hover:text-bc-danger active-scale"><Trash2 size={14} /></button>
               </div>
             ))}
             <button
               onClick={() => update(editing.id, { steps: [...(editing.steps ?? []), { id: `s${Date.now()}`, label: 'Nouvelle étape', validator: 'Responsable' }] })}
-              className="flex items-center gap-1.5 text-xs font-bold text-bc-green hover:underline mt-2"
+              className="flex items-center gap-1.5 text-xs font-bold text-bc-green hover:underline mt-2 active-scale"
             >
               <Plus size={14} /> Ajouter une étape
             </button>
@@ -177,7 +164,7 @@ export default function FormBuilderView({ activeBranch, simulatedRole }: FormBui
                   {form.kind === 'steps' ? `${(form.steps ?? []).length} étapes` : `${form.fields.length} champs`} · v{form.version}
                 </p>
               </div>
-              <button onClick={() => setEditId(form.id)} className="mt-4 w-full py-2.5 bg-bc-canvas border border-bc-border text-slate-700 font-bold text-xs rounded-xl hover:bg-slate-100 flex justify-center items-center gap-2 transition-colors">
+              <button onClick={() => setEditId(form.id)} className="mt-4 w-full py-2.5 bg-bc-canvas border border-bc-border text-bc-text-secondary font-bold text-xs rounded-xl hover:bg-bc-border/40 flex justify-center items-center gap-2 transition-colors active-scale">
                 <FileEdit size={14} /> Configurer
               </button>
             </div>

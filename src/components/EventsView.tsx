@@ -18,15 +18,50 @@ import {
   Building2
 } from 'lucide-react';
 import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts';
-import { Event, Branch, Report } from '../types';
+import { motion } from 'motion/react';
+import { staggerParent, staggerItem } from './ui/motion';
+import { Event, Branch, Report, Member, FormDef } from '../types';
+import { useProjects } from '../data';
+
+const RATINGS = [
+  { v: 1, label: 'Très mal' },
+  { v: 2, label: 'Mal' },
+  { v: 3, label: 'Moyen' },
+  { v: 4, label: 'Bien' },
+  { v: 5, label: 'Très bien' },
+];
+function RatingRow({ label, value, onChange }: { label: string; value: number; onChange: (v: number) => void }) {
+  return (
+    <div>
+      <label className="block text-[10px] font-bold text-bc-text mb-1.5">{label}</label>
+      <div className="grid grid-cols-5 gap-1.5">
+        {RATINGS.map(r => (
+          <button
+            key={r.v}
+            type="button"
+            onClick={() => onChange(r.v)}
+            className={`py-1.5 rounded-lg text-[10px] font-bold border transition-colors active:scale-95 ${value === r.v ? 'bg-bc-green text-white border-bc-green' : 'bg-white text-bc-text-secondary border-bc-border hover:bg-bc-canvas'}`}
+          >
+            {r.label}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+const INCIDENT_TYPES = ['Technique', 'Sécurité', 'Organisation', 'Autre'];
 
 interface EventsViewProps {
   events: Event[];
   reports?: Report[];
   onAddEvent: (event: Event) => void;
+  onUpdateEvent?: (event: Event) => void;
   onAddReport: (report: Report) => void;
   activeBranch: Branch;
   simulatedRole: string;
+  members?: Member[];
+  forms?: FormDef[];
 }
 
 const TYPE_LABEL: Record<Event['type'], string> = {
@@ -42,12 +77,23 @@ export default function EventsView({
   events,
   reports = [],
   onAddEvent,
+  onUpdateEvent,
   onAddReport,
   activeBranch,
-  simulatedRole
+  simulatedRole,
+  members = [],
+  forms = []
 }: EventsViewProps) {
+  // P1.4 — labels read live from FormBuilder's fd_adn FormDef, id-matched.
+  const adnForm = forms.find((f) => f.id === 'fd_adn');
+  const adnLabel = (fieldId: string, fallback: string) =>
+    adnForm?.fields.find((f) => f.id === fieldId)?.label ?? fallback;
   const [showAddEventModal, setShowAddEventModal] = useState(false);
   const [showCounterModal, setShowCounterModal] = useState(false);
+  const [presentServiteurs, setPresentServiteurs] = useState<string[]>([]);
+  const [filterType, setFilterType] = useState<'all' | Event['type']>('all');
+  const [filterProject, setFilterProject] = useState('all');
+  const toggleServiteur = (id: string) => setPresentServiteurs(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]);
   const [selectedEventId, setSelectedEventId] = useState<string | null>(null);
   const [viewMode, setViewMode] = useState<'list' | 'calendar'>('list');
 
@@ -58,20 +104,49 @@ export default function EventsView({
   const [eventScope, setEventScope] = useState<'church' | 'light' | 'both'>('church');
   const [eventOrganizer, setEventOrganizer] = useState('');
   const [eventProject, setEventProject] = useState('');
+  const [eventRecurring, setEventRecurring] = useState(false); // D3 — culte hebdomadaire
 
   // Counters State
   const [menPortiers, setMenPortiers] = useState(620);
   const [womenPortiers, setWomenPortiers] = useState(680);
+  const [onlinePresence, setOnlinePresence] = useState(0);
   const [newMenADN, setNewMenADN] = useState(15);
   const [newWomenADN, setNewWomenADN] = useState(18);
   const [ojMen, setOjMen] = useState(8);
   const [ojWomen, setOjWomen] = useState(12);
   const [offertory, setOffertory] = useState(350000);
 
+  // P2.6 — Rapport de culte, blocs Infos générales / Atmosphère / Incidents / Stats
+  const [predicateur, setPredicateur] = useState('');
+  const [theme, setTheme] = useState('');
+  const [officiant, setOfficiant] = useState('');
+  const [ferveurVal, setFerveurVal] = useState(3);
+  const [louangeVal, setLouangeVal] = useState(3);
+  const [appelVal, setAppelVal] = useState(3);
+  const [incidents, setIncidents] = useState<{ type: string; departments: string; details: string }[]>([]);
+  const [incidentType, setIncidentType] = useState(INCIDENT_TYPES[0]);
+  const [incidentDept, setIncidentDept] = useState('');
+  const [incidentDetails, setIncidentDetails] = useState('');
+  const [attendeesEnfants, setAttendeesEnfants] = useState(0);
+  const [culteRemarques, setCulteRemarques] = useState('');
+
+  const addIncident = () => {
+    if (!incidentDetails.trim()) return;
+    setIncidents(prev => [...prev, { type: incidentType, departments: incidentDept.trim(), details: incidentDetails.trim() }]);
+    setIncidentDept('');
+    setIncidentDetails('');
+  };
+  const removeIncident = (idx: number) => setIncidents(prev => prev.filter((_, i) => i !== idx));
+
   const isChurch = activeBranch === 'church';
 
   // Filter events by branch — a 2-branches event (branch 'global') is visible from either branch.
+  const projects = useProjects();
   const branchEvents = events.filter(e => activeBranch === 'global' || e.branch === activeBranch || e.branch === 'global');
+  const projectIds = Array.from(new Set(branchEvents.map(e => e.projectId).filter((id): id is string => !!id)));
+  const filteredEvents = branchEvents
+    .filter(e => filterType === 'all' || e.type === filterType)
+    .filter(e => filterProject === 'all' || e.projectId === filterProject);
   const selectedEvent = events.find(e => e.id === selectedEventId);
 
   // Sunday Stats: attendance per closed event (from Portiers reports), chronological.
@@ -83,27 +158,45 @@ export default function EventsView({
       return { name: e.date.slice(5), affluence: p ? (p.content.total ?? 0) : 0 };
     });
 
+  // D3 (WORKFLOWS §10) — cultes récurrents. Décalage de jours sans dérive de fuseau
+  // (arithmétique en UTC pur, la date reste un 'YYYY-MM-DD').
+  const addDays = (iso: string, days: number) => {
+    const [y, m, d] = iso.split('-').map(Number);
+    return new Date(Date.UTC(y, m - 1, d + days)).toISOString().slice(0, 10);
+  };
+  const RECUR_OCCURRENCES = 8; // ~2 mois d'avance. ponytail: horizon fixe, à rendre configurable si besoin.
+
   const handleCreateEvent = (e: React.FormEvent) => {
     e.preventDefault();
     if (!eventTitle) return;
 
-    const newEvent: Event = {
-      id: `evt_custom_${Date.now()}`,
+    const base = {
       title: eventTitle,
       type: eventType,
-      date: eventDate,
-      branch: eventScope === 'both' ? 'global' : eventScope, // 2 branches → 'global' (visible des deux)
+      branch: eventScope === 'both' ? ('global' as const) : eventScope, // 2 branches → 'global'
       closed: false,
       scope: eventScope,
       organizer: eventOrganizer || undefined,
       projectId: eventProject || undefined,
     };
 
-    onAddEvent(newEvent);
+    // Hebdomadaire : on génère RECUR_OCCURRENCES occurrences d'avance en une fois (idempotent :
+    // une seule action de création, pas de régénération continue → pas de doublons).
+    const count = eventRecurring ? RECUR_OCCURRENCES : 1;
+    for (let i = 0; i < count; i++) {
+      onAddEvent({
+        ...base,
+        id: `evt_custom_${Date.now()}_${i}`,
+        date: addDays(eventDate, i * 7),
+        ...(eventRecurring ? { recurrence: 'weekly' as const } : {}),
+      });
+    }
+
     setShowAddEventModal(false);
     setEventTitle('');
     setEventOrganizer('');
     setEventProject('');
+    setEventRecurring(false);
   };
 
   const handleSaveCounters = (e: React.FormEvent) => {
@@ -127,7 +220,8 @@ export default function EventsView({
       content: {
         men: menPortiers,
         women: womenPortiers,
-        total: menPortiers + womenPortiers
+        total: menPortiers + womenPortiers,
+        online: onlinePresence
       }
     };
 
@@ -165,7 +259,23 @@ export default function EventsView({
         attendancePortiers: menPortiers + womenPortiers,
         attendanceADN: newMenADN + newWomenADN,
         offertory: offertory,
-        notes: `Comptage validé avec succès par les Portiers et l'ADN. Total de Décideurs OJ : ${ojMen + ojWomen}.`
+        // Infos générales
+        predicateur,
+        theme,
+        officiant,
+        // Atmosphère spirituelle (1-5)
+        ferveur: ferveurVal,
+        louange: louangeVal,
+        deroulementAppel: appelVal,
+        // Journal des incidents
+        incidents,
+        // Stats de fréquentation
+        attendeesAdultes: menPortiers + womenPortiers,
+        attendeesEnfants,
+        nouvellesDecisions: ojMen + ojWomen,
+        // Remarques libres
+        notes: culteRemarques || `Comptage validé avec succès par les Portiers et l'ADN. Total de Décideurs OJ : ${ojMen + ojWomen}.`,
+        presencesService: presentServiteurs
       }
     };
 
@@ -173,11 +283,23 @@ export default function EventsView({
     onAddReport(adnReport);
     onAddReport(culteReport);
 
-    // Update event closed state
-    targetEvent.closed = true;
+    // Clôture persistée (B1) : muter targetEvent.closed en place ne déclenchait aucun
+    // setEvents → au reload l'événement redevenait « En cours » et était re-clôturable,
+    // doublant les rapports portiers/ADN/culte et les stats du dimanche.
+    onUpdateEvent?.({ ...targetEvent, closed: true });
 
     // Close counters and alert
     setShowCounterModal(false);
+    setPredicateur('');
+    setTheme('');
+    setOfficiant('');
+    setFerveurVal(3);
+    setLouangeVal(3);
+    setAppelVal(3);
+    setIncidents([]);
+    setAttendeesEnfants(0);
+    setCulteRemarques('');
+    setPresentServiteurs([]);
     alert('Comptages enregistrés et Culte clôturé avec succès !');
   };
 
@@ -199,17 +321,17 @@ export default function EventsView({
               <ArrowLeft size={14} className="mr-1" /> Retour à l'agenda
             </button>
             <div className="flex items-center gap-3">
-              <div className={`p-3 rounded-2xl ${selectedEvent.closed ? 'bg-slate-100 text-bc-text-secondary' : 'bg-bc-green text-white'}`}>
+              <div className={`p-3 rounded-2xl ${selectedEvent.closed ? 'bg-bc-canvas text-bc-text-secondary' : 'bg-bc-green text-white'}`}>
                 <Calendar size={24} />
               </div>
               <div>
                 <h2 className="text-2xl font-ui font-extrabold text-bc-text">{selectedEvent.title}</h2>
                 <div className="flex items-center gap-3 mt-1 text-sm text-bc-text-secondary">
                   <span className="font-mono text-xs">{selectedEvent.date}</span>
-                  <span className="w-1 h-1 bg-slate-300 rounded-full"></span>
+                  <span className="w-1 h-1 bg-bc-border rounded-full"></span>
                   <span className="uppercase text-[10px] tracking-wider font-bold">{selectedEvent.type.replace('_', ' ')}</span>
-                  <span className="w-1 h-1 bg-slate-300 rounded-full"></span>
-                  <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${selectedEvent.closed ? 'bg-slate-100 text-bc-text-secondary' : 'bg-emerald-50 text-emerald-600'}`}>
+                  <span className="w-1 h-1 bg-bc-border rounded-full"></span>
+                  <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${selectedEvent.closed ? 'bg-bc-canvas text-bc-text-secondary' : 'bg-bc-success/10 text-bc-success'}`}>
                     {selectedEvent.closed ? 'Clôturé' : 'En cours'}
                   </span>
                 </div>
@@ -217,10 +339,10 @@ export default function EventsView({
             </div>
           </div>
           
-          {!selectedEvent.closed && ['Pasteur', 'Admin', 'Super Admin'].includes(simulatedRole) && (
+          {!selectedEvent.closed && ['Pasteur', 'Admin', 'Super Admin', 'ADN', 'Portier', 'GDC'].includes(simulatedRole) && (
             <button
               onClick={() => setShowCounterModal(true)}
-              className="px-5 py-2.5 bg-bc-green text-white font-bold text-xs rounded-full hover:bg-slate-800 transition-colors flex items-center gap-2 shadow-sm"
+              className="px-5 py-2.5 bg-bc-green text-white font-bold text-xs rounded-full hover:bg-bc-text transition-colors flex items-center gap-2 shadow-sm active:scale-95"
             >
               <CheckCircle size={16} /> Clôturer le Culte
             </button>
@@ -263,7 +385,7 @@ export default function EventsView({
         ) : (
           <div className="bg-white p-12 rounded-[2rem] border border-bc-border shadow-sm flex flex-col items-center justify-center min-h-[400px]">
             <div className="w-20 h-20 bg-bc-canvas rounded-full flex items-center justify-center mb-6 border border-bc-border">
-              <Activity size={32} className="text-slate-300" />
+              <Activity size={32} className="text-bc-text-secondary" />
             </div>
             <h3 className="text-xl font-ui font-bold text-bc-text mb-2">En attente de clôture</h3>
             <p className="text-sm text-bc-text-secondary text-center max-w-md mb-8">
@@ -278,13 +400,13 @@ export default function EventsView({
           <div className="bg-white rounded-[2.5rem] max-w-lg w-full p-6 border border-bc-border shadow-2xl relative max-h-[90vh] overflow-y-auto">
             <button
               onClick={() => setShowCounterModal(false)}
-              className="absolute top-4 right-4 p-2 text-slate-400 hover:text-bc-text transition-colors"
+              className="absolute top-4 right-4 p-2 text-bc-text-secondary hover:text-bc-text transition-colors active:scale-95"
             >
               <X size={20} />
             </button>
 
             <h3 className="text-base font-ui font-bold text-bc-text flex items-center gap-2 mb-4">
-              <CheckCircle size={18} className="text-emerald-500" />
+              <CheckCircle size={18} className="text-bc-success" />
               Clôturer : Saisie des Comptages
             </h3>
 
@@ -301,7 +423,7 @@ export default function EventsView({
                       type="number"
                       value={menPortiers}
                       onChange={(e) => setMenPortiers(parseInt(e.target.value) || 0)}
-                      className="w-full border border-bc-border rounded-full px-3 py-2 text-xs focus:outline-none focus:border-slate-400"
+                      className="w-full border border-bc-border rounded-full px-3 py-2 text-xs focus:outline-none focus:border-bc-green"
                     />
                   </div>
                   <div>
@@ -310,9 +432,34 @@ export default function EventsView({
                       type="number"
                       value={womenPortiers}
                       onChange={(e) => setWomenPortiers(parseInt(e.target.value) || 0)}
-                      className="w-full border border-bc-border rounded-full px-3 py-2 text-xs focus:outline-none focus:border-slate-400"
+                      className="w-full border border-bc-border rounded-full px-3 py-2 text-xs focus:outline-none focus:border-bc-green"
                     />
                   </div>
+                </div>
+                <div>
+                  <label className="block text-[10px] font-bold text-bc-text mb-1">Présence en ligne</label>
+                  <input
+                    type="number"
+                    value={onlinePresence}
+                    onChange={(e) => setOnlinePresence(parseInt(e.target.value) || 0)}
+                    className="w-full border border-bc-border rounded-full px-3 py-2 text-xs focus:outline-none focus:border-bc-green"
+                  />
+                </div>
+              </div>
+
+              {/* 1bis. Roster — serviteurs présents */}
+              <div className="p-4 bg-bc-canvas/40 border border-bc-border rounded-[2rem] space-y-3">
+                <span className="text-[10px] uppercase font-bold text-bc-text-secondary flex items-center gap-1.5">
+                  <Users size={12} /> Serviteurs présents
+                </span>
+                <div className="flex flex-wrap gap-2 max-h-40 overflow-y-auto">
+                  {members.filter(m => activeBranch === 'global' || m.branch === activeBranch).map(m => (
+                    <button type="button" key={m.id} onClick={() => toggleServiteur(m.id)}
+                      className={`text-xs font-medium px-3 py-1.5 rounded-full border active:scale-95 ${presentServiteurs.includes(m.id) ? 'bg-bc-green text-white border-bc-green' : 'bg-white text-bc-text border-bc-border'}`}>
+                      {m.firstName} {m.lastName}
+                    </button>
+                  ))}
+                  {members.length === 0 && <p className="text-xs text-bc-text-secondary italic">Aucun membre disponible.</p>}
                 </div>
               </div>
 
@@ -323,41 +470,41 @@ export default function EventsView({
                 </span>
                 <div className="grid grid-cols-2 gap-3">
                   <div>
-                    <label className="block text-[10px] font-bold text-bc-text mb-1">Nouveaux (H)</label>
+                    <label className="block text-[10px] font-bold text-bc-text mb-1">{adnLabel('f0', 'Nouveaux (H)')}</label>
                     <input
                       type="number"
                       value={newMenADN}
                       onChange={(e) => setNewMenADN(parseInt(e.target.value) || 0)}
-                      className="w-full border border-bc-border rounded-full px-3 py-2 text-xs focus:outline-none focus:border-slate-400"
+                      className="w-full border border-bc-border rounded-full px-3 py-2 text-xs focus:outline-none focus:border-bc-green"
                     />
                   </div>
                   <div>
-                    <label className="block text-[10px] font-bold text-bc-text mb-1">Nouveaux (F)</label>
+                    <label className="block text-[10px] font-bold text-bc-text mb-1">{adnLabel('f1', 'Nouveaux (F)')}</label>
                     <input
                       type="number"
                       value={newWomenADN}
                       onChange={(e) => setNewWomenADN(parseInt(e.target.value) || 0)}
-                      className="w-full border border-bc-border rounded-full px-3 py-2 text-xs focus:outline-none focus:border-slate-400"
+                      className="w-full border border-bc-border rounded-full px-3 py-2 text-xs focus:outline-none focus:border-bc-green"
                     />
                   </div>
                 </div>
                 <div className="grid grid-cols-2 gap-3 pt-2">
                   <div>
-                    <label className="block text-[10px] font-bold text-bc-text mb-1">Oui à Jésus (H)</label>
+                    <label className="block text-[10px] font-bold text-bc-text mb-1">{adnLabel('f2', 'Oui à Jésus (H)')}</label>
                     <input
                       type="number"
                       value={ojMen}
                       onChange={(e) => setOjMen(parseInt(e.target.value) || 0)}
-                      className="w-full border border-bc-border rounded-full px-3 py-2 text-xs focus:outline-none focus:border-slate-400"
+                      className="w-full border border-bc-border rounded-full px-3 py-2 text-xs focus:outline-none focus:border-bc-green"
                     />
                   </div>
                   <div>
-                    <label className="block text-[10px] font-bold text-bc-text mb-1">Oui à Jésus (F)</label>
+                    <label className="block text-[10px] font-bold text-bc-text mb-1">{adnLabel('f3', 'Oui à Jésus (F)')}</label>
                     <input
                       type="number"
                       value={ojWomen}
                       onChange={(e) => setOjWomen(parseInt(e.target.value) || 0)}
-                      className="w-full border border-bc-border rounded-full px-3 py-2 text-xs focus:outline-none focus:border-slate-400"
+                      className="w-full border border-bc-border rounded-full px-3 py-2 text-xs focus:outline-none focus:border-bc-green"
                     />
                   </div>
                 </div>
@@ -374,22 +521,138 @@ export default function EventsView({
                     type="number"
                     value={offertory}
                     onChange={(e) => setOffertory(parseInt(e.target.value) || 0)}
-                    className="w-full border border-bc-border rounded-full px-3 py-2 text-xs focus:outline-none focus:border-slate-400"
+                    className="w-full border border-bc-border rounded-full px-3 py-2 text-xs focus:outline-none focus:border-bc-green"
                   />
                 </div>
+              </div>
+
+              {/* 4. Infos générales */}
+              <div className="p-4 bg-bc-canvas/40 border border-bc-border rounded-[2rem] space-y-3">
+                <span className="text-[10px] uppercase font-bold text-bc-text-secondary flex items-center gap-1.5">
+                  📋 4. Infos générales
+                </span>
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-[10px] font-bold text-bc-text mb-1">Prédicateur</label>
+                    <input
+                      type="text"
+                      value={predicateur}
+                      onChange={(e) => setPredicateur(e.target.value)}
+                      className="w-full border border-bc-border rounded-full px-3 py-2 text-xs focus:outline-none focus:border-bc-green"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[10px] font-bold text-bc-text mb-1">Officiant</label>
+                    <input
+                      type="text"
+                      value={officiant}
+                      onChange={(e) => setOfficiant(e.target.value)}
+                      className="w-full border border-bc-border rounded-full px-3 py-2 text-xs focus:outline-none focus:border-bc-green"
+                    />
+                  </div>
+                </div>
+                <div>
+                  <label className="block text-[10px] font-bold text-bc-text mb-1">Thème</label>
+                  <input
+                    type="text"
+                    value={theme}
+                    onChange={(e) => setTheme(e.target.value)}
+                    className="w-full border border-bc-border rounded-full px-3 py-2 text-xs focus:outline-none focus:border-bc-green"
+                  />
+                </div>
+              </div>
+
+              {/* 5. Atmosphère spirituelle */}
+              <div className="p-4 bg-bc-canvas/40 border border-bc-border rounded-[2rem] space-y-3">
+                <span className="text-[10px] uppercase font-bold text-bc-text-secondary flex items-center gap-1.5">
+                  🙏 5. Atmosphère spirituelle
+                </span>
+                <RatingRow label="Ferveur" value={ferveurVal} onChange={setFerveurVal} />
+                <RatingRow label="Louange" value={louangeVal} onChange={setLouangeVal} />
+                <RatingRow label="Déroulement de l'appel" value={appelVal} onChange={setAppelVal} />
+              </div>
+
+              {/* 6. Journal des incidents */}
+              <div className="p-4 bg-bc-canvas/40 border border-bc-border rounded-[2rem] space-y-3">
+                <span className="text-[10px] uppercase font-bold text-bc-text-secondary flex items-center gap-1.5">
+                  ⚠️ 6. Journal des incidents
+                </span>
+                <div className="space-y-2">
+                  {incidents.map((inc, idx) => (
+                    <div key={idx} className="flex items-center justify-between bg-white border border-bc-border rounded-xl px-3 py-2 text-xs">
+                      <span>
+                        <span className="font-bold">{inc.type}</span>
+                        {inc.departments && <span className="text-bc-text-secondary"> · {inc.departments}</span>}
+                        {' — '}{inc.details}
+                      </span>
+                      <button type="button" onClick={() => removeIncident(idx)} className="text-bc-text-secondary hover:text-bc-danger active:scale-95"><X size={12} /></button>
+                    </div>
+                  ))}
+                  <div className="grid grid-cols-2 gap-2">
+                    <select
+                      value={incidentType}
+                      onChange={(e) => setIncidentType(e.target.value)}
+                      className="border border-bc-border rounded-full px-3 py-1.5 text-xs bg-white focus:outline-none"
+                    >
+                      {INCIDENT_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
+                    </select>
+                    <input
+                      value={incidentDept}
+                      onChange={(e) => setIncidentDept(e.target.value)}
+                      placeholder="Département(s) concerné(s)"
+                      className="border border-bc-border rounded-full px-3 py-1.5 text-xs focus:outline-none focus:border-bc-green"
+                    />
+                  </div>
+                  <div className="flex gap-2">
+                    <input
+                      value={incidentDetails}
+                      onChange={(e) => setIncidentDetails(e.target.value)}
+                      placeholder="Détails de l'incident…"
+                      className="flex-1 border border-bc-border rounded-full px-3 py-1.5 text-xs focus:outline-none focus:border-bc-green"
+                    />
+                    <button type="button" onClick={addIncident} className="px-3 py-1.5 bg-bc-green text-white rounded-full text-xs font-bold active:scale-95"><Plus size={13} /></button>
+                  </div>
+                </div>
+              </div>
+
+              {/* 7. Stats de fréquentation */}
+              <div className="p-4 bg-bc-canvas/40 border border-bc-border rounded-[2rem] space-y-3">
+                <span className="text-[10px] uppercase font-bold text-bc-text-secondary flex items-center gap-1.5">
+                  📊 7. Stats de fréquentation
+                </span>
+                <div>
+                  <label className="block text-[10px] font-bold text-bc-text mb-1">Enfants émargés</label>
+                  <input
+                    type="number"
+                    value={attendeesEnfants}
+                    onChange={(e) => setAttendeesEnfants(parseInt(e.target.value) || 0)}
+                    className="w-full border border-bc-border rounded-full px-3 py-2 text-xs focus:outline-none focus:border-bc-green"
+                  />
+                </div>
+              </div>
+
+              {/* 8. Remarques libres */}
+              <div>
+                <label className="block text-[10px] font-bold text-bc-text mb-1">Remarques libres</label>
+                <textarea
+                  value={culteRemarques}
+                  onChange={(e) => setCulteRemarques(e.target.value)}
+                  rows={2}
+                  className="w-full border border-bc-border rounded-2xl px-3 py-2 text-xs focus:outline-none focus:border-bc-green"
+                />
               </div>
 
               <div className="flex gap-3 justify-end pt-3">
                 <button
                   type="button"
                   onClick={() => setShowCounterModal(false)}
-                  className="px-5 py-2.5 bg-slate-100 text-slate-700 rounded-full text-xs font-bold hover:bg-slate-200 transition-colors"
+                  className="px-5 py-2.5 bg-bc-canvas text-bc-text-secondary rounded-full text-xs font-bold hover:bg-bc-border/40 transition-colors active:scale-95"
                 >
                   Annuler
                 </button>
                 <button
                   type="submit"
-                  className="px-5 py-2.5 bg-bc-green text-white rounded-full text-xs font-bold hover:bg-slate-800 transition-colors"
+                  className="px-5 py-2.5 bg-bc-green text-white rounded-full text-xs font-bold hover:bg-bc-text transition-colors active:scale-95"
                 >
                   Clôturer le Culte
                 </button>
@@ -416,7 +679,9 @@ export default function EventsView({
           </p>
         </div>
 
-        {['Pasteur', 'Admin', 'Responsable', 'Super Admin'].includes(simulatedRole) && (
+        {/* CAHIER_DES_CHARGES.md §7.1 — création réservée au Responsable Gestion des Cultes,
+            aux Ministres, aux Pasteurs, ou à un département (Responsable). */}
+        {['Pasteur', 'Admin', 'Responsable', 'Super Admin', 'Ministre'].includes(simulatedRole) && (
           <div className="flex gap-2 w-full md:w-auto">
             <button
               id="event-plan-btn"
@@ -433,13 +698,35 @@ export default function EventsView({
       {/* Toolbar: view toggle + Sunday Stats */}
       <div className="flex flex-col lg:flex-row gap-4">
         <div className="inline-flex bg-white border border-bc-border rounded-full p-1 self-start">
-          <button onClick={() => setViewMode('list')} className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold ${viewMode === 'list' ? 'bg-bc-green text-white' : 'text-bc-text-secondary'}`}>
+          <button onClick={() => setViewMode('list')} className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold active:scale-95 ${viewMode === 'list' ? 'bg-bc-green text-white' : 'text-bc-text-secondary'}`}>
             <List size={14} /> Liste
           </button>
-          <button onClick={() => setViewMode('calendar')} className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold ${viewMode === 'calendar' ? 'bg-bc-green text-white' : 'text-bc-text-secondary'}`}>
+          <button onClick={() => setViewMode('calendar')} className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold active:scale-95 ${viewMode === 'calendar' ? 'bg-bc-green text-white' : 'text-bc-text-secondary'}`}>
             <LayoutGrid size={14} /> Calendrier
           </button>
         </div>
+        <select
+          value={filterType}
+          onChange={(e) => setFilterType(e.target.value as 'all' | Event['type'])}
+          className="bg-white border border-bc-border rounded-full px-3 py-1.5 text-xs font-bold text-bc-text-secondary self-start"
+        >
+          <option value="all">Tous les types</option>
+          {Object.entries(TYPE_LABEL).map(([type, label]) => (
+            <option key={type} value={type}>{label}</option>
+          ))}
+        </select>
+        {projectIds.length > 0 && (
+          <select
+            value={filterProject}
+            onChange={(e) => setFilterProject(e.target.value)}
+            className="bg-white border border-bc-border rounded-full px-3 py-1.5 text-xs font-bold text-bc-text-secondary self-start"
+          >
+            <option value="all">Tous les projets</option>
+            {projectIds.map(id => (
+              <option key={id} value={id}>{projects.find(p => p.id === id)?.name ?? id}</option>
+            ))}
+          </select>
+        )}
         {sundayData.length > 0 && (
           <div className="flex-1 bg-white border border-bc-border rounded-[1.5rem] p-3">
             <p className="text-[10px] font-bold uppercase tracking-wider text-bc-text-secondary mb-1 px-2 flex items-center gap-1.5"><TrendingUp size={12} /> Sunday Stats · affluence par culte</p>
@@ -448,14 +735,14 @@ export default function EventsView({
                 <AreaChart data={sundayData} margin={{ top: 5, right: 10, left: -20, bottom: 0 }}>
                   <defs>
                     <linearGradient id="evtAffluence" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor="#009BDE" stopOpacity={0.35} />
-                      <stop offset="95%" stopColor="#009BDE" stopOpacity={0} />
+                      <stop offset="5%" stopColor="var(--accent-1)" stopOpacity={0.35} />
+                      <stop offset="95%" stopColor="var(--accent-1)" stopOpacity={0} />
                     </linearGradient>
                   </defs>
-                  <XAxis dataKey="name" tick={{ fontSize: 9, fill: '#94a3b8' }} />
-                  <YAxis tick={{ fontSize: 9, fill: '#94a3b8' }} />
+                  <XAxis dataKey="name" tick={{ fontSize: 9, fill: 'var(--color-bc-text-secondary)' }} />
+                  <YAxis tick={{ fontSize: 9, fill: 'var(--color-bc-text-secondary)' }} />
                   <Tooltip />
-                  <Area type="monotone" dataKey="affluence" stroke="#009BDE" strokeWidth={2} fill="url(#evtAffluence)" />
+                  <Area type="monotone" dataKey="affluence" stroke="var(--accent-1)" strokeWidth={2} fill="url(#evtAffluence)" />
                 </AreaChart>
               </ResponsiveContainer>
             </div>
@@ -463,23 +750,24 @@ export default function EventsView({
         )}
       </div>
 
-      {viewMode === 'calendar' && <MonthCalendar events={branchEvents} onSelect={setSelectedEventId} />}
+      {viewMode === 'calendar' && <MonthCalendar events={filteredEvents} onSelect={setSelectedEventId} />}
 
       {/* Grid of Planned Events */}
-      <div className={`grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 ${viewMode === 'calendar' ? 'hidden' : ''}`}>
-        {branchEvents.map((evt) => (
-          <div 
-            key={evt.id} 
+      <motion.div variants={staggerParent} initial="hidden" animate="show" className={`grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 ${viewMode === 'calendar' ? 'hidden' : ''}`}>
+        {filteredEvents.map((evt) => (
+          <motion.div
+            variants={staggerItem}
+            key={evt.id}
             onClick={() => setSelectedEventId(evt.id)}
-            className="bg-white border border-bc-border shadow-sm rounded-[2rem] p-5 hover:shadow-md hover:border-slate-300 cursor-pointer transition-all flex flex-col justify-between group"
+            className="bg-white border border-bc-border shadow-sm rounded-[2rem] p-5 hover:shadow-md hover:border-bc-border cursor-pointer transition-all flex flex-col justify-between group"
           >
             <div>
               <div className="flex justify-between items-start">
-                <div className={`p-2.5 rounded-2xl transition-colors ${evt.closed ? 'bg-slate-100 text-slate-400 group-hover:bg-slate-200' : 'bg-bc-green text-white'}`}>
+                <div className={`p-2.5 rounded-2xl transition-colors ${evt.closed ? 'bg-bc-canvas text-bc-text-secondary group-hover:bg-bc-border/40' : 'bg-bc-green text-white'}`}>
                   <Calendar size={20} />
                 </div>
                 <span className={`text-[9px] font-bold px-2 py-0.5 rounded-full border ${
-                  evt.closed ? 'bg-bc-canvas text-bc-text-secondary border-bc-border' : 'bg-emerald-50 text-emerald-600 border-emerald-100'
+                  evt.closed ? 'bg-bc-canvas text-bc-text-secondary border-bc-border' : 'bg-bc-success/10 text-bc-success border-bc-success/20'
                 }`}>
                   {evt.closed ? 'Clôturé' : 'En cours'}
                 </span>
@@ -495,9 +783,9 @@ export default function EventsView({
               <span className="font-mono">{evt.date}</span>
               <span className="font-bold uppercase tracking-wider">{evt.branch}</span>
             </div>
-          </div>
+          </motion.div>
         ))}
-      </div>
+      </motion.div>
 
       {/* Plan Event Modal */}
       {showAddEventModal && (
@@ -506,7 +794,7 @@ export default function EventsView({
             <button
               id="close-add-event-modal-btn"
               onClick={() => setShowAddEventModal(false)}
-              className="absolute top-4 right-4 p-2 text-bc-text-secondary hover:text-bc-purple transition-colors"
+              className="absolute top-4 right-4 p-2 text-bc-text-secondary hover:text-bc-purple transition-colors active:scale-95"
             >
               <X size={20} />
             </button>
@@ -557,6 +845,11 @@ export default function EventsView({
                     onChange={(e) => setEventDate(e.target.value)}
                     className="w-full border border-bc-border rounded-full px-3 py-2 text-xs focus:outline-none focus:border-bc-green"
                   />
+                  {/* D3 — cultes récurrents (§10) */}
+                  <label className="flex items-center gap-2 mt-2 cursor-pointer">
+                    <input type="checkbox" checked={eventRecurring} onChange={(e) => setEventRecurring(e.target.checked)} className="accent-bc-green" />
+                    <span className="text-[11px] text-bc-text-secondary">Répéter chaque semaine ({RECUR_OCCURRENCES} occurrences)</span>
+                  </label>
                 </div>
               </div>
 
@@ -601,14 +894,14 @@ export default function EventsView({
                   id="event-cancel-btn"
                   type="button"
                   onClick={() => setShowAddEventModal(false)}
-                  className="px-4 py-2 border border-bc-border text-bc-text-secondary rounded-full text-xs hover:bg-bc-canvas"
+                  className="px-4 py-2 border border-bc-border text-bc-text-secondary rounded-full text-xs hover:bg-bc-canvas active:scale-95"
                 >
                   Annuler
                 </button>
                 <button
                   id="event-submit-btn"
                   type="submit"
-                  className={`px-5 py-2 text-white rounded-full text-xs font-ui font-bold hover:opacity-90 ${'bg-bc-green'}`}
+                  className={`px-5 py-2 text-white rounded-full text-xs font-ui font-bold hover:opacity-90 active:scale-95 ${'bg-bc-green'}`}
                 >
                   Planifier l'événement
                 </button>
@@ -656,7 +949,7 @@ function MonthCalendar({ events, onSelect }: { events: Event[]; onSelect: (id: s
           <div key={i} className={`min-h-[64px] rounded-xl p-1 text-left ${d ? 'bg-bc-canvas/40 border border-bc-border' : ''}`}>
             {d && <div className="text-[10px] font-bold text-bc-text-secondary">{d}</div>}
             {d && byDay(d).map(e => (
-              <button key={e.id} onClick={() => onSelect(e.id)} className={`w-full mt-0.5 text-[9px] font-bold rounded px-1 py-0.5 truncate text-left ${e.closed ? 'bg-slate-200 text-slate-600' : 'bg-bc-green text-white'}`} title={e.title}>
+              <button key={e.id} onClick={() => onSelect(e.id)} className={`w-full mt-0.5 text-[9px] font-bold rounded px-1 py-0.5 truncate text-left active:scale-95 ${e.closed ? 'bg-bc-border text-bc-text-secondary' : 'bg-bc-green text-white'}`} title={e.title}>
                 {TYPE_LABEL[e.type]}
               </button>
             ))}

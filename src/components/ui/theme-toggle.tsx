@@ -20,17 +20,19 @@ export function ThemeToggle({ className }: ThemeToggleProps) {
   }, [isDark])
 
   return (
-    <div
+    <button
+      type="button"
+      role="switch"
+      aria-checked={isDark}
+      aria-label="Thème sombre"
       className={cn(
-        "flex w-14 h-7 p-0.5 rounded-full cursor-pointer transition-colors duration-300",
-        isDark 
-          ? "bg-slate-800 border-slate-700" 
+        "flex w-14 h-7 p-0.5 rounded-full cursor-pointer transition-colors duration-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-bc-green focus-visible:ring-offset-2",
+        isDark
+          ? "bg-slate-800 border-slate-700"
           : "bg-slate-100 border border-bc-border",
         className
       )}
       onClick={() => setIsDark(!isDark)}
-      role="button"
-      tabIndex={0}
     >
       <div className="flex items-center w-full relative">
         <div className="w-full flex justify-between px-1.5 absolute">
@@ -58,6 +60,6 @@ export function ThemeToggle({ className }: ThemeToggleProps) {
           )}
         </div>
       </div>
-    </div>
+    </button>
   )
 }

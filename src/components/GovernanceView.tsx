@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Shield, Check, X, Sliders, AlertCircle, Info, UserCheck, Plus, GitBranch } from 'lucide-react';
-import { PermissionMatrix, Branch } from '../types';
+import { PermissionMatrix, Branch, Delegation } from '../types';
 import { load, save } from '../data';
 import { motion, AnimatePresence } from 'motion/react';
 
@@ -42,7 +42,28 @@ export default function GovernanceView({
     { key: 'inscrire_formations_certifications', label: 'Inscrire aux Formations / Certifications', desc: 'Donne l\'accès à l\'inscription des collaborateurs dans l\'Académie VH.' }
   ];
 
-  const roles = ['Pasteur', 'Admin', 'Responsable', 'Coach', 'Membre'];
+  // P1.1 — lignes "accès aux onglets" (view_*) éditables dans la matrice
+  const TAB_LABELS: Record<string, string> = {
+    dashboard: 'Accueil', members: 'Membres', ministeres: 'Ministères',
+    departments: 'Départements', integration: 'Intégration', bloombus: 'Bloom Bus',
+    events: 'Cultes & Événements', projects: 'Projets', cursus: 'Cursus Pastoral',
+    formations: 'Formations', permissions: 'Permissions', accounts: 'Comptes & Admins',
+    settings: 'Configuration système', formbuilder: 'Constructeur de form', audit: 'Audit',
+    reports: 'Rapports', programs: 'Parcours Baptême',
+  };
+  const viewCapabilities = Object.keys(permissionMatrix)
+    .filter(k => k.startsWith('view_'))
+    .map(k => ({
+      key: k,
+      label: `Voir l'onglet ${TAB_LABELS[k.slice(5)] ?? k.slice(5)}`,
+      desc: 'Visibilité de l\'onglet dans la navigation.',
+    }));
+  const allCapabilities = [...capabilitiesList, ...viewCapabilities];
+
+  // Colonnes dérivées de la matrice (ordre canonique), plus de liste en dur
+  const ROLE_ORDER = ['Super Admin', 'Admin', 'Pasteur Principal', 'Pasteur', 'Ministre', 'Responsable', 'Adjoint', 'Coach', 'Leader', 'Capitaine', 'Responsable de Zone', 'Responsable de Commune', 'ADN', 'Portier', 'GDC', 'Intégration', 'Membre', 'Nouveau'];
+  const presentRoles = new Set(Object.values(permissionMatrix).flatMap(o => Object.keys(o)));
+  const roles = ROLE_ORDER.filter(r => presentRoles.has(r));
   // §11.2 — config réservée à Admin / Pasteur Principal / Super Admin (pas 'Pasteur' générique).
   const canEditGov = ['Admin', 'Pasteur Principal', 'Super Admin'].includes(simulatedRole);
   const capLabel = (key: string) => capabilitiesList.find(c => c.key === key)?.label ?? key;
@@ -62,7 +83,11 @@ export default function GovernanceView({
   // §11.3 — délégation par un Responsable dans son département. On ne délègue JAMAIS
   // l'accès au rapport spirituel (consulter_rapports_de_vie exclu des capacités déléguables).
   const DELEGABLE_CAPS = capabilitiesList.filter(c => c.key !== 'consulter_rapports_de_vie');
-  const [delegations, setDelegations] = useState<{ id: string; from: string; to: string; scope: string; right: string }[]>(
+  // ponytail: saisie libre from/to (pas de sélecteur membre ici) — console de supervision
+  // org-wide, pas le point d'entrée principal. Sans `toId`, ces entrées restent affichées
+  // mais n'accordent aucune capacité effective (cf. hasCapability) ; le vrai octroi passe
+  // par DepartmentsView, où from/to sont de vrais membres.
+  const [delegations, setDelegations] = useState<Delegation[]>(
     () => load('bc_delegations', [
       { id: 'del_1', from: 'Resp. Louange (Jean K.)', to: 'Adjoint (Paul A.)', scope: 'Département Louange', right: 'modifier_jalons_bapteme_integration' },
     ])
@@ -126,15 +151,19 @@ export default function GovernanceView({
               </tr>
             </thead>
             <tbody className="divide-y divide-bc-border text-xs">
-              {capabilitiesList.map((cap) => (
+              {allCapabilities.map((cap) => (
                 <tr key={cap.key} className="hover:bg-bc-canvas/15 transition-colors">
                   <td className="p-4">
                     <span className="font-bold text-bc-text block text-[12px]">{cap.label}</span>
                     <span className="text-[10px] text-bc-text-secondary font-medium mt-0.5 block leading-normal">{cap.desc}</span>
                   </td>
                   {roles.map(role => {
-                    const isAllowed = permissionMatrix[cap.key]?.[role] || false;
-                    const canEdit = canEditGov;
+                    // Le Super Admin voit toujours tout (Sidebar.tsx canView bypass) — un toggle
+                    // view_* désactivé ici n'aurait aucun effet réel et laisserait croire à tort
+                    // qu'on peut le verrouiller hors de l'app. On bloque l'action à la source.
+                    const isSuperAdminViewLock = role === 'Super Admin' && cap.key.startsWith('view_');
+                    const isAllowed = isSuperAdminViewLock ? true : (permissionMatrix[cap.key]?.[role] || false);
+                    const canEdit = canEditGov && !isSuperAdminViewLock;
 
                     return (
                       <td key={role} className="p-4 text-center">
@@ -142,6 +171,7 @@ export default function GovernanceView({
                           id={`toggle-perm-${cap.key}-${role.toLowerCase()}`}
                           onClick={() => onTogglePermission(cap.key, role)}
                           disabled={!canEdit}
+                          title={isSuperAdminViewLock ? 'Le Super Admin garde toujours accès à tous les onglets.' : undefined}
                           whileHover={canEdit ? { scale: 1.1 } : {}}
                           whileTap={canEdit ? { scale: 0.9 } : {}}
                           transition={{ type: 'spring', stiffness: 400, damping: 15 }}
@@ -195,7 +225,7 @@ export default function GovernanceView({
             <select value={newCap} onChange={e => setNewCap(e.target.value)} className="border border-bc-border rounded-full px-3 py-2 text-xs bg-white">
               {capabilitiesList.map(c => <option key={c.key} value={c.key}>{c.label}</option>)}
             </select>
-            <button onClick={addSpecial} className="flex items-center gap-1.5 bg-bc-green text-white rounded-full px-4 py-2 text-xs font-bold hover:opacity-90">
+            <button onClick={addSpecial} className="flex items-center gap-1.5 bg-bc-green text-white rounded-full px-4 py-2 text-xs font-bold hover:opacity-90 active-scale">
               <Plus size={14} /> Accorder
             </button>
           </div>
@@ -207,7 +237,7 @@ export default function GovernanceView({
             <div key={i} className="flex items-center justify-between bg-bc-canvas/40 border border-bc-border rounded-full px-4 py-2 text-xs">
               <span><span className="font-bold text-bc-text">{s.member}</span> — {capLabel(s.capability)}</span>
               {canEditGov && (
-                <button onClick={() => setSpecials(prev => prev.filter((_, j) => j !== i))} className="text-bc-text-secondary hover:text-red-500">
+                <button onClick={() => setSpecials(prev => prev.filter((_, j) => j !== i))} className="text-bc-text-secondary hover:text-bc-danger active-scale">
                   <X size={14} />
                 </button>
               )}
@@ -229,7 +259,7 @@ export default function GovernanceView({
               <span><span className="font-bold text-bc-text">{d.from}</span> → {d.to}</span>
               <span className="flex items-center gap-2">
                 <span className="text-bc-text-secondary">{capLabel(d.right)} · <span className="italic">{d.scope}</span></span>
-                {canEditGov && <button onClick={() => removeDelegation(d.id)} className="text-bc-text-secondary hover:text-red-500"><X size={12} /></button>}
+                {canEditGov && <button onClick={() => removeDelegation(d.id)} className="text-bc-text-secondary hover:text-bc-danger active-scale"><X size={12} /></button>}
               </span>
             </div>
           ))}
@@ -243,7 +273,7 @@ export default function GovernanceView({
               <select value={delRight} onChange={e => setDelRight(e.target.value)} className="flex-1 min-w-0 border border-bc-border rounded-full px-3 py-1.5 text-xs bg-white">
                 {DELEGABLE_CAPS.map(c => <option key={c.key} value={c.key}>{c.label}</option>)}
               </select>
-              <button onClick={addDelegation} disabled={!delFrom.trim() || !delTo.trim()} className="px-3 py-1.5 bg-bc-green text-white rounded-full text-xs font-bold disabled:opacity-40 shrink-0"><Plus size={13} /></button>
+              <button onClick={addDelegation} disabled={!delFrom.trim() || !delTo.trim()} className="px-3 py-1.5 bg-bc-green text-white rounded-full text-xs font-bold disabled:opacity-40 shrink-0 active-scale"><Plus size={13} /></button>
             </div>
           </div>
         )}

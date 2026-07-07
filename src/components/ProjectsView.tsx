@@ -1,11 +1,15 @@
-import React, { useMemo, useState } from 'react';
-import { Branch, Project, ProjectTask } from '../types';
+import React, { useEffect, useMemo, useState } from 'react';
+import { Branch, Project, ProjectTask, Event, Member } from '../types';
 import { Activity, Target, Users, Calendar, ArrowLeft, Plus, X, Check } from 'lucide-react';
-import { useProjects, useMinistries } from '../data';
+import { useProjects, useMinistries, save } from '../data';
+import { motion } from 'motion/react';
+import { staggerParent, staggerItem } from './ui/motion';
 
 interface ProjectsViewProps {
   activeBranch: Branch;
   simulatedRole: string;
+  events?: Event[];
+  operator?: Member;
 }
 
 const COLUMNS: { key: ProjectTask['status']; label: string }[] = [
@@ -16,28 +20,40 @@ const COLUMNS: { key: ProjectTask['status']; label: string }[] = [
 
 const TEAM_ROLES = ['PMO', 'Responsable COM', 'Logistique', 'Finance', 'Membre'];
 
-export default function ProjectsView({ activeBranch, simulatedRole }: ProjectsViewProps) {
+export default function ProjectsView({ activeBranch, simulatedRole, events = [], operator }: ProjectsViewProps) {
   const seed = useProjects();
   const ministries = useMinistries();
   const ministryName = (id?: string) => ministries.find((m) => m.id === id)?.name ?? 'Ministère';
   const scopeLabel = (p: Project) =>
     p.scope === 'both' ? 'Transverse' : p.scope === 'ministry' ? ministryName(p.ministryId) : p.scope === 'church' ? 'Bloom Church' : 'Bloom Light';
-  // ponytail: local session state; move mutations to ./data when the backend lands.
+  // Persiste en localStorage (B4) : sans ça, créer/éditer un projet puis changer d'onglet perdait tout.
   const [projects, setProjects] = useState<Project[]>(seed);
+  useEffect(() => { save('bc_projects', projects); }, [projects]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [filterStatus, setFilterStatus] = useState('all');
+  const [filterScope, setFilterScope] = useState('all');
+  const [filterPmo, setFilterPmo] = useState('all');
   const [showCreate, setShowCreate] = useState(false);
 
   const canCreate = ['Pasteur', 'Admin', 'Responsable', 'Super Admin', 'Ministre'].includes(simulatedRole);
+  // §16 — PMO gère son projet ; membres d'équipe = accès à leur seul projet.
+  // moveTask n'était gardé par rien : n'importe quel rôle avec accès à l'onglet pouvait
+  // déplacer une tâche sur un projet dont il n'est même pas membre.
+  const operatorName = operator ? `${operator.firstName} ${operator.lastName}` : '';
+  const canMoveTask = (project: Project) =>
+    canCreate || project.pmo === operatorName || !!project.team?.some(t => t.member === operatorName);
+  const pmoOptions = Array.from(new Set(projects.map((p) => p.pmo).filter(Boolean)));
 
   const filtered = useMemo(
     () =>
       projects.filter(
         (p) =>
           (p.scope === 'both' || p.scope === 'ministry' || activeBranch === 'global' || p.scope === activeBranch) &&
-          (filterStatus === 'all' || p.status === filterStatus),
+          (filterStatus === 'all' || p.status === filterStatus) &&
+          (filterScope === 'all' || p.scope === filterScope) &&
+          (filterPmo === 'all' || p.pmo === filterPmo),
       ),
-    [projects, activeBranch, filterStatus],
+    [projects, activeBranch, filterStatus, filterScope, filterPmo],
   );
 
   const selected = projects.find((p) => p.id === selectedId) ?? null;
@@ -90,7 +106,7 @@ export default function ProjectsView({ activeBranch, simulatedRole }: ProjectsVi
 
     return (
       <div className="space-y-6 animate-in slide-in-from-bottom-4 duration-300">
-        <button onClick={() => setSelectedId(null)} className="flex items-center gap-1.5 text-xs font-bold text-bc-text-secondary hover:text-bc-text">
+        <button onClick={() => setSelectedId(null)} className="flex items-center gap-1.5 text-xs font-bold text-bc-text-secondary hover:text-bc-text active-scale">
           <ArrowLeft size={14} /> Retour aux projets
         </button>
 
@@ -102,7 +118,7 @@ export default function ProjectsView({ activeBranch, simulatedRole }: ProjectsVi
               {selected.endDate && ` · échéance ${selected.endDate}`}
             </p>
           </div>
-          <span className="text-[10px] font-bold px-3 py-1 bg-emerald-50 text-emerald-600 border border-emerald-100 rounded-full">{selected.status}</span>
+          <span className="text-[10px] font-bold px-3 py-1 bg-bc-success/10 text-bc-success border border-bc-success/20 rounded-full">{selected.status}</span>
         </div>
 
         {/* Dashboard */}
@@ -116,6 +132,22 @@ export default function ProjectsView({ activeBranch, simulatedRole }: ProjectsVi
           <div className="h-full bg-bc-green transition-all" style={{ width: `${progress}%` }} />
         </div>
 
+        {/* Événements rattachés */}
+        <div className="bg-white p-6 rounded-[2rem] border border-bc-border shadow-sm">
+          <h3 className="font-ui font-bold text-bc-text mb-4 flex items-center gap-2"><Calendar size={16} /> Événements rattachés</h3>
+          <div className="space-y-2">
+            {events.filter((e) => e.projectId === selected.id).length === 0 && (
+              <p className="text-xs text-bc-text-secondary italic">Aucun événement rattaché à ce projet.</p>
+            )}
+            {events.filter((e) => e.projectId === selected.id).map((e) => (
+              <div key={e.id} className="flex items-center justify-between text-xs bg-bc-canvas/40 border border-bc-border rounded-full px-4 py-2">
+                <span className="font-bold text-bc-text">{e.title}</span>
+                <span className="text-bc-text-secondary">{e.date}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           {/* Team */}
           <div className="bg-white p-6 rounded-[2rem] border border-bc-border shadow-sm">
@@ -127,7 +159,7 @@ export default function ProjectsView({ activeBranch, simulatedRole }: ProjectsVi
                   <span className="font-bold text-bc-text">{t.member}</span>
                   <div className="flex items-center gap-2">
                     <span className="text-bc-text-secondary">{t.role}</span>
-                    {canCreate && <button onClick={() => removeTeamMember(selected, i)} className="text-bc-text-secondary hover:text-red-500"><X size={12} /></button>}
+                    {canCreate && <button onClick={() => removeTeamMember(selected, i)} className="text-bc-text-secondary hover:text-bc-danger active-scale"><X size={12} /></button>}
                   </div>
                 </div>
               ))}
@@ -142,7 +174,7 @@ export default function ProjectsView({ activeBranch, simulatedRole }: ProjectsVi
                   <button
                     onClick={() => { if (newTeamMember.trim()) { addTeamMember(selected, newTeamMember.trim(), newTeamRole); setNewTeamMember(''); } }}
                     disabled={!newTeamMember.trim()}
-                    className="px-3 py-1.5 bg-bc-green text-white rounded-full text-xs font-bold disabled:opacity-40"
+                    className="px-3 py-1.5 bg-bc-green text-white rounded-full text-xs font-bold disabled:opacity-40 active-scale"
                   ><Plus size={13} /></button>
                 </div>
               </div>
@@ -156,20 +188,20 @@ export default function ProjectsView({ activeBranch, simulatedRole }: ProjectsVi
               {objs.length === 0 && <p className="text-xs text-bc-text-secondary italic">Aucun objectif.</p>}
               {objs.map((o) => (
                 <div key={o.id} className="flex items-center gap-2 text-xs py-1.5 group">
-                  <button onClick={() => toggleObjective(selected, o.id)} className="flex items-center gap-2 flex-1 text-left">
+                  <button onClick={() => toggleObjective(selected, o.id)} className="flex items-center gap-2 flex-1 text-left active-scale">
                     <span className={`w-4 h-4 rounded flex items-center justify-center border shrink-0 ${o.done ? 'bg-bc-green border-bc-green text-white' : 'border-bc-border'}`}>
                       {o.done && <Check size={11} />}
                     </span>
                     <span className={o.done ? 'line-through text-bc-text-secondary' : 'text-bc-text'}>{o.label}</span>
                   </button>
-                  {canCreate && <button onClick={() => removeObjective(selected, o.id)} className="text-bc-text-secondary hover:text-red-500 opacity-0 group-hover:opacity-100"><X size={12} /></button>}
+                  {canCreate && <button onClick={() => removeObjective(selected, o.id)} className="text-bc-text-secondary hover:text-bc-danger opacity-0 group-hover:opacity-100 active-scale"><X size={12} /></button>}
                 </div>
               ))}
             </div>
             {canCreate && (
               <div className="mt-3 pt-3 border-t border-bc-border flex gap-2">
                 <input value={newObj} onChange={(e) => setNewObj(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter' && newObj.trim()) { addObjective(selected, newObj.trim()); setNewObj(''); } }} placeholder="Nouvel objectif…" className="flex-1 border border-bc-border rounded-full px-3 py-1.5 text-xs focus:outline-none focus:border-bc-green" />
-                <button onClick={() => { if (newObj.trim()) { addObjective(selected, newObj.trim()); setNewObj(''); } }} disabled={!newObj.trim()} className="px-3 py-1.5 bg-bc-green text-white rounded-full text-xs font-bold disabled:opacity-40"><Plus size={13} /></button>
+                <button onClick={() => { if (newObj.trim()) { addObjective(selected, newObj.trim()); setNewObj(''); } }} disabled={!newObj.trim()} className="px-3 py-1.5 bg-bc-green text-white rounded-full text-xs font-bold disabled:opacity-40 active-scale"><Plus size={13} /></button>
               </div>
             )}
           </div>
@@ -186,7 +218,7 @@ export default function ProjectsView({ activeBranch, simulatedRole }: ProjectsVi
                   <button
                     onClick={() => { if (newActTitle.trim()) { addAction(selected, newActTitle.trim(), newActAssignee.trim(), newActDue); setNewActTitle(''); setNewActAssignee(''); setNewActDue(''); } }}
                     disabled={!newActTitle.trim()}
-                    className="px-3 py-1.5 bg-bc-green text-white rounded-full text-xs font-bold disabled:opacity-40 shrink-0"
+                    className="px-3 py-1.5 bg-bc-green text-white rounded-full text-xs font-bold disabled:opacity-40 shrink-0 active-scale"
                   ><Plus size={13} /></button>
                 </div>
               </div>
@@ -197,13 +229,15 @@ export default function ProjectsView({ activeBranch, simulatedRole }: ProjectsVi
                   <p className="text-[10px] font-bold uppercase tracking-wider text-bc-text-secondary mb-1.5">{col.label}</p>
                   <div className="space-y-1.5">
                     {actions.filter((a) => a.status === col.key).map((a) => (
-                      <div key={a.id} className="bg-bc-canvas/50 border border-bc-border rounded-xl px-3 py-2 text-xs">
+                      <div key={a.id} className="bg-bc-canvas/50 border border-bc-border rounded-2xl px-3 py-2 text-xs">
                         <div className="font-bold text-bc-text">{a.title}</div>
                         <div className="text-[10px] text-bc-text-secondary">{a.assignee}{a.due && ` · ${a.due}`}</div>
-                        <div className="flex gap-1 mt-1.5">
-                          {col.key !== 'todo' && <button onClick={() => moveTask(selected, a.id, -1)} className="text-[10px] px-2 py-0.5 rounded-full border border-bc-border hover:bg-white">◀</button>}
-                          {col.key !== 'done' && <button onClick={() => moveTask(selected, a.id, 1)} className="text-[10px] px-2 py-0.5 rounded-full border border-bc-border hover:bg-white">▶</button>}
-                        </div>
+                        {canMoveTask(selected) && (
+                          <div className="flex gap-1 mt-1.5">
+                            {col.key !== 'todo' && <button onClick={() => moveTask(selected, a.id, -1)} className="text-[10px] px-2 py-0.5 rounded-full border border-bc-border hover:bg-white active-scale">◀</button>}
+                            {col.key !== 'done' && <button onClick={() => moveTask(selected, a.id, 1)} className="text-[10px] px-2 py-0.5 rounded-full border border-bc-border hover:bg-white active-scale">▶</button>}
+                          </div>
+                        )}
                       </div>
                     ))}
                     {actions.filter((a) => a.status === col.key).length === 0 && <p className="text-[10px] text-bc-text-secondary italic">—</p>}
@@ -228,7 +262,7 @@ export default function ProjectsView({ activeBranch, simulatedRole }: ProjectsVi
           <p className="text-xs text-bc-text-secondary mt-0.5">Initiatives, objectifs et actions de l'organisation.</p>
         </div>
         {canCreate && (
-          <button onClick={() => setShowCreate(true)} className="px-5 py-2.5 bg-bc-green text-white rounded-full text-xs font-bold hover:opacity-90 transition-colors shadow-sm flex items-center gap-1.5">
+          <button onClick={() => setShowCreate(true)} className="px-5 py-2.5 bg-bc-green text-white rounded-full text-xs font-bold hover:opacity-90 transition-colors active-scale shadow-sm flex items-center gap-1.5">
             <Plus size={14} /> Nouveau Projet
           </button>
         )}
@@ -241,32 +275,47 @@ export default function ProjectsView({ activeBranch, simulatedRole }: ProjectsVi
           <option value="En cours">En cours</option>
           <option value="Terminé">Terminé</option>
         </select>
+        <select value={filterScope} onChange={(e) => setFilterScope(e.target.value)} className="border border-bc-border rounded-full px-3 py-2 text-xs bg-white">
+          <option value="all">Toutes les portées</option>
+          <option value="church">Église</option>
+          <option value="light">Light</option>
+          <option value="both">2 branches</option>
+          <option value="ministry">Ministère</option>
+        </select>
+        {pmoOptions.length > 0 && (
+          <select value={filterPmo} onChange={(e) => setFilterPmo(e.target.value)} className="border border-bc-border rounded-full px-3 py-2 text-xs bg-white">
+            <option value="all">Tous les PMO</option>
+            {pmoOptions.map((pmo) => (
+              <option key={pmo} value={pmo}>{pmo}</option>
+            ))}
+          </select>
+        )}
         <span className="text-xs text-bc-text-secondary self-center">{filtered.length} projet(s)</span>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+      <motion.div variants={staggerParent} initial="hidden" animate="show" className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
         {filtered.map((project) => {
           const objs = project.objectives ?? [];
           const done = objs.filter((o) => o.done).length;
           return (
-            <div key={project.id} onClick={() => setSelectedId(project.id)} className="bg-white border border-bc-border rounded-[1.5rem] p-4 hover:shadow-md hover:border-slate-300 transition-all cursor-pointer group">
+            <motion.div variants={staggerItem} key={project.id} onClick={() => setSelectedId(project.id)} className="bg-white border border-bc-border rounded-2xl p-4 hover:shadow-md hover:border-bc-text-secondary/40 transition-all cursor-pointer group">
               <div className="flex justify-between items-start mb-2">
                 <div>
                   <h4 className="font-bold text-sm text-bc-text group-hover:underline">{project.name}</h4>
                   <p className="text-[10px] text-bc-text-secondary">PMO : {project.pmo} • {scopeLabel(project)}</p>
                 </div>
-                <span className="text-[10px] font-bold px-2 py-1 bg-emerald-50 text-emerald-600 border border-emerald-100 rounded-full">{project.status}</span>
+                <span className="text-[10px] font-bold px-2 py-1 bg-bc-success/10 text-bc-success border border-bc-success/20 rounded-full">{project.status}</span>
               </div>
               <div className="grid grid-cols-3 gap-2 mt-4">
-                <Mini icon={<Target size={14} className="text-slate-400 mb-1" />} value={`${done}/${objs.length} Obj.`} />
-                <Mini icon={<Users size={14} className="text-slate-400 mb-1" />} value={`${(project.team ?? []).length} Memb.`} />
-                <Mini icon={<Calendar size={14} className="text-slate-400 mb-1" />} value={project.endDate ?? 'À définir'} />
+                <Mini icon={<Target size={14} className="text-bc-text-secondary mb-1" />} value={`${done}/${objs.length} Obj.`} />
+                <Mini icon={<Users size={14} className="text-bc-text-secondary mb-1" />} value={`${(project.team ?? []).length} Memb.`} />
+                <Mini icon={<Calendar size={14} className="text-bc-text-secondary mb-1" />} value={project.endDate ?? 'À définir'} />
               </div>
-            </div>
+            </motion.div>
           );
         })}
         {filtered.length === 0 && <p className="text-xs text-bc-text-secondary italic">Aucun projet pour ces filtres.</p>}
-      </div>
+      </motion.div>
 
       {showCreate && <CreateProjectModal onClose={() => setShowCreate(false)} onCreate={(p) => { setProjects((prev) => [p, ...prev]); setShowCreate(false); }} />}
     </div>
@@ -286,7 +335,7 @@ function Mini({ icon, value }: { icon: React.ReactNode; value: string }) {
   return (
     <div className="bg-bc-canvas rounded-xl p-2 flex flex-col items-center justify-center text-center">
       {icon}
-      <span className="text-[10px] font-bold text-slate-700">{value}</span>
+      <span className="text-[10px] font-bold text-bc-text-secondary">{value}</span>
     </div>
   );
 }
@@ -309,7 +358,7 @@ function CreateProjectModal({ onClose, onCreate }: { onClose: () => void; onCrea
       <div className="bg-white rounded-[2rem] p-6 w-full max-w-md shadow-xl" onClick={(e) => e.stopPropagation()}>
         <div className="flex justify-between items-center mb-4">
           <h3 className="font-ui font-bold text-bc-text">Nouveau projet</h3>
-          <button onClick={onClose} className="text-bc-text-secondary hover:text-bc-text"><X size={18} /></button>
+          <button onClick={onClose} className="text-bc-text-secondary hover:text-bc-text active-scale"><X size={18} /></button>
         </div>
         <div className="space-y-3">
           <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Nom du projet" className="w-full border border-bc-border rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-bc-green" />
@@ -328,7 +377,7 @@ function CreateProjectModal({ onClose, onCreate }: { onClose: () => void; onCrea
           <label className="block text-[10px] font-bold uppercase tracking-wider text-bc-text-secondary">Échéance</label>
           <input type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} className="w-full border border-bc-border rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-bc-green" />
         </div>
-        <button onClick={submit} disabled={!name.trim() || !pmo.trim()} className="w-full mt-5 bg-bc-green text-white rounded-full py-2.5 text-sm font-bold hover:opacity-90 disabled:opacity-40">
+        <button onClick={submit} disabled={!name.trim() || !pmo.trim()} className="w-full mt-5 bg-bc-green text-white rounded-full py-2.5 text-sm font-bold hover:opacity-90 disabled:opacity-40 active-scale">
           Créer le projet
         </button>
       </div>

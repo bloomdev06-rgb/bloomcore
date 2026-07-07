@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import {
   Bus,
   Map as MapIcon,
@@ -10,9 +10,46 @@ import {
   Activity,
   Plus,
   X,
+  TrendingUp,
 } from "lucide-react";
-import { Member, Branch, BloomBusEntity, Report } from "../types";
-import { useBusLines } from "../data";
+import { LineChart, Line, XAxis, YAxis, Tooltip, Legend } from "recharts";
+import { Member, Branch, BloomBusEntity, Report, Event, FormDef } from "../types";
+import { useBusLines, save } from "../data";
+import { busMobilisationRate, moissonTotal, busVisitesTotal, dominantHealthLevel } from "../data/kpi";
+import { ResponsiveChart } from "./ui/ResponsiveChart";
+import { HEALTH_AXES } from "./DashboardView";
+import { HealthSmiley } from "./ui/HealthSmiley";
+import { motion } from "motion/react";
+import { staggerParent, staggerItem } from "./ui/motion";
+import { Avatar } from "./ui/Avatar";
+
+// §Accueil-1.3/§5 — les 4 critères réellement saisis par le rapport de suivi Bloom Bus
+// (presenceCulte/presenceService sont des compteurs, pas une échelle 1-5 : exclus du smiley/courbe ici).
+const BUS_HEALTH_KEYS = new Set(["spirituel", "social", "physique", "financier"]);
+const BUS_HEALTH_AXES = HEALTH_AXES.filter((a) => BUS_HEALTH_KEYS.has(a.key));
+
+// Rapports rapport_bloom_bus_member → série temporelle moyenne par critère (un point par date de rapport).
+function healthEvolutionSeries(matchReports: Report[]) {
+  const byDate = new Map<string, { spr: number[]; soc: number[]; fin: number[]; phy: number[] }>();
+  [...matchReports]
+    .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime())
+    .forEach((r) => {
+      if (!byDate.has(r.date)) byDate.set(r.date, { spr: [], soc: [], fin: [], phy: [] });
+      const b = byDate.get(r.date)!;
+      b.spr.push(Number(r.content?.sprVal ?? 0));
+      b.soc.push(Number(r.content?.socVal ?? 0));
+      b.fin.push(Number(r.content?.finVal ?? 0));
+      b.phy.push(Number(r.content?.phyVal ?? 0));
+    });
+  const avg = (arr: number[]) => (arr.length ? Math.round((arr.reduce((s, v) => s + v, 0) / arr.length) * 10) / 10 : 0);
+  return Array.from(byDate.entries()).map(([date, b]) => ({
+    date,
+    Spirituelle: avg(b.spr),
+    Sociale: avg(b.soc),
+    Physique: avg(b.phy),
+    Financière: avg(b.fin),
+  }));
+}
 
 // Échelle de santé : choix parmi 5 niveaux (au lieu d'un curseur).
 const RATINGS = [
@@ -25,14 +62,14 @@ const RATINGS = [
 function RatingRow({ label, value, onChange }: { label: string; value: number; onChange: (v: number) => void }) {
   return (
     <div>
-      <label className="block text-xs font-bold text-slate-700 mb-1.5">{label}</label>
+      <label className="block text-xs font-bold text-bc-text-secondary mb-1.5">{label}</label>
       <div className="grid grid-cols-5 gap-1.5">
         {RATINGS.map((r) => (
           <button
             key={r.v}
             type="button"
             onClick={() => onChange(r.v)}
-            className={`py-1.5 rounded-lg text-[10px] font-bold border transition-colors ${value === r.v ? "bg-bc-green text-white border-bc-green" : "bg-white text-bc-text-secondary border-bc-border hover:bg-bc-canvas"}`}
+            className={`py-1.5 rounded-lg text-[10px] font-bold border transition-colors active-scale ${value === r.v ? "bg-bc-green text-white border-bc-green" : "bg-white text-bc-text-secondary border-bc-border hover:bg-bc-canvas"}`}
           >
             {r.label}
           </button>
@@ -44,10 +81,13 @@ function RatingRow({ label, value, onChange }: { label: string; value: number; o
 
 interface BloomBusViewProps {
   members: Member[];
+  reports: Report[];
+  events?: Event[];
   onUpdateMember: (member: Member) => void;
   onAddReport: (report: Report) => void;
   activeBranch: Branch;
   simulatedRole: string;
+  forms?: FormDef[];
 }
 
 // Real OpenStreetMap embed, bbox fitted to the selected territory (marker at centroid).
@@ -67,14 +107,25 @@ function osmUrl(buses: BloomBusEntity[]): string {
 
 export default function BloomBusView({
   members,
+  reports,
+  events = [],
   onUpdateMember,
   onAddReport,
   activeBranch,
   simulatedRole,
+  forms = [],
 }: BloomBusViewProps) {
+  // ponytail: pas de sélecteur de période ici (KPIS.md ne précise pas de granularité par vue) ; mois par défaut, comme le Dashboard.
+  const kpiPeriod = "month" as const;
+  // P1.4 — labels read live from FormBuilder's fd_bus_sante FormDef, id-matched (not
+  // position-matched) so reordering fields in the builder doesn't relabel the wrong value.
+  const santeForm = forms.find((f) => f.id === "fd_bus_sante");
+  const santeLabel = (fieldId: string, fallback: string) =>
+    santeForm?.fields.find((f) => f.id === fieldId)?.label ?? fallback;
   const seedBus = useBusLines();
   // ponytail: local session state; persist via ./data at backend time.
   const [busLines, setBusLines] = useState<BloomBusEntity[]>(seedBus);
+  useEffect(() => { save('bc_bus_lines', busLines); }, [busLines]);
   const [showAddBus, setShowAddBus] = useState(false);
   const [expandedCommunes, setExpandedCommunes] = useState<string[]>([
     "Cocody",
@@ -94,14 +145,24 @@ export default function BloomBusView({
   const [socVal, setSocVal] = useState(3);
   const [finVal, setFinVal] = useState(3);
   const [phyVal, setPhyVal] = useState(3);
-  const [culVal, setCulVal] = useState(3);
+  // P2.8 — sélection du/des culte(s) auxquels le membre était présent, plutôt qu'une échelle 1-5.
+  const [culteIds, setCulteIds] = useState<string[]>([]);
+  const toggleCulte = (id: string) =>
+    setCulteIds((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
 
   // Life report
   const [mobilisedCount, setMobilisedCount] = useState(30);
   const [presentCulteCount, setPresentCulteCount] = useState(28);
-  const [visitsCount, setVisitsCount] = useState(3);
+  // P2.8 — multi-sélection des membres visités, plutôt qu'un simple compteur.
+  const [visitedMemberIds, setVisitedMemberIds] = useState<string[]>([]);
+  const toggleVisitedMember = (id: string) =>
+    setVisitedMemberIds((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
   const [newArrvCount, setNewArrvCount] = useState(2);
   const [incidents, setIncidents] = useState("Aucun incident signalé.");
+
+  const culteEvents = events.filter(
+    (e) => e.type.startsWith("dimanche_") && (activeBranch === "global" || e.branch === activeBranch || e.branch === "global"),
+  );
 
   // Grouping
   const busByCommune: Record<string, Record<string, BloomBusEntity[]>> = {};
@@ -141,6 +202,12 @@ export default function BloomBusView({
       m.level !== "Nouveau" &&
       (activeBranch === "global" || m.branch === activeBranch), // étanchéité par branche §3
   );
+  const branchReports = reports.filter(
+    (r) => activeBranch === "global" || r.targetBranch === activeBranch,
+  );
+  const tMobBus = busMobilisationRate(busMembers, branchReports, busIds, kpiPeriod);
+  const moisson = moissonTotal(branchReports, kpiPeriod, new Date(), busIds);
+  const visites = busVisitesTotal(branchReports, busIds, kpiPeriod);
 
   const canEdit = [
     "Pasteur",
@@ -150,7 +217,30 @@ export default function BloomBusView({
     "Capitaine",
     "Super Admin",
     "Ministre",
+    "Responsable de Zone",
+    "Responsable de Commune",
   ].includes(simulatedRole);
+  // ECRANS-PAR-ONGLET.md §5.3 — CRUD territorial (créer bus/zone/commune) réservé à l'Admin,
+  // distinct de canEdit qui ne couvre que la saisie de rapport de suivi.
+  const canAdminTerritory = ["Admin", "Super Admin"].includes(simulatedRole);
+
+  // Nombre de membres par territoire (§5 — commune / zone / bus), pour l'arbre de la sidebar.
+  const countForBusIds = (ids: string[]) =>
+    members.filter(
+      (m) => m.bloomBusId && ids.includes(m.bloomBusId) && m.level !== "Nouveau" && (activeBranch === "global" || m.branch === activeBranch),
+    ).length;
+
+  // Synthèse santé + évolution (§Accueil-1.3 / §5) — sur les membres du niveau territorial sélectionné.
+  const busHealthReports = reports.filter(
+    (r) => r.reportType === "rapport_bloom_bus_member" && busMembers.some((m) => m.id === r.content?.memberId) && (activeBranch === "global" || r.targetBranch === activeBranch),
+  );
+  const busEvolutionData = healthEvolutionSeries(busHealthReports);
+
+  // Évolution personnelle du membre ouvert dans la modale de suivi.
+  const memberHealthReports = reports.filter(
+    (r) => r.reportType === "rapport_bloom_bus_member" && r.content?.memberId === targetMemberId && (activeBranch === "global" || r.targetBranch === activeBranch),
+  );
+  const memberEvolutionData = healthEvolutionSeries(memberHealthReports);
 
   const handleSaveMemberHealth = (e: React.FormEvent) => {
     e.preventDefault();
@@ -164,7 +254,8 @@ export default function BloomBusView({
         social: socVal,
         financier: finVal,
         physique: phyVal,
-        presenceCulte: culVal,
+        // ponytail: presenceCulte reste un nombre agrégé (rollup) — dérivé du nombre de cultes sélectionnés.
+        presenceCulte: culteIds.length,
         presenceService: targetMember.healthKPIs?.presenceService || 3,
       },
     };
@@ -185,10 +276,11 @@ export default function BloomBusView({
         socVal,
         finVal,
         phyVal,
-        culVal,
+        culteIds,
       },
     });
     setShowMemberReportModal(false);
+    setCulteIds([]);
   };
 
   const handleSaveLifeReport = (e: React.FormEvent) => {
@@ -207,12 +299,13 @@ export default function BloomBusView({
         busId: selectedLevel.id,
         mobilised: mobilisedCount,
         presencesCulte: presentCulteCount,
-        visitesRealisees: visitsCount,
+        visitesRealisees: visitedMemberIds,
         moissonNouveaux: newArrvCount,
         incidents,
       },
     });
     setShowLifeReportModal(false);
+    setVisitedMemberIds([]);
   };
 
   return (
@@ -221,23 +314,31 @@ export default function BloomBusView({
       <div className="w-full lg:w-72 bg-white rounded-[2rem] border border-bc-border shadow-sm p-4 flex flex-col shrink-0 overflow-y-auto">
         <div className="flex items-center justify-between mb-4 px-2">
           <h3 className="font-ui font-bold text-bc-text">Territoires Bloom</h3>
-          {canEdit && (
-            <button onClick={() => setShowAddBus(true)} title="Ajouter un bus" className="p-1.5 rounded-full bg-bc-green text-white hover:opacity-90">
+          {canAdminTerritory && (
+            <button onClick={() => setShowAddBus(true)} title="Ajouter un bus" className="p-1.5 rounded-full bg-bc-green text-white hover:opacity-90 active-scale">
               <Plus size={14} />
             </button>
           )}
         </div>
-        <div className="space-y-2">
-          {Object.entries(busByCommune).map(([commune, zones]) => (
-            <div key={commune} className="space-y-1">
+        <motion.div variants={staggerParent} initial="hidden" animate="show" className="space-y-2">
+          {Object.entries(busByCommune).map(([commune, zones]) => {
+            const communeBusIds = Object.values(zones).flat().map((b) => b.id);
+            const communeCount = countForBusIds(communeBusIds);
+            return (
+            <motion.div variants={staggerItem} key={commune} className="space-y-1">
               <div
-                className={`flex items-center justify-between p-2 rounded-xl cursor-pointer ${selectedLevel.type === "commune" && selectedLevel.id === commune ? "bg-bc-green text-white" : "hover:bg-bc-canvas text-slate-700"}`}
+                className={`flex items-center justify-between p-2 rounded-xl cursor-pointer active-scale ${selectedLevel.type === "commune" && selectedLevel.id === commune ? "bg-bc-green text-white" : "hover:bg-bc-canvas text-bc-text-secondary"}`}
                 onClick={() => {
                   setSelectedLevel({ type: "commune", id: commune });
                   toggleCommune(commune);
                 }}
               >
-                <span className="font-bold text-sm">{commune}</span>
+                <span className="font-bold text-sm flex items-center gap-2 min-w-0">
+                  <span className="truncate">{commune}</span>
+                  <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded-full shrink-0 ${selectedLevel.type === "commune" && selectedLevel.id === commune ? "bg-white/20" : "bg-bc-canvas text-bc-text-secondary"}`}>
+                    {communeCount}
+                  </span>
+                </span>
                 {expandedCommunes.includes(commune) ? (
                   <ChevronDown size={16} />
                 ) : (
@@ -247,17 +348,25 @@ export default function BloomBusView({
 
               {expandedCommunes.includes(commune) && (
                 <div className="pl-4 space-y-1">
-                  {Object.entries(zones).map(([zone, buses]) => (
+                  {Object.entries(zones).map(([zone, buses]) => {
+                    const zoneBusIds = buses.map((b) => b.id);
+                    const zoneCount = countForBusIds(zoneBusIds);
+                    return (
                     <div key={zone} className="space-y-1">
                       <div
-                        className={`flex items-center justify-between p-2 rounded-xl cursor-pointer ${selectedLevel.type === "zone" && selectedLevel.id === zone ? "bg-bc-green text-white" : "hover:bg-bc-canvas text-slate-700"}`}
+                        className={`flex items-center justify-between p-2 rounded-xl cursor-pointer active-scale ${selectedLevel.type === "zone" && selectedLevel.id === zone ? "bg-bc-green text-white" : "hover:bg-bc-canvas text-bc-text-secondary"}`}
                         onClick={(e) => {
                           e.stopPropagation();
                           setSelectedLevel({ type: "zone", id: zone });
                           toggleZone(zone);
                         }}
                       >
-                        <span className="font-bold text-xs">{zone}</span>
+                        <span className="font-bold text-xs flex items-center gap-2 min-w-0">
+                          <span className="truncate">{zone}</span>
+                          <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded-full shrink-0 ${selectedLevel.type === "zone" && selectedLevel.id === zone ? "bg-white/20" : "bg-bc-canvas text-bc-text-secondary"}`}>
+                            {zoneCount}
+                          </span>
+                        </span>
                         {expandedZones.includes(zone) ? (
                           <ChevronDown size={14} />
                         ) : (
@@ -267,30 +376,38 @@ export default function BloomBusView({
 
                       {expandedZones.includes(zone) && (
                         <div className="pl-4 space-y-1">
-                          {buses.map((bus) => (
+                          {buses.map((bus) => {
+                            const busCount = countForBusIds([bus.id]);
+                            return (
                             <div
                               key={bus.id}
-                              className={`flex items-center p-2 rounded-xl cursor-pointer ${selectedLevel.type === "bus" && selectedLevel.id === bus.id ? "bg-slate-100 text-bc-text" : "hover:bg-bc-canvas text-bc-text-secondary"}`}
+                              className={`flex items-center p-2 rounded-xl cursor-pointer active-scale ${selectedLevel.type === "bus" && selectedLevel.id === bus.id ? "bg-bc-green text-white" : "hover:bg-bc-canvas text-bc-text-secondary"}`}
                               onClick={(e) => {
                                 e.stopPropagation();
                                 setSelectedLevel({ type: "bus", id: bus.id });
                               }}
                             >
                               <Bus size={12} className="mr-2 shrink-0" />
-                              <span className="text-xs font-bold leading-tight">
+                              <span className="text-xs font-bold leading-tight flex-1 truncate">
                                 {bus.name}
                               </span>
+                              <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded-full shrink-0 ${selectedLevel.type === "bus" && selectedLevel.id === bus.id ? "bg-white/20" : "bg-white text-bc-text-secondary border border-bc-border"}`}>
+                                {busCount}
+                              </span>
                             </div>
-                          ))}
+                            );
+                          })}
                         </div>
                       )}
                     </div>
-                  ))}
+                    );
+                  })}
                 </div>
               )}
-            </div>
-          ))}
-        </div>
+            </motion.div>
+            );
+          })}
+        </motion.div>
       </div>
 
       {/* Main Content Area */}
@@ -319,11 +436,16 @@ export default function BloomBusView({
               <span className="text-[10px] font-bold uppercase text-bc-text-secondary tracking-wider">
                 T_mob_bus
               </span>
-              <Activity size={14} className="text-slate-400" />
+              <Activity size={14} className="text-bc-text-secondary" />
             </div>
-            <div className="text-3xl font-black text-bc-text">84%</div>
-            <div className="text-[10px] text-emerald-500 font-bold mt-1 bg-emerald-50 px-2 py-0.5 rounded-full">
-              +5% ce mois
+            <div className="text-3xl font-black text-bc-text">{tMobBus === null ? "—" : `${tMobBus}%`}</div>
+            {tMobBus !== null && (
+              <div className="flex h-2 w-full mt-2 rounded-full overflow-hidden bg-bc-canvas">
+                <div className="bg-bc-cerulean transition-all duration-500 ease-out-spring" style={{ width: `${tMobBus}%` }} />
+              </div>
+            )}
+            <div className="text-[10px] text-bc-text-secondary font-bold mt-1 bg-bc-canvas px-2 py-0.5 rounded-full border border-bc-border">
+              Sur le mois
             </div>
           </div>
           <div className="bg-white p-4 rounded-2xl border border-bc-border shadow-sm flex flex-col justify-center items-center">
@@ -331,9 +453,9 @@ export default function BloomBusView({
               <span className="text-[10px] font-bold uppercase text-bc-text-secondary tracking-wider">
                 Moisson
               </span>
-              <Users size={14} className="text-slate-400" />
+              <Users size={14} className="text-bc-text-secondary" />
             </div>
-            <div className="text-3xl font-black text-bc-text">12</div>
+            <div className="text-3xl font-black text-bc-text">{moisson}</div>
             <div className="text-[10px] text-bc-text-secondary font-bold mt-1 bg-bc-canvas px-2 py-0.5 rounded-full border border-bc-border">
               Nouveaux gagnés
             </div>
@@ -343,12 +465,63 @@ export default function BloomBusView({
               <span className="text-[10px] font-bold uppercase text-bc-text-secondary tracking-wider">
                 Visites
               </span>
-              <Heart size={14} className="text-slate-400" />
+              <Heart size={14} className="text-bc-text-secondary" />
             </div>
-            <div className="text-3xl font-black text-bc-text">34</div>
+            <div className="text-3xl font-black text-bc-text">{visites}</div>
             <div className="text-[10px] text-bc-text-secondary font-bold mt-1 bg-bc-canvas px-2 py-0.5 rounded-full border border-bc-border">
-              Membres visités
+              Visites réalisées
             </div>
+          </div>
+        </div>
+
+        {/* Santé spirituelle du territoire — synthèse (smileys) + évolution (courbes) */}
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 shrink-0">
+          <div className="bg-white p-5 rounded-[2rem] border border-bc-border shadow-sm flex flex-col justify-center">
+            <h3 className="text-sm font-ui font-bold text-bc-text mb-4 flex items-center gap-2">
+              <Heart size={16} /> Synthèse santé spirituelle
+            </h3>
+            {busMembers.length === 0 ? (
+              <p className="text-xs text-bc-text-secondary italic text-center py-6">Aucun membre rattaché à ce niveau.</p>
+            ) : (
+              <div className="flex flex-col h-full justify-center space-y-4">
+                <div className="grid grid-cols-4 gap-1 w-full text-center">
+                  {BUS_HEALTH_AXES.map((axis) => {
+                    const level = dominantHealthLevel(busMembers, axis.key);
+                    return (
+                      <div key={axis.key} className="min-w-0">
+                        <HealthSmiley value={level} size={26} />
+                        <div className="text-[9px] sm:text-[10px] font-bold text-bc-text-secondary truncate mt-1">{axis.label}</div>
+                      </div>
+                    );
+                  })}
+                </div>
+                <p className="text-center text-[10px] text-bc-text-secondary">Niveau dominant par critère (sur {busMembers.length} membres)</p>
+              </div>
+            )}
+          </div>
+
+          <div className="bg-white p-5 rounded-[2rem] border border-bc-border shadow-sm flex flex-col">
+            <h3 className="text-sm font-ui font-bold text-bc-text mb-4 flex items-center gap-2">
+              <TrendingUp size={16} /> Évolution des critères
+            </h3>
+            {busEvolutionData.length === 0 ? (
+              <p className="text-xs text-bc-text-secondary italic text-center py-6 flex-1 flex items-center justify-center">Pas encore assez de rapports de suivi pour tracer une courbe.</p>
+            ) : (
+              <div className="h-48 min-w-0">
+                <ResponsiveChart height="100%" minHeight={150}>
+                  <LineChart data={busEvolutionData}>
+                    <XAxis dataKey="date" fontSize={9} axisLine={false} tickLine={false} />
+                    <YAxis domain={[1, 5]} fontSize={9} axisLine={false} tickLine={false} width={20} />
+                    <Tooltip contentStyle={{ borderRadius: "1rem", border: "none", boxShadow: "0 4px 6px -1px rgb(0 0 0 / 0.1)", fontSize: 11 }} />
+                    <Legend wrapperStyle={{ fontSize: 10 }} />
+                    <Line type="monotone" dataKey="Spirituelle" stroke="var(--accent-1)" strokeWidth={2} dot={false} />
+                    <Line type="monotone" dataKey="Sociale" stroke="var(--accent-2)" strokeWidth={2} dot={false} />
+                    <Line type="monotone" dataKey="Physique" stroke="var(--color-bc-purple)" strokeWidth={2} dot={false} />
+                    <Line type="monotone" dataKey="Financière" stroke="var(--color-bc-text-secondary)" strokeWidth={2} dot={false} />
+                  </LineChart>
+                </ResponsiveChart>
+              </div>
+            )}
           </div>
         </div>
 
@@ -386,7 +559,7 @@ export default function BloomBusView({
                 {canEdit && (
                   <button
                     onClick={() => setShowLifeReportModal(true)}
-                    className="text-[10px] font-bold text-bc-green flex items-center gap-1 px-2 py-1 rounded-full hover:bg-bc-green/10"
+                    className="text-[10px] font-bold text-bc-green flex items-center gap-1 px-2 py-1 rounded-full hover:bg-bc-green/10 active-scale"
                     title="Rapport d'activité du bus (Capitaine)"
                   >
                     <Sliders size={13} /> Rapport d'activité
@@ -407,12 +580,14 @@ export default function BloomBusView({
                       key={m.id}
                       onClick={() => { if (canEdit) { setTargetMemberId(m.id); setShowMemberReportModal(true); } }}
                       disabled={!canEdit}
-                      className="w-full text-left p-3 bg-bc-canvas border border-bc-border rounded-xl flex items-center gap-3 hover:bg-slate-100 transition-colors disabled:cursor-default"
+                      className="w-full text-left p-3 bg-bc-canvas border border-bc-border rounded-xl flex items-center gap-3 hover:bg-bc-border/40 transition-colors disabled:cursor-default active-scale"
                     >
-                      <div className="w-10 h-10 rounded-full bg-white border border-bc-border text-bc-text flex justify-center items-center font-bold text-xs shadow-sm shrink-0">
-                        {m.firstName[0]}
-                        {m.lastName[0]}
-                      </div>
+                      <Avatar
+                        src={m.avatarUrl}
+                        initials={`${m.firstName[0]}${m.lastName[0]}`}
+                        size="sm"
+                        className="w-10 h-10 bg-white border border-bc-border text-bc-text text-xs shadow-sm"
+                      />
                       <div className="min-w-0 flex-1">
                         <p className="text-sm font-bold text-bc-text truncate">
                           {m.firstName} {m.lastName}
@@ -446,24 +621,61 @@ export default function BloomBusView({
                   {(() => { const t = members.find((m) => m.id === targetMemberId); return t ? `${t.firstName} ${t.lastName}` : "—"; })()}
                 </span>
               </div>
+
+              {memberEvolutionData.length > 0 && (
+                <div className="p-3 rounded-xl border border-bc-border">
+                  <span className="text-[10px] text-bc-text-secondary font-bold uppercase flex items-center gap-1 mb-1">
+                    <TrendingUp size={11} /> Évolution personnelle
+                  </span>
+                  <div className="h-32 min-w-0">
+                    <ResponsiveChart height="100%" minHeight={100}>
+                      <LineChart data={memberEvolutionData}>
+                        <XAxis dataKey="date" fontSize={8} axisLine={false} tickLine={false} />
+                        <YAxis domain={[1, 5]} fontSize={8} axisLine={false} tickLine={false} width={16} />
+                        <Tooltip contentStyle={{ borderRadius: "1rem", border: "none", boxShadow: "0 4px 6px -1px rgb(0 0 0 / 0.1)", fontSize: 10 }} />
+                        <Line type="monotone" dataKey="Spirituelle" stroke="var(--accent-1)" strokeWidth={2} dot={false} />
+                        <Line type="monotone" dataKey="Sociale" stroke="var(--accent-2)" strokeWidth={2} dot={false} />
+                        <Line type="monotone" dataKey="Physique" stroke="var(--color-bc-purple)" strokeWidth={2} dot={false} />
+                        <Line type="monotone" dataKey="Financière" stroke="var(--color-bc-text-secondary)" strokeWidth={2} dot={false} />
+                      </LineChart>
+                    </ResponsiveChart>
+                  </div>
+                </div>
+              )}
+
               <div className="space-y-4">
-                <RatingRow label="Spiritualité" value={sprVal} onChange={setSprVal} />
-                <RatingRow label="Social" value={socVal} onChange={setSocVal} />
-                <RatingRow label="Physique" value={phyVal} onChange={setPhyVal} />
-                <RatingRow label="Financier" value={finVal} onChange={setFinVal} />
-                <RatingRow label="Présence au culte" value={culVal} onChange={setCulVal} />
+                <RatingRow label={santeLabel("f0", "Spiritualité")} value={sprVal} onChange={setSprVal} />
+                <RatingRow label={santeLabel("f1", "Social")} value={socVal} onChange={setSocVal} />
+                <RatingRow label={santeLabel("f2", "Physique")} value={phyVal} onChange={setPhyVal} />
+                <RatingRow label={santeLabel("f3", "Financier")} value={finVal} onChange={setFinVal} />
+                <div>
+                  <label className="block text-xs font-bold text-bc-text-secondary mb-1.5">Présence au culte / événement</label>
+                  <div className="flex flex-wrap gap-2">
+                    {culteEvents.map((ev) => (
+                      <button
+                        type="button"
+                        key={ev.id}
+                        onClick={() => toggleCulte(ev.id)}
+                        className={`text-xs font-medium px-3 py-1.5 rounded-full border active-scale ${culteIds.includes(ev.id) ? "bg-bc-green text-white border-bc-green" : "bg-white text-bc-text border-bc-border"}`}
+                      >
+                        {ev.title} · {ev.date}
+                      </button>
+                    ))}
+                    {culteEvents.length === 0 && <p className="text-xs text-bc-text-secondary italic">Aucun culte enregistré.</p>}
+                  </div>
+                </div>
               </div>
               <div className="flex justify-end gap-3 pt-4">
                 <button
                   type="button"
                   onClick={() => setShowMemberReportModal(false)}
-                  className="px-5 py-2.5 bg-slate-100 text-slate-700 rounded-full text-xs font-bold hover:bg-slate-200 transition-colors"
+                  className="px-5 py-2.5 bg-bc-canvas text-bc-text-secondary rounded-full text-xs font-bold hover:bg-bc-border/40 transition-colors active-scale"
                 >
                   Annuler
                 </button>
                 <button
                   type="submit"
-                  className="px-5 py-2.5 bg-bc-green text-white rounded-full text-xs font-bold hover:bg-slate-800 transition-colors"
+                  className="px-5 py-2.5 bg-bc-green text-white rounded-full text-xs font-bold hover:opacity-90 transition-colors active-scale"
                 >
                   Enregistrer
                 </button>
@@ -482,7 +694,7 @@ export default function BloomBusView({
             <form onSubmit={handleSaveLifeReport} className="space-y-4">
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1">
+                  <label className="block text-xs font-bold text-bc-text-secondary mb-1">
                     Mobilisation
                   </label>
                   <input
@@ -493,7 +705,7 @@ export default function BloomBusView({
                   />
                 </div>
                 <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1">
+                  <label className="block text-xs font-bold text-bc-text-secondary mb-1">
                     Présence Culte
                   </label>
                   <input
@@ -506,7 +718,7 @@ export default function BloomBusView({
                   />
                 </div>
                 <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1">
+                  <label className="block text-xs font-bold text-bc-text-secondary mb-1">
                     Nouveaux gagnés
                   </label>
                   <input
@@ -516,20 +728,27 @@ export default function BloomBusView({
                     className="w-full p-2.5 border border-bc-border rounded-xl bg-bc-canvas text-sm font-bold focus:bg-white focus:outline-none"
                   />
                 </div>
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1">
-                    Visites Réalisées
-                  </label>
-                  <input
-                    type="number"
-                    value={visitsCount}
-                    onChange={(e) => setVisitsCount(Number(e.target.value))}
-                    className="w-full p-2.5 border border-bc-border rounded-xl bg-bc-canvas text-sm font-bold focus:bg-white focus:outline-none"
-                  />
+              </div>
+              <div>
+                <label className="block text-xs font-bold text-bc-text-secondary mb-1">
+                  Membres visités
+                </label>
+                <div className="flex flex-wrap gap-2 max-h-32 overflow-y-auto">
+                  {busMembers.map((m) => (
+                    <button
+                      type="button"
+                      key={m.id}
+                      onClick={() => toggleVisitedMember(m.id)}
+                      className={`text-xs font-medium px-3 py-1.5 rounded-full border active-scale ${visitedMemberIds.includes(m.id) ? "bg-bc-green text-white border-bc-green" : "bg-white text-bc-text border-bc-border"}`}
+                    >
+                      {m.firstName} {m.lastName}
+                    </button>
+                  ))}
+                  {busMembers.length === 0 && <p className="text-xs text-bc-text-secondary italic">Aucun membre dans ce bus.</p>}
                 </div>
               </div>
               <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1">
+                <label className="block text-xs font-bold text-bc-text-secondary mb-1">
                   Incidents / Activité
                 </label>
                 <textarea
@@ -542,13 +761,13 @@ export default function BloomBusView({
                 <button
                   type="button"
                   onClick={() => setShowLifeReportModal(false)}
-                  className="px-5 py-2.5 bg-slate-100 text-slate-700 rounded-full text-xs font-bold hover:bg-slate-200 transition-colors"
+                  className="px-5 py-2.5 bg-bc-canvas text-bc-text-secondary rounded-full text-xs font-bold hover:bg-bc-border/40 transition-colors active-scale"
                 >
                   Annuler
                 </button>
                 <button
                   type="submit"
-                  className="px-5 py-2.5 bg-bc-green text-white rounded-full text-xs font-bold hover:bg-slate-800 transition-colors"
+                  className="px-5 py-2.5 bg-bc-green text-white rounded-full text-xs font-bold hover:opacity-90 transition-colors active-scale"
                 >
                   Enregistrer
                 </button>
@@ -595,7 +814,7 @@ function AddBusModal({ onClose, onAdd }: { onClose: () => void; onAdd: (b: Bloom
       <div className="bg-white rounded-[2rem] p-6 w-full max-w-md shadow-xl" onClick={(e) => e.stopPropagation()}>
         <div className="flex justify-between items-center mb-4">
           <h3 className="font-ui font-bold text-bc-text">Ajouter un bus</h3>
-          <button onClick={onClose} className="text-bc-text-secondary hover:text-bc-text"><X size={18} /></button>
+          <button onClick={onClose} className="text-bc-text-secondary hover:text-bc-text active-scale"><X size={18} /></button>
         </div>
         <div className="space-y-3">
           <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Nom du bus" className="w-full border border-bc-border rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-bc-green" />
@@ -612,7 +831,7 @@ function AddBusModal({ onClose, onAdd }: { onClose: () => void; onAdd: (b: Bloom
             </div>
           </div>
         </div>
-        <button onClick={submit} disabled={!name.trim() || !commune.trim() || !zone.trim()} className="w-full mt-5 bg-bc-green text-white rounded-full py-2.5 text-sm font-bold hover:opacity-90 disabled:opacity-40">
+        <button onClick={submit} disabled={!name.trim() || !commune.trim() || !zone.trim()} className="w-full mt-5 bg-bc-green text-white rounded-full py-2.5 text-sm font-bold hover:opacity-90 disabled:opacity-40 active-scale">
           Ajouter le bus
         </button>
       </div>

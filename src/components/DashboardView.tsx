@@ -1,32 +1,60 @@
 import React, { useState } from 'react';
-import { Branch, Member, Event } from '../types';
-import { LayoutDashboard, Users, Bus, TrendingUp, AlertCircle, Calendar, Clock, Smile, Meh, Star, Frown } from 'lucide-react';
-import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip } from 'recharts';
+import { Branch, Member, Event, Report } from '../types';
+import { Users, Bus, TrendingUp, AlertCircle, Clock, X, FolderKanban } from 'lucide-react';
+import { AreaChart, Area, XAxis, Tooltip, ResponsiveContainer } from 'recharts';
 import { ResponsiveChart } from './ui/ResponsiveChart';
 import { motion } from 'motion/react';
 import MiniCalendar from './MiniCalendar';
-import { dominantHealthLevel } from '../data/kpi';
+import { HealthSmiley } from './ui/HealthSmiley';
+import {
+  isRed, activeMemberIds, activeMemberWindow, activeBusIds, moissonBySource, pendingFollowUps,
+  periodHealthLevels, projectProgress, periodRange, Period, PeriodInput,
+  weeklyBaptismCounts, weeklyActiveCounts, weeklyMoissonCounts,
+} from '../data/kpi';
+import { useBusLines, useProjects, useDepartments } from '../data';
 
 interface DashboardViewProps {
   activeBranch: Branch;
   simulatedRole: string;
   members?: Member[];
   events?: Event[];
+  reports?: Report[];
   setActiveTab?: (tab: string) => void;
   onOpenQuickNewForm?: () => void;
+  operatorId?: string;
+  onMarkReportTreated?: (reportId: string) => void;
 }
 
-// Health level 1..5 → face + colour for the "un smiley par critère" row.
-const FACE: Record<number, { Icon: typeof Smile; color: string }> = {
-  0: { Icon: Meh, color: 'text-slate-300' },
-  1: { Icon: Frown, color: 'text-red-500' },
-  2: { Icon: Frown, color: 'text-orange-500' },
-  3: { Icon: Meh, color: 'text-yellow-500' },
-  4: { Icon: Smile, color: 'text-emerald-400' },
-  5: { Icon: Star, color: 'text-emerald-600' },
-};
+// Mini courbe de tendance dans une tuile KPI (8 semaines, sans axes ni tooltip).
+function Spark({ data, color }: { data: { week: string; count: number }[]; color: string }) {
+  return (
+    <div className="h-8 mt-1 -mx-1">
+      <ResponsiveContainer width="100%" height="100%">
+        <AreaChart data={data} margin={{ top: 2, right: 2, bottom: 0, left: 2 }}>
+          <Area type="monotone" dataKey="count" stroke={color} fill={color} fillOpacity={0.15} strokeWidth={1.5} />
+        </AreaChart>
+      </ResponsiveContainer>
+    </div>
+  );
+}
 
-const HEALTH_AXES = [
+// Anneau de proportion (valeur/total) pour les tuiles KPI qui sont une vraie part d'un tout.
+function Ring({ value, total, color }: { value: number; total: number; color: string }) {
+  const C = 2 * Math.PI * 14;
+  const pct = total > 0 ? Math.min(value / total, 1) : 0;
+  return (
+    <svg width="32" height="32" viewBox="0 0 32 32" className="shrink-0 -rotate-90">
+      <circle cx="16" cy="16" r="14" fill="none" stroke="var(--color-bc-border)" strokeWidth="3" />
+      <circle
+        cx="16" cy="16" r="14" fill="none" stroke={color} strokeWidth="3" strokeLinecap="round"
+        strokeDasharray={C} strokeDashoffset={C * (1 - pct)}
+        className="transition-[stroke-dashoffset] duration-700 ease-out-spring"
+      />
+    </svg>
+  );
+}
+
+export const HEALTH_AXES = [
   { key: 'spirituel', label: 'Spirituelle' },
   { key: 'social', label: 'Sociale' },
   { key: 'physique', label: 'Physique' },
@@ -35,13 +63,42 @@ const HEALTH_AXES = [
   { key: 'presenceService', label: 'Présence service' },
 ] as const;
 
-export default function DashboardView({ activeBranch, simulatedRole, members = [], setActiveTab }: DashboardViewProps) {
+export default function DashboardView({ activeBranch, simulatedRole, members = [], reports = [], setActiveTab, operatorId, onMarkReportTreated }: DashboardViewProps) {
   const go = (tab: string) => setActiveTab?.(tab);
   const isChurch = activeBranch === 'church';
-  const [period, setPeriod] = useState('month');
+  // ponytail: défaut "semaine en cours" (fenêtre glissante 7j) — demandé pour la santé globale, appliqué au sélecteur entier.
+  const [period, setPeriod] = useState<Period>('week');
+  const [customFrom, setCustomFrom] = useState('');
+  const [customTo, setCustomTo] = useState('');
+  const [showFollowUps, setShowFollowUps] = useState(false);
+  const effectivePeriod: PeriodInput = period === 'custom' && customFrom && customTo
+    ? { from: new Date(customFrom), to: new Date(`${customTo}T23:59:59`) }
+    : period;
 
   const branchMembers = members.filter(m => activeBranch === 'global' || m.branch === activeBranch);
+  const branchReports = reports.filter(r => activeBranch === 'global' || r.targetBranch === activeBranch);
   const waitingCount = branchMembers.filter(m => m.integrationState === 'En attente').length;
+  const redCount = branchMembers.filter(m => isRed(m)).length;
+  const pendingReceptionsCount = branchMembers.filter(m => m.integrationState === 'En attente' && m.receptionValidated === false).length;
+  // Actif = a servi ≥ 1 fois sur 1 mois + 1 semaine glissants — fenêtre fixe, indépendante du sélecteur.
+  const activeCount = activeMemberIds(branchReports, activeMemberWindow()).size;
+  const activeBusCount = activeBusIds(branchReports, effectivePeriod).size;
+  const totalBusLines = useBusLines().length;
+  const moisson = moissonBySource(branchReports, effectivePeriod);
+  const { from: pFrom, to: pTo } = periodRange(effectivePeriod);
+  const periodBaptised = branchMembers.filter(m => m.baptismDate && new Date(m.baptismDate) >= pFrom && new Date(m.baptismDate) <= pTo);
+  const baptisedViaDept = periodBaptised.filter(m => m.baptismViaDepartment).length;
+  // "Nouveau en attente" — enregistrés et orientés vers un département, pas encore reçus par le responsable.
+  const nouveauxEnAttente = branchMembers.filter(m =>
+    m.level === 'Nouveau' && Object.keys(m.departments ?? {}).length > 0 && m.receptionValidated === false).length;
+  const followUps = pendingFollowUps(branchReports);
+  // §8.3 — même règle de confidentialité que ReportsView : le corps pastoral seul voit le contenu.
+  const canSeeConfidential = ['Pasteur', 'Pasteur Principal', 'Ministre'].includes(simulatedRole);
+  const health = periodHealthLevels(branchReports, effectivePeriod);
+  const projectsInProgress = useProjects().filter(p =>
+    p.status === 'En cours' && (activeBranch === 'global' || p.scope === activeBranch || p.scope === 'both' || p.scope === 'ministry'));
+  const departments = useDepartments();
+  const deptName = (id?: string) => departments.find(d => d.id === id)?.name ?? '';
 
   // §13.3 — dashboard par profil. Encadrement = tableau décisionnel ; autres = tableau personnel.
   const LEADERSHIP = ['Pasteur', 'Pasteur Principal', 'Ministre', 'Admin', 'Super Admin', 'Responsable', 'Coach', 'Leader'];
@@ -50,7 +107,7 @@ export default function DashboardView({ activeBranch, simulatedRole, members = [
     ['Pasteur', 'Pasteur Principal', 'Admin', 'Super Admin'].includes(simulatedRole) ? 'les deux branches'
     : simulatedRole === 'Ministre' ? 'votre ministère'
     : 'votre département';
-  const operator = members.find(m => m.id === 'mem_1') ?? members[0];
+  const operator = members.find(m => m.id === operatorId) ?? members[0];
 
   // --- Personal dashboard (profils non-encadrants) ---
   if (!isLeadership && operator) {
@@ -91,7 +148,7 @@ export default function DashboardView({ activeBranch, simulatedRole, members = [
                 <div className="flex justify-between text-xs"><span className="text-bc-text-secondary">Départements</span><span className="font-bold text-bc-text">{Object.keys(operator.departments ?? {}).length}</span></div>
               </div>
             </div>
-            <button onClick={() => go('profile')} className="w-full py-3 bg-bc-text text-white rounded-[2rem] text-xs font-ui font-bold hover:opacity-90">
+            <button onClick={() => go('profile')} className="w-full py-3 bg-bc-text text-white rounded-[2rem] text-xs font-ui font-bold hover:opacity-90 active-scale">
               Voir mon profil complet
             </button>
           </div>
@@ -139,159 +196,198 @@ export default function DashboardView({ activeBranch, simulatedRole, members = [
           <div className="relative z-10 flex flex-col md:flex-row md:items-center justify-between gap-4">
             <div>
               <h2 className="text-2xl font-ui font-extrabold mb-1 tracking-tight">Bonjour, {simulatedRole}</h2>
-              <p className="text-slate-400 text-sm">
+              <p className="text-white/80 text-sm">
                 Voici la synthèse pour {scopeLabel} au {new Date().toLocaleDateString('fr-FR')}. <br/>
-                <span className="text-emerald-400 font-bold">{waitingCount} nouveaux</span> en attente de suivi.
+                <span className="text-bc-success font-bold">{waitingCount} nouveaux</span> en attente de suivi.
               </p>
             </div>
             
-            <select 
-              value={period}
-              onChange={(e) => setPeriod(e.target.value)}
-              className="bg-white/10 border border-white/20 text-white rounded-full px-4 py-2 text-xs font-bold focus:outline-none focus:ring-1 focus:ring-white w-full md:w-auto cursor-pointer"
-            >
-              <option value="week">Cette Semaine</option>
-              <option value="month">Ce Mois</option>
-              <option value="quarter">Ce Trimestre</option>
-              <option value="year">Cette Année</option>
-              <option value="custom">Personnalisé</option>
-            </select>
+            <div className="flex flex-col md:flex-row md:items-center gap-2">
+              <select
+                value={period}
+                onChange={(e) => setPeriod(e.target.value as Period)}
+                className="bg-white/10 border border-white/20 text-white rounded-full px-4 py-2 text-xs font-bold focus:outline-none focus:ring-1 focus:ring-white w-full md:w-auto cursor-pointer"
+              >
+                <option value="week">Cette Semaine</option>
+                <option value="month">Ce Mois</option>
+                <option value="quarter">Ce Trimestre</option>
+                <option value="year">Cette Année</option>
+                <option value="custom">Personnalisé</option>
+              </select>
+              {period === 'custom' && (
+                <div className="flex items-center gap-2">
+                  <input type="date" value={customFrom} onChange={e => setCustomFrom(e.target.value)}
+                    className="bg-white/10 border border-white/20 text-white rounded-full px-3 py-1.5 text-xs font-bold focus:outline-none focus:ring-1 focus:ring-white cursor-pointer [color-scheme:dark]" />
+                  <span className="text-white/60 text-xs">→</span>
+                  <input type="date" value={customTo} onChange={e => setCustomTo(e.target.value)}
+                    className="bg-white/10 border border-white/20 text-white rounded-full px-3 py-1.5 text-xs font-bold focus:outline-none focus:ring-1 focus:ring-white cursor-pointer [color-scheme:dark]" />
+                </div>
+              )}
+            </div>
           </div>
           <div className="absolute right-0 top-0 w-64 h-full bg-gradient-to-l from-white/10 to-transparent pointer-events-none" />
         </motion.div>
 
         {/* KPI Row */}
         <motion.div variants={itemVariants} className="grid grid-cols-[repeat(auto-fit,minmax(140px,1fr))] gap-4 shrink-0">
-          <div className="bg-white p-4 rounded-[1.5rem] border border-bc-border shadow-sm hover:shadow-md transition-shadow">
+          <div className="bg-white p-4 rounded-2xl border border-bc-border shadow-soft hover:shadow-md transition-shadow">
             <div className="flex items-center gap-2 text-bc-text-secondary mb-2">
               <Users size={14} />
               <span className="text-[9px] font-bold uppercase tracking-wider">Actifs</span>
             </div>
-            <div className="text-xl font-ui font-extrabold text-bc-text tracking-tight">1,245</div>
-            <p className="text-[9px] text-emerald-600 font-bold mt-1">+12% ce mois</p>
+            <div className="text-xl font-ui font-extrabold text-bc-text tracking-tight">{activeCount}</div>
+            <Spark data={weeklyActiveCounts(branchReports, 8)} color="var(--color-bc-green)" />
+            <p className="text-[9px] text-bc-text-secondary mt-1">Ont servi (1 mois + 1 sem.)</p>
           </div>
 
-          <div className="bg-white p-4 rounded-[1.5rem] border border-bc-border shadow-sm hover:shadow-md transition-shadow">
+          <div className="bg-white p-4 rounded-2xl border border-bc-border shadow-soft hover:shadow-md transition-shadow">
             <div className="flex items-center gap-2 text-bc-text-secondary mb-2">
               <span className="text-[9px] font-bold uppercase tracking-wider">Baptisés</span>
             </div>
-            <div className="text-xl font-ui font-extrabold text-bc-text tracking-tight">850 <span className="text-sm text-slate-400 font-normal">/ 395</span></div>
-            <p className="text-[9px] text-emerald-600 font-bold mt-1">+8 nvx baptisés</p>
+            <div className="text-xl font-ui font-extrabold text-bc-text tracking-tight">{periodBaptised.length}</div>
+            <Spark data={weeklyBaptismCounts(branchMembers, 8)} color="var(--color-bc-success)" />
+            <p className="text-[9px] text-bc-text-secondary mt-1">Sur la période · {baptisedViaDept} Dépt · {periodBaptised.length - baptisedViaDept} Fiche</p>
           </div>
-          
-          <div className="bg-white p-4 rounded-[1.5rem] border border-bc-border shadow-sm hover:shadow-md transition-shadow">
+
+          <div className="bg-white p-4 rounded-2xl border border-bc-border shadow-soft hover:shadow-md transition-shadow">
             <div className="flex items-center gap-2 text-bc-text-secondary mb-2">
               <Bus size={14} />
               <span className="text-[9px] font-bold uppercase tracking-wider">Bloom Bus</span>
             </div>
-            <div className="text-xl font-ui font-extrabold text-bc-text tracking-tight">42</div>
-            <p className="text-[9px] text-slate-400 mt-1">Actifs</p>
+            <div className="flex items-center gap-2.5">
+              <Ring value={activeBusCount} total={totalBusLines} color="var(--color-bc-cerulean)" />
+              <div>
+                <div className="text-lg font-ui font-extrabold text-bc-text tracking-tight leading-none">{activeBusCount}<span className="text-xs text-bc-text-secondary font-normal">/{totalBusLines}</span></div>
+                <p className="text-[9px] text-bc-text-secondary mt-1">lignes actives</p>
+              </div>
+            </div>
           </div>
 
-          <div className="bg-white p-4 rounded-[1.5rem] border border-bc-border shadow-sm hover:shadow-md transition-shadow">
+          <div className="bg-white p-4 rounded-2xl border border-bc-border shadow-soft hover:shadow-md transition-shadow">
             <div className="flex items-center gap-2 text-bc-text-secondary mb-2">
               <TrendingUp size={14} />
               <span className="text-[9px] font-bold uppercase tracking-wider">Moisson</span>
             </div>
-            <div className="text-xl font-ui font-extrabold text-bc-text tracking-tight">128</div>
-            <p className="text-[9px] text-slate-400 mt-1">Nouveaux gagnés</p>
+            <div className="text-xl font-ui font-extrabold text-bc-text tracking-tight">{moisson.adn + moisson.bus}</div>
+            <Spark data={weeklyMoissonCounts(branchReports, 8)} color="var(--color-bc-gold)" />
+            <p className="text-[9px] text-bc-text-secondary mt-1">Intégrés · {moisson.adn} ADN · {moisson.bus} Bus</p>
           </div>
 
-          <div className="bg-white p-4 rounded-[1.5rem] border border-bc-border shadow-sm hover:shadow-md transition-shadow">
+          <button
+            type="button"
+            onClick={() => setShowFollowUps(true)}
+            className="bg-white p-4 rounded-2xl border border-bc-border shadow-soft hover:shadow-md transition-shadow text-left cursor-pointer active-scale"
+          >
             <div className="flex items-center gap-2 text-bc-text-secondary mb-2">
-              <span className="text-[9px] font-bold uppercase tracking-wider">Remontées</span>
+              <span className="text-[9px] font-bold uppercase tracking-wider">À traiter</span>
             </div>
-            <div className="text-xl font-ui font-extrabold text-bc-text tracking-tight">24</div>
-            <p className="text-[9px] text-orange-500 font-bold mt-1">Nécessitant suivi</p>
-          </div>
+            <div className="text-xl font-ui font-extrabold text-bc-text tracking-tight">{followUps.length}</div>
+            <p className="text-[9px] text-bc-warning font-bold mt-1">Remontées avec suivi · voir la liste</p>
+          </button>
 
-          <div className="bg-white p-4 rounded-[1.5rem] border border-bc-border shadow-sm hover:shadow-md transition-shadow">
+          <div className="bg-white p-4 rounded-2xl border border-bc-border shadow-soft hover:shadow-md transition-shadow">
             <div className="flex items-center gap-2 text-bc-text-secondary mb-2">
               <Clock size={14} />
-              <span className="text-[9px] font-bold uppercase tracking-wider">En attente</span>
+              <span className="text-[9px] font-bold uppercase tracking-wider">Nouveau en attente</span>
             </div>
-            <div className="text-xl font-ui font-extrabold text-orange-500 tracking-tight">{waitingCount}</div>
-            <p className="text-[9px] text-orange-400 mt-1">Réceptions à valider</p>
+            <div className="flex items-center gap-2.5">
+              <Ring value={nouveauxEnAttente} total={branchMembers.length} color="var(--color-bc-warning)" />
+              <div>
+                <div className="text-lg font-ui font-extrabold text-bc-warning tracking-tight leading-none">{nouveauxEnAttente}</div>
+                <p className="text-[9px] text-bc-warning mt-1">Pas encore reçus en dépt</p>
+              </div>
+            </div>
           </div>
 
-          <div className="bg-white p-4 rounded-[1.5rem] border border-bc-border shadow-sm hover:shadow-md transition-shadow">
+          <div className="bg-white p-4 rounded-2xl border border-bc-border shadow-soft hover:shadow-md transition-shadow">
             <div className="flex items-center gap-2 text-bc-text-secondary mb-2">
               <AlertCircle size={14} />
               <span className="text-[9px] font-bold uppercase tracking-wider">Au rouge</span>
             </div>
-            <div className="text-xl font-ui font-extrabold text-red-500 tracking-tight">14</div>
-            <p className="text-[9px] text-red-400 mt-1">Délais dépassés</p>
+            <div className="flex items-center gap-2.5">
+              <Ring value={redCount} total={branchMembers.length} color="var(--color-bc-danger)" />
+              <div>
+                <div className="text-lg font-ui font-extrabold text-bc-danger tracking-tight leading-none">{redCount}</div>
+                <p className="text-[9px] text-bc-danger mt-1">Délais dépassés</p>
+              </div>
+            </div>
           </div>
         </motion.div>
 
         {/* Charts & Health Row */}
         <motion.div variants={itemVariants} className="grid grid-cols-1 lg:grid-cols-2 gap-6 shrink-0">
           
-          {/* Health Row (Faces) */}
+          {/* Health Row — les 5 critères du rapport Bloom Bus, scoping = période sélectionnée */}
           <div className="bg-white p-6 rounded-[2rem] border border-bc-border shadow-sm flex flex-col justify-center">
             <h3 className="font-ui font-bold text-bc-text mb-4 tracking-tight">Santé Spirituelle Globale</h3>
             <div className="flex flex-col h-full justify-center space-y-4">
               <div className="grid grid-cols-5 gap-1 w-full text-center">
-                {HEALTH_AXES.map(axis => {
-                  const level = dominantHealthLevel(branchMembers, axis.key);
-                  const { Icon, color } = FACE[level] ?? FACE[0];
-                  return (
-                    <div key={axis.key} className="min-w-0">
-                      <Icon className={`w-6 h-6 ${color} mx-auto mb-1`} strokeWidth={2.5} />
-                      <div className={`text-[9px] sm:text-[10px] font-bold ${color} truncate`}>{axis.label}</div>
-                    </div>
-                  );
-                })}
+                {HEALTH_AXES.filter(a => a.key !== 'presenceService').map(axis => (
+                  <div key={axis.key} className="min-w-0">
+                    <HealthSmiley value={health[axis.key as keyof typeof health]} size={30} />
+                    <div className="text-[9px] sm:text-[10px] font-bold text-bc-text-secondary truncate mt-1">{axis.label}</div>
+                  </div>
+                ))}
               </div>
-              <p className="text-center text-[10px] text-slate-400">Niveau dominant par critère (sur {branchMembers.length} membres)</p>
+              <p className="text-center text-[10px] text-bc-text-secondary">Synthèse des rapports Bloom Bus de la période</p>
             </div>
           </div>
 
           <div className="bg-white p-6 rounded-[2rem] border border-bc-border shadow-sm">
-            <h3 className="font-ui font-bold text-bc-text mb-4 tracking-tight">Croissance & Participants</h3>
-            <div className="h-48 mt-4 min-w-0">
+            <h3 className="font-ui font-bold text-bc-text mb-2 tracking-tight">Croissance & Participants</h3>
+            <div className="flex gap-4 text-[10px] font-bold text-bc-text-secondary">
+              <span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-bc-text inline-block" /> Nouveaux</span>
+              <span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full inline-block" style={{ background: 'var(--accent-1)' }} /> Participants</span>
+            </div>
+            <div className="h-48 mt-2 min-w-0">
               <ResponsiveChart height="100%" minHeight={150}>
                 <AreaChart data={growthData}>
                   <defs>
                     <linearGradient id="colorNouveaux" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor="#0F172A" stopOpacity={0.1}/>
-                      <stop offset="95%" stopColor="#0F172A" stopOpacity={0}/>
+                      <stop offset="5%" stopColor="var(--color-bc-text)" stopOpacity={0.1}/>
+                      <stop offset="95%" stopColor="var(--color-bc-text)" stopOpacity={0}/>
                     </linearGradient>
                     <linearGradient id="colorParticipants" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor="#009BDE" stopOpacity={0.1}/>
-                      <stop offset="95%" stopColor="#009BDE" stopOpacity={0}/>
+                      <stop offset="5%" stopColor="var(--accent-1)" stopOpacity={0.1}/>
+                      <stop offset="95%" stopColor="var(--accent-1)" stopOpacity={0}/>
                     </linearGradient>
                   </defs>
                   <XAxis dataKey="name" fontSize={10} axisLine={false} tickLine={false} />
                   <Tooltip cursor={{ fill: 'transparent' }} contentStyle={{ borderRadius: '1rem', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }} />
-                  <Area type="monotone" dataKey="nouveaux" name="Nouveaux" stroke="#0F172A" strokeWidth={2} fillOpacity={1} fill="url(#colorNouveaux)" />
-                  <Area type="monotone" dataKey="participants" name="Participants" stroke="#009BDE" strokeWidth={2} fillOpacity={1} fill="url(#colorParticipants)" />
+                  <Area type="monotone" dataKey="nouveaux" name="Nouveaux" stroke="var(--color-bc-text)" strokeWidth={2} fillOpacity={1} fill="url(#colorNouveaux)" />
+                  <Area type="monotone" dataKey="participants" name="Participants" stroke="var(--accent-1)" strokeWidth={2} fillOpacity={1} fill="url(#colorParticipants)" />
                 </AreaChart>
               </ResponsiveChart>
             </div>
           </div>
         </motion.div>
 
-        {/* Integration Queue */}
+        {/* Projets en cours (remplace la file d'intégration — les KPIs d'intégration sont déjà plus haut) */}
         <motion.div variants={itemVariants} className="bg-white p-6 rounded-[2rem] border border-bc-border shadow-sm shrink-0 mb-6">
           <div className="flex justify-between items-center mb-4">
-            <h3 className="font-ui font-bold text-bc-text tracking-tight">File d'intégration</h3>
-            <button className="text-xs font-bold text-bc-text-secondary hover:text-bc-text transition-colors">Voir tout →</button>
+            <h3 className="font-ui font-bold text-bc-text tracking-tight flex items-center gap-2"><FolderKanban size={16} /> Projets en cours</h3>
+            <button onClick={() => go('projects')} className="text-xs font-bold text-bc-text-secondary hover:text-bc-text transition-colors">Voir tout →</button>
           </div>
-          <div className="grid grid-cols-3 gap-4">
-            <div className="p-4 rounded-[1.5rem] bg-orange-50/50 border border-orange-100 flex flex-col justify-center items-center">
-              <span className="text-2xl font-black text-orange-600 mb-1">12</span>
-              <span className="text-[10px] font-bold text-orange-500 uppercase tracking-wider">En attente</span>
+          {projectsInProgress.length === 0 ? (
+            <p className="text-xs text-bc-text-secondary italic text-center py-4">Aucun projet en cours.</p>
+          ) : (
+            <div className="space-y-3">
+              {projectsInProgress.map(p => {
+                const pct = projectProgress(p);
+                return (
+                  <div key={p.id} onClick={() => go('projects')} className="cursor-pointer group">
+                    <div className="flex items-center justify-between mb-1">
+                      <span className="text-xs font-bold text-bc-text group-hover:text-bc-green transition-colors truncate">{p.name}</span>
+                      <span className="text-[10px] font-bold text-bc-text-secondary shrink-0 ml-3">{pct}%</span>
+                    </div>
+                    <div className="flex h-2 rounded-full overflow-hidden bg-bc-canvas">
+                      <div className="bg-bc-green transition-all duration-700 ease-out-spring rounded-full" style={{ width: `${pct}%` }} />
+                    </div>
+                  </div>
+                );
+              })}
             </div>
-            <div className="p-4 rounded-[1.5rem] bg-blue-50/50 border border-blue-100 flex flex-col justify-center items-center">
-              <span className="text-2xl font-black text-blue-600 mb-1">28</span>
-              <span className="text-[10px] font-bold text-blue-500 uppercase tracking-wider">En suivi</span>
-            </div>
-            <div className="p-4 rounded-[1.5rem] bg-emerald-50/50 border border-emerald-100 flex flex-col justify-center items-center">
-              <span className="text-2xl font-black text-emerald-600 mb-1">45</span>
-              <span className="text-[10px] font-bold text-emerald-500 uppercase tracking-wider">Intégrés</span>
-            </div>
-          </div>
+          )}
         </motion.div>
 
       </motion.div>
@@ -310,7 +406,7 @@ export default function DashboardView({ activeBranch, simulatedRole, members = [
           <h3 className="font-ui font-bold text-bc-text mb-4 tracking-tight">Agenda Proche</h3>
           <div className="space-y-3">
             <div className="flex gap-4 p-3 hover:bg-bc-canvas rounded-2xl transition-colors cursor-pointer border border-transparent hover:border-bc-border">
-              <div className="w-12 h-12 rounded-xl bg-slate-100 flex flex-col items-center justify-center shrink-0 text-bc-text">
+              <div className="w-12 h-12 rounded-xl bg-bc-canvas flex flex-col items-center justify-center shrink-0 text-bc-text">
                 <span className="text-[10px] font-bold uppercase">Dim</span>
                 <span className="text-sm font-black">24</span>
               </div>
@@ -327,29 +423,89 @@ export default function DashboardView({ activeBranch, simulatedRole, members = [
             À traiter aujourd'hui
           </h3>
           <div className="space-y-3">
-            <div onClick={() => go('integration')} className="p-4 bg-orange-50/50 rounded-2xl border border-orange-100 cursor-pointer hover:bg-orange-50 transition-colors">
-              <p className="text-xs font-bold text-orange-700">8 Réceptions en attente</p>
-              <p className="text-[10px] text-orange-500 mt-1">À valider par les départements</p>
+            <div onClick={() => go('integration')} className="p-4 bg-bc-warning/10 rounded-2xl border border-bc-warning/20 cursor-pointer hover:bg-bc-warning/15 transition-colors active-scale">
+              <p className="text-xs font-bold text-bc-warning">{pendingReceptionsCount} Réceptions en attente</p>
+              <p className="text-[10px] text-bc-warning mt-1">À valider par les départements</p>
             </div>
-            <div onClick={() => go('events')} className="p-4 bg-bc-canvas/50 rounded-2xl border border-bc-border cursor-pointer hover:bg-bc-canvas transition-colors">
-              <p className="text-xs font-bold text-slate-700">3 Rapports de culte manquants</p>
+            {/* ponytail: "rapports attendus" n'a pas de baseline définie (KPIS.md §4) — placeholder tant qu'elle n'existe pas. */}
+            <div onClick={() => go('events')} className="p-4 bg-bc-canvas/50 rounded-2xl border border-bc-border cursor-pointer hover:bg-bc-canvas transition-colors active-scale">
+              <p className="text-xs font-bold text-bc-text-secondary">Rapports de culte manquants — à définir</p>
             </div>
           </div>
         </div>
 
         <div>
-          <h3 className="font-ui font-bold text-bc-text mb-4 flex items-center gap-2 tracking-tight text-red-500">
+          <h3 className="font-ui font-bold text-bc-text mb-4 flex items-center gap-2 tracking-tight text-bc-danger">
             Alertes système
           </h3>
           <div className="space-y-3">
-            <div onClick={() => go('integration')} className="p-4 bg-red-50/50 rounded-2xl border border-red-100 cursor-pointer hover:bg-red-50 transition-colors">
-              <p className="text-xs font-bold text-red-700">14 Membres au rouge</p>
-              <p className="text-[10px] text-red-500 mt-1">Délais d'intégration dépassés (&gt;7 jours)</p>
+            <div onClick={() => go('integration')} className="p-4 bg-bc-danger/10 rounded-2xl border border-bc-danger/20 cursor-pointer hover:bg-bc-danger/15 transition-colors active-scale flex items-start gap-2.5">
+              {redCount > 0 && (
+                <span className="relative w-2 h-2 mt-1 shrink-0">
+                  <span className="absolute inset-0 rounded-full bg-bc-danger animate-ping opacity-60 motion-reduce:hidden" />
+                  <span className="absolute inset-0 rounded-full bg-bc-danger" />
+                </span>
+              )}
+              <div>
+                <p className="text-xs font-bold text-bc-danger">{redCount} Membres au rouge</p>
+                <p className="text-[10px] text-bc-danger mt-1">Délais d'intégration dépassés (&gt;7 jours)</p>
+              </div>
             </div>
           </div>
         </div>
 
       </motion.div>
+
+      {/* Modal "À traiter" — remontées avec suivi non traitées, lignes denses */}
+      {showFollowUps && (
+        <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4" onClick={() => setShowFollowUps(false)}>
+          <div className="bg-white rounded-[2rem] w-full max-w-2xl max-h-[80vh] flex flex-col overflow-hidden shadow-xl" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between px-6 py-4 border-b border-bc-border shrink-0">
+              <h3 className="font-ui font-bold text-bc-text tracking-tight">À traiter · {followUps.length} remontée{followUps.length > 1 ? 's' : ''} avec suivi</h3>
+              <button onClick={() => setShowFollowUps(false)} className="p-1.5 rounded-full hover:bg-bc-canvas active-scale" aria-label="Fermer"><X size={16} /></button>
+            </div>
+            <div className="overflow-y-auto divide-y divide-bc-border">
+              {followUps.length === 0 && (
+                <p className="text-xs text-bc-text-secondary italic text-center py-8">Aucune remontée en attente de traitement.</p>
+              )}
+              {followUps.map(r => {
+                const hidden = r.confidential && !canSeeConfidential;
+                const isCoach = r.reportType === 'rapport_suivi_coach';
+                const memberName = isCoach ? (() => {
+                  const m = members.find(mm => mm.id === r.content?.memberId);
+                  return m ? `${m.firstName} ${m.lastName}` : '';
+                })() : '';
+                return (
+                  <div key={r.id} className="flex items-center gap-3 px-6 py-2.5 text-xs">
+                    <span className="w-12 shrink-0 text-bc-text-secondary tabular-nums">{new Date(r.date).toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit' })}</span>
+                    <span className={`shrink-0 px-2 py-0.5 rounded-full text-[10px] font-bold ${isCoach ? 'bg-bc-purple/10 text-bc-purple' : 'bg-bc-warning/10 text-bc-warning'}`}>
+                      {isCoach ? 'Suivi coach' : 'Observation'}
+                    </span>
+                    {hidden ? (
+                      <span className="flex-1 italic text-bc-text-secondary truncate">Confidentiel — réservé au corps pastoral</span>
+                    ) : (
+                      <>
+                        <span className="flex-1 min-w-0 truncate text-bc-text">
+                          <span className="font-bold">{r.authorName}</span>
+                          {deptName(r.departmentId) && <span className="text-bc-text-secondary"> · {deptName(r.departmentId)}</span>}
+                          {memberName && <span className="text-bc-text-secondary"> · {memberName}</span>}
+                          {r.content?.notes && <span className="text-bc-text-secondary"> — {r.content.notes}</span>}
+                        </span>
+                        <button
+                          onClick={() => onMarkReportTreated?.(r.id)}
+                          className="shrink-0 px-3 py-1 rounded-full bg-bc-green text-white text-[10px] font-bold active-scale"
+                        >
+                          Marquer traité
+                        </button>
+                      </>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+      )}
 
     </div>
   );

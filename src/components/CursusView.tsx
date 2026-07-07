@@ -1,12 +1,18 @@
 import React, { useState } from 'react';
 import { Branch, Member, PastoralCursus } from '../types';
 import { Heart, User, ArrowUpCircle, FileText, Share2, Search, PenLine, LayoutList, Network, X } from 'lucide-react';
+import { useBusLines, useDepartments, useMinistries } from '../data';
+import { inMemberScope } from '../data/scope';
+import { motion } from 'motion/react';
+import { staggerParent, staggerItem } from './ui/motion';
+import { Avatar } from './ui/Avatar';
 
 interface CursusViewProps {
   activeBranch: Branch;
   simulatedRole: string;
   members: Member[];
   onUpdateMember: (m: Member) => void;
+  operator?: Member;
 }
 
 // Pastoral ladder, entry ('Aucun') excluded from the org chart.
@@ -14,18 +20,57 @@ const CURSUS_ORDER: PastoralCursus[] = ['Aucun', 'Appelé', 'Serviteur', "Gagneu
 const nextCursus = (c: PastoralCursus): PastoralCursus => CURSUS_ORDER[Math.min(CURSUS_ORDER.indexOf(c) + 1, CURSUS_ORDER.length - 1)];
 const isTop = (c: PastoralCursus) => CURSUS_ORDER.indexOf(c) === CURSUS_ORDER.length - 1;
 
-export default function CursusView({ activeBranch, simulatedRole, members = [], onUpdateMember }: CursusViewProps) {
+// Mentor→filleul tree node. `pool` caps both roots and children — a mentor filtered
+// out of `pool` makes their filleuls surface as roots instead of vanishing.
+function CursusTreeNode({ member, pool, canManage, onPromote, depth = 0 }: {
+  member: Member; pool: Member[]; canManage: boolean; onPromote: (m: Member) => void; depth?: number;
+}) {
+  // ponytail: depth cap guards against an operator-created mentorId cycle, not expected in practice.
+  const children = depth < 8 ? pool.filter(c => c.mentorId === member.id) : [];
+  return (
+    <div className={depth > 0 ? 'ml-6 pl-4 border-l border-bc-border' : ''}>
+      <div className="flex items-center gap-2 py-1.5">
+        <Avatar src={member.avatarUrl} initials={`${member.firstName[0]}${member.lastName[0]}`} size="sm" className="w-7 h-7 bg-bc-border/40 text-bc-text-secondary text-[10px] uppercase" />
+        <span className="text-xs font-bold text-bc-text">{member.firstName} {member.lastName}</span>
+        <span className="text-[10px] font-bold text-bc-text-secondary px-2 py-0.5 rounded-full bg-bc-canvas">{member.pastoralCursus}</span>
+        {canManage && !isTop(member.pastoralCursus) && (
+          <button
+            onClick={() => onPromote(member)}
+            className="p-1 text-bc-text-secondary hover:text-bc-green transition-colors active-scale"
+            title={`Promouvoir → ${nextCursus(member.pastoralCursus)}`}
+          >
+            <ArrowUpCircle size={16} />
+          </button>
+        )}
+      </div>
+      {children.map(c => (
+        <div key={c.id}>
+          <CursusTreeNode member={c} pool={pool} canManage={canManage} onPromote={onPromote} depth={depth + 1} />
+        </div>
+      ))}
+    </div>
+  );
+}
+
+export default function CursusView({ activeBranch, simulatedRole, members = [], onUpdateMember, operator }: CursusViewProps) {
+  const busLines = useBusLines();
+  const departments = useDepartments();
+  const ministries = useMinistries();
   const [filterLevel, setFilterLevel] = useState<PastoralCursus | 'all'>('all');
   const [searchTerm, setSearchTerm] = useState('');
   const [viewMode, setViewMode] = useState<'list' | 'tree'>('list');
   const [promoting, setPromoting] = useState<Member | null>(null);
 
-  const canManage = ['Pasteur', 'Admin', 'Super Admin'].includes(simulatedRole);
+  // Spec (Onglet 8) : promotions validées uniquement par le Pasteur Principal.
+  const canManage = simulatedRole === 'Pasteur Principal';
 
+  // Même cloisonnement que MembersView (scope.ts) : un Coach/Responsable ne voit que
+  // le cursus des membres de son propre département, pas de tout le branch.
   const cursusMembers = members.filter(m =>
     m.pastoralCursus &&
     m.pastoralCursus !== 'Aucun' &&
-    (activeBranch === 'global' || m.branch === activeBranch)
+    (activeBranch === 'global' || m.branch === activeBranch) &&
+    (!operator || inMemberScope(operator, m, simulatedRole, busLines, departments, ministries))
   );
 
   const filteredMembers = cursusMembers.filter(m => {
@@ -50,7 +95,7 @@ export default function CursusView({ activeBranch, simulatedRole, members = [], 
     canManage && !isTop(m.pastoralCursus) ? (
       <button
         onClick={(e) => { e.stopPropagation(); setPromoting(m); }}
-        className="p-2 text-slate-400 hover:text-bc-green transition-colors"
+        className="p-2 text-bc-text-secondary hover:text-bc-green transition-colors active-scale"
         title={`Promouvoir → ${nextCursus(m.pastoralCursus)}`}
       >
         <ArrowUpCircle size={18} />
@@ -71,16 +116,16 @@ export default function CursusView({ activeBranch, simulatedRole, members = [], 
         </div>
 
         {/* View toggle */}
-        <div className="bg-slate-100 rounded-full p-1 flex items-center gap-1 shrink-0">
+        <div className="bg-bc-canvas rounded-full p-1 flex items-center gap-1 shrink-0">
           <button
             onClick={() => setViewMode('list')}
-            className={`px-3 py-1.5 rounded-full text-xs font-bold flex items-center gap-1.5 transition-colors ${viewMode === 'list' ? 'bg-white text-bc-text shadow-sm' : 'text-bc-text-secondary'}`}
+            className={`px-3 py-1.5 rounded-full text-xs font-bold flex items-center gap-1.5 transition-colors active-scale ${viewMode === 'list' ? 'bg-white text-bc-text shadow-sm' : 'text-bc-text-secondary'}`}
           >
             <LayoutList size={14} /> Liste
           </button>
           <button
             onClick={() => setViewMode('tree')}
-            className={`px-3 py-1.5 rounded-full text-xs font-bold flex items-center gap-1.5 transition-colors ${viewMode === 'tree' ? 'bg-white text-bc-text shadow-sm' : 'text-bc-text-secondary'}`}
+            className={`px-3 py-1.5 rounded-full text-xs font-bold flex items-center gap-1.5 transition-colors active-scale ${viewMode === 'tree' ? 'bg-white text-bc-text shadow-sm' : 'text-bc-text-secondary'}`}
           >
             <Network size={14} /> Organigramme
           </button>
@@ -97,14 +142,14 @@ export default function CursusView({ activeBranch, simulatedRole, members = [], 
               placeholder="Rechercher un pasteur/filleul..."
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
-              className="pl-9 pr-4 py-2 w-full border border-bc-border rounded-full text-xs bg-bc-canvas/40 focus:outline-none focus:border-slate-300 focus:bg-white transition-all"
+              className="pl-9 pr-4 py-2 w-full border border-bc-border rounded-full text-xs bg-bc-canvas/40 focus:outline-none focus:border-bc-border focus:bg-white transition-all"
             />
           </div>
 
           <select
             value={filterLevel}
             onChange={(e) => setFilterLevel(e.target.value as PastoralCursus | 'all')}
-            className="border border-bc-border rounded-full text-xs py-2 px-3 bg-white focus:outline-none focus:border-slate-300"
+            className="border border-bc-border rounded-full text-xs py-2 px-3 bg-white focus:outline-none focus:border-bc-border"
           >
             <option value="all">Tous les Niveaux (Cursus)</option>
             {CURSUS_ORDER.slice(1).map(l => <option key={l} value={l}>{l}</option>)}
@@ -112,47 +157,35 @@ export default function CursusView({ activeBranch, simulatedRole, members = [], 
         </div>
 
         <div className="flex items-center gap-4 text-xs font-medium text-bc-text-secondary bg-bc-canvas px-4 py-2 rounded-full border border-bc-border">
-          <span className="font-bold text-slate-700">Total : {filteredMembers.length}</span>
+          <span className="font-bold text-bc-text">Total : {filteredMembers.length}</span>
           <div className="flex items-center gap-1.5">
-            <span className="w-2 h-2 rounded-full bg-blue-400"></span> Hommes : {maleCount}
+            <span className="w-2 h-2 rounded-full bg-bc-cerulean"></span> Hommes : {maleCount}
           </div>
           <div className="flex items-center gap-1.5">
-            <span className="w-2 h-2 rounded-full bg-pink-400"></span> Femmes : {femaleCount}
+            <span className="w-2 h-2 rounded-full bg-bc-fushia"></span> Femmes : {femaleCount}
           </div>
         </div>
       </div>
 
       {viewMode === 'tree' ? (
-        /* ---- Organigramme: pyramid tiers by cursus rank (top rank first) ----
-           ponytail: grouped by level, not a mentor→filleul tree (needs mentorId — known deferral). */
-        <div className="bg-white p-6 rounded-[2rem] border border-bc-border shadow-sm space-y-4">
-          {[...CURSUS_ORDER].slice(1).reverse().map(level => {
-            const tier = filteredMembers.filter(m => m.pastoralCursus === level);
-            return (
-              <div key={level} className="relative">
-                <div className="flex items-center gap-3 mb-2">
-                  <span className="text-xs font-ui font-extrabold text-bc-text px-3 py-1 rounded-full bg-bc-green/10">{level}</span>
-                  <span className="text-[10px] font-bold text-bc-text-secondary">{tier.length}</span>
-                  <div className="flex-1 h-px bg-bc-border" />
+        /* Organigramme mentor→filleul : racines = pas de mentor, ou mentor hors du pool filtré. */
+        <div className="bg-white p-6 rounded-[2rem] border border-bc-border shadow-sm space-y-3">
+          {filteredMembers.filter(m => !m.mentorId || !filteredMembers.some(c => c.id === m.mentorId)).length === 0 ? (
+            <p className="text-[11px] italic text-bc-text-secondary p-3">Aucun membre trouvé pour ces filtres.</p>
+          ) : (
+            filteredMembers
+              .filter(m => !m.mentorId || !filteredMembers.some(c => c.id === m.mentorId))
+              .map(root => (
+                <div key={root.id}>
+                  <CursusTreeNode
+                    member={root}
+                    pool={filteredMembers}
+                    canManage={canManage}
+                    onPromote={setPromoting}
+                  />
                 </div>
-                {tier.length === 0 ? (
-                  <p className="text-[11px] italic text-slate-300 pl-3 pb-2">Aucun membre à ce niveau</p>
-                ) : (
-                  <div className="flex flex-wrap gap-2 pb-2">
-                    {tier.map(m => (
-                      <div key={m.id} className="flex items-center gap-2 border border-bc-border rounded-full pl-1 pr-1 py-1 bg-bc-canvas/40 hover:bg-bc-canvas transition-colors">
-                        <div className="w-7 h-7 rounded-full bg-slate-200 flex items-center justify-center text-bc-text-secondary font-bold text-[10px] uppercase">
-                          {m.firstName[0]}{m.lastName[0]}
-                        </div>
-                        <span className="text-xs font-bold text-slate-700">{m.firstName} {m.lastName}</span>
-                        <PromoteBtn m={m} />
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-            );
-          })}
+              ))
+          )}
         </div>
       ) : (
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -163,17 +196,17 @@ export default function CursusView({ activeBranch, simulatedRole, members = [], 
               <h3 className="font-ui font-bold text-bc-text">Mon Mentor</h3>
             </div>
             <div className="p-4 border border-bc-border rounded-2xl flex items-center gap-4 bg-bc-canvas/50">
-              <div className="w-12 h-12 rounded-full bg-slate-200 flex items-center justify-center">
-                <User size={20} className="text-slate-600" />
+              <div className="w-12 h-12 rounded-full bg-bc-border/40 flex items-center justify-center">
+                <User size={20} className="text-bc-text-secondary" />
               </div>
               <div>
-                <h4 className="text-sm font-bold text-slate-800">Rév. Pasteur Principal</h4>
+                <h4 className="text-sm font-bold text-bc-text">Rév. Pasteur Principal</h4>
                 <p className="text-xs text-bc-text-secondary">Pasteur Titulaire</p>
               </div>
             </div>
 
             <div className="mt-6 border-t border-bc-border pt-4">
-              <h4 className="text-xs font-bold text-slate-700 mb-2">Mon statut actuel</h4>
+              <h4 className="text-xs font-bold text-bc-text mb-2">Mon statut actuel</h4>
               <div className="inline-flex px-3 py-1 bg-bc-green text-white text-xs font-bold rounded-full">
                 Pasteur Assistant
               </div>
@@ -192,33 +225,44 @@ export default function CursusView({ activeBranch, simulatedRole, members = [], 
               </button>
             </div>
 
-            <div className="space-y-4 overflow-y-auto max-h-[500px] pr-2">
+            <motion.div variants={staggerParent} initial="hidden" animate="show" className="space-y-4 overflow-y-auto max-h-[500px] pr-2">
               {filteredMembers.length === 0 ? (
                 <div className="p-8 text-center text-bc-text-secondary border border-bc-border rounded-2xl">
                   Aucun membre trouvé dans le cursus pastoral pour ces filtres.
                 </div>
               ) : (
                 filteredMembers.map(m => (
-                  <div key={m.id} className="border border-bc-border p-4 rounded-2xl flex justify-between items-center hover:bg-bc-canvas transition-colors cursor-pointer group">
+                  <motion.div variants={staggerItem} key={m.id} className="border border-bc-border p-4 rounded-2xl flex justify-between items-center hover:bg-bc-canvas transition-colors cursor-pointer group">
                     <div className="flex items-center gap-3">
-                      <div className="w-10 h-10 rounded-full bg-slate-200 flex items-center justify-center text-bc-text-secondary font-bold text-xs uppercase">
-                        {m.firstName[0]}{m.lastName[0]}
-                      </div>
+                      <Avatar src={m.avatarUrl} initials={`${m.firstName[0]}${m.lastName[0]}`} size="sm" className="w-10 h-10 bg-bc-border/40 text-bc-text-secondary text-xs uppercase" />
                       <div>
-                        <h4 className="text-sm font-bold text-slate-800">{m.firstName} {m.lastName}</h4>
+                        <h4 className="text-sm font-bold text-bc-text">{m.firstName} {m.lastName}</h4>
                         <p className="text-xs text-bc-text-secondary">{m.pastoralCursus} • {m.branch === 'church' ? 'Bloom Church' : 'Bloom Light'}</p>
                       </div>
                     </div>
-                    <div className="flex gap-2">
-                      <button className="p-2 text-slate-400 hover:text-bc-text transition-colors" title="Historique">
+                    <div className="flex items-center gap-2">
+                      {canManage && (
+                        <select
+                          value={m.mentorId ?? ''}
+                          onClick={(e) => e.stopPropagation()}
+                          onChange={(e) => onUpdateMember({ ...m, mentorId: e.target.value || undefined })}
+                          className="text-[10px] border border-bc-border rounded-full px-2 py-1.5 bg-white max-w-[140px]"
+                        >
+                          <option value="">Aucun mentor</option>
+                          {cursusMembers.filter(c => c.id !== m.id).map(c => (
+                            <option key={c.id} value={c.id}>{c.firstName} {c.lastName}</option>
+                          ))}
+                        </select>
+                      )}
+                      <button className="p-2 text-bc-text-secondary hover:text-bc-text transition-colors" title="Historique">
                         <FileText size={18} />
                       </button>
                       <PromoteBtn m={m} />
                     </div>
-                  </div>
+                  </motion.div>
                 ))
               )}
-            </div>
+            </motion.div>
           </div>
         </div>
       )}
@@ -227,7 +271,7 @@ export default function CursusView({ activeBranch, simulatedRole, members = [], 
       {promoting && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4" onClick={() => setPromoting(null)}>
           <div className="bg-white rounded-[2rem] w-full max-w-md p-6 border border-bc-border shadow-2xl relative" onClick={e => e.stopPropagation()}>
-            <button onClick={() => setPromoting(null)} className="absolute top-4 right-4 p-2 text-bc-text-secondary hover:text-bc-text transition-colors">
+            <button onClick={() => setPromoting(null)} className="absolute top-4 right-4 p-2 text-bc-text-secondary hover:text-bc-text transition-colors active-scale">
               <X size={20} />
             </button>
             <div className="flex items-center gap-2 mb-4">
@@ -238,13 +282,13 @@ export default function CursusView({ activeBranch, simulatedRole, members = [], 
               Promouvoir <span className="font-bold text-bc-text">{promoting.firstName} {promoting.lastName}</span> dans le cursus pastoral ?
             </p>
             <div className="flex items-center justify-center gap-3 mb-6">
-              <span className="text-xs font-bold px-3 py-1.5 rounded-full bg-slate-100 text-bc-text-secondary">{promoting.pastoralCursus}</span>
+              <span className="text-xs font-bold px-3 py-1.5 rounded-full bg-bc-canvas text-bc-text-secondary">{promoting.pastoralCursus}</span>
               <ArrowUpCircle size={16} className="text-bc-green rotate-90" />
               <span className="text-xs font-bold px-3 py-1.5 rounded-full bg-bc-green text-white">{nextCursus(promoting.pastoralCursus)}</span>
             </div>
             <div className="flex gap-3 justify-end pt-3 border-t border-bc-border">
-              <button onClick={() => setPromoting(null)} className="px-4 py-2 border border-bc-border text-bc-text-secondary rounded-full text-xs hover:bg-bc-canvas">Annuler</button>
-              <button onClick={confirmPromotion} className="px-5 py-2 bg-bc-green text-white rounded-full text-xs font-ui font-bold hover:opacity-90">Confirmer la promotion</button>
+              <button onClick={() => setPromoting(null)} className="px-4 py-2 border border-bc-border text-bc-text-secondary rounded-full text-xs hover:bg-bc-canvas active-scale">Annuler</button>
+              <button onClick={confirmPromotion} className="px-5 py-2 bg-bc-green text-white rounded-full text-xs font-ui font-bold hover:opacity-90 active-scale">Confirmer la promotion</button>
             </div>
           </div>
         </div>
