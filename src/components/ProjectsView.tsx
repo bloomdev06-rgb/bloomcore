@@ -1,9 +1,11 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Branch, Project, ProjectTask, Event, Member } from '../types';
-import { Activity, Target, Users, Calendar, ArrowLeft, Plus, X, Check } from 'lucide-react';
+import { Activity, Target, Users, Calendar, ArrowLeft, Plus, X, Check, Trash2 } from 'lucide-react';
 import { useProjects, useMinistries, save } from '../data';
 import { motion } from 'motion/react';
 import { staggerParent, staggerItem } from './ui/motion';
+import { Modal } from './ui/Modal';
+import { ConfirmDialog } from './ui/ConfirmDialog';
 
 interface ProjectsViewProps {
   activeBranch: Branch;
@@ -34,6 +36,11 @@ export default function ProjectsView({ activeBranch, simulatedRole, events = [],
   const [filterScope, setFilterScope] = useState('all');
   const [filterPmo, setFilterPmo] = useState('all');
   const [showCreate, setShowCreate] = useState(false);
+  const [deletingProject, setDeletingProject] = useState<Project | null>(null);
+  const deleteProject = (id: string) => {
+    setProjects((prev) => prev.filter((p) => p.id !== id));
+    if (selectedId === id) setSelectedId(null);
+  };
 
   const canCreate = ['Pasteur', 'Admin', 'Responsable', 'Super Admin', 'Ministre'].includes(simulatedRole);
   // §16 — PMO gère son projet ; membres d'équipe = accès à leur seul projet.
@@ -118,7 +125,18 @@ export default function ProjectsView({ activeBranch, simulatedRole, events = [],
               {selected.endDate && ` · échéance ${selected.endDate}`}
             </p>
           </div>
-          <span className="text-[10px] font-bold px-3 py-1 bg-bc-success/10 text-bc-success border border-bc-success/20 rounded-full">{selected.status}</span>
+          <div className="flex items-center gap-2">
+            <span className="text-[10px] font-bold px-3 py-1 bg-bc-success/10 text-bc-success border border-bc-success/20 rounded-full">{selected.status}</span>
+            {canCreate && (
+              <button
+                onClick={() => setDeletingProject(selected)}
+                className="p-2 rounded-full text-bc-text-secondary hover:text-bc-danger hover:bg-bc-canvas transition-colors active-scale"
+                title="Supprimer le projet"
+              >
+                <Trash2 size={14} />
+              </button>
+            )}
+          </div>
         </div>
 
         {/* Dashboard */}
@@ -304,7 +322,18 @@ export default function ProjectsView({ activeBranch, simulatedRole, events = [],
                   <h4 className="font-bold text-sm text-bc-text group-hover:underline">{project.name}</h4>
                   <p className="text-[10px] text-bc-text-secondary">PMO : {project.pmo} • {scopeLabel(project)}</p>
                 </div>
-                <span className="text-[10px] font-bold px-2 py-1 bg-bc-success/10 text-bc-success border border-bc-success/20 rounded-full">{project.status}</span>
+                <div className="flex items-center gap-1 shrink-0">
+                  <span className="text-[10px] font-bold px-2 py-1 bg-bc-success/10 text-bc-success border border-bc-success/20 rounded-full">{project.status}</span>
+                  {canCreate && (
+                    <button
+                      onClick={(e) => { e.stopPropagation(); setDeletingProject(project); }}
+                      className="p-1.5 rounded-full text-bc-text-secondary hover:text-bc-danger opacity-0 group-hover:opacity-100 transition-colors active-scale"
+                      title="Supprimer le projet"
+                    >
+                      <Trash2 size={13} />
+                    </button>
+                  )}
+                </div>
               </div>
               <div className="grid grid-cols-3 gap-2 mt-4">
                 <Mini icon={<Target size={14} className="text-bc-text-secondary mb-1" />} value={`${done}/${objs.length} Obj.`} />
@@ -318,6 +347,15 @@ export default function ProjectsView({ activeBranch, simulatedRole, events = [],
       </motion.div>
 
       {showCreate && <CreateProjectModal onClose={() => setShowCreate(false)} onCreate={(p) => { setProjects((prev) => [p, ...prev]); setShowCreate(false); }} />}
+
+      <ConfirmDialog
+        open={!!deletingProject}
+        onCancel={() => setDeletingProject(null)}
+        onConfirm={() => { if (deletingProject) deleteProject(deletingProject.id); }}
+        title="Supprimer le projet"
+        message={deletingProject ? `Le projet "${deletingProject.name}" sera définitivement supprimé. Cette action est irréversible.` : ""}
+        confirmLabel="Supprimer"
+      />
     </div>
   );
 }
@@ -354,33 +392,27 @@ function CreateProjectModal({ onClose, onCreate }: { onClose: () => void; onCrea
   };
 
   return (
-    <div className="fixed inset-0 bg-bc-text/30 backdrop-blur-sm z-50 flex items-center justify-center p-4" onClick={onClose}>
-      <div className="bg-white rounded-[2rem] p-6 w-full max-w-md shadow-xl" onClick={(e) => e.stopPropagation()}>
-        <div className="flex justify-between items-center mb-4">
-          <h3 className="font-ui font-bold text-bc-text">Nouveau projet</h3>
-          <button onClick={onClose} className="text-bc-text-secondary hover:text-bc-text active-scale"><X size={18} /></button>
-        </div>
-        <div className="space-y-3">
-          <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Nom du projet" className="w-full border border-bc-border rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-bc-green" />
-          <input value={pmo} onChange={(e) => setPmo(e.target.value)} placeholder="PMO (chef de projet)" className="w-full border border-bc-border rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-bc-green" />
-          <select value={scope} onChange={(e) => setScope(e.target.value as Project['scope'])} className="w-full border border-bc-border rounded-xl px-3 py-2 text-sm bg-white">
-            <option value="both">Transverse (2 branches)</option>
-            <option value="church">Bloom Church</option>
-            <option value="light">Bloom Light</option>
-            <option value="ministry">Ministère</option>
+    <Modal open={true} onClose={onClose} title="Nouveau projet" maxWidth="max-w-md">
+      <div className="space-y-3">
+        <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Nom du projet" className="w-full border border-bc-border rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-bc-green" />
+        <input value={pmo} onChange={(e) => setPmo(e.target.value)} placeholder="PMO (chef de projet)" className="w-full border border-bc-border rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-bc-green" />
+        <select value={scope} onChange={(e) => setScope(e.target.value as Project['scope'])} className="w-full border border-bc-border rounded-xl px-3 py-2 text-sm bg-white">
+          <option value="both">Transverse (2 branches)</option>
+          <option value="church">Bloom Church</option>
+          <option value="light">Bloom Light</option>
+          <option value="ministry">Ministère</option>
+        </select>
+        {scope === 'ministry' && (
+          <select value={ministryId} onChange={(e) => setMinistryId(e.target.value)} className="w-full border border-bc-border rounded-xl px-3 py-2 text-sm bg-white">
+            {ministries.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
           </select>
-          {scope === 'ministry' && (
-            <select value={ministryId} onChange={(e) => setMinistryId(e.target.value)} className="w-full border border-bc-border rounded-xl px-3 py-2 text-sm bg-white">
-              {ministries.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
-            </select>
-          )}
-          <label className="block text-[10px] font-bold uppercase tracking-wider text-bc-text-secondary">Échéance</label>
-          <input type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} className="w-full border border-bc-border rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-bc-green" />
-        </div>
-        <button onClick={submit} disabled={!name.trim() || !pmo.trim()} className="w-full mt-5 bg-bc-green text-white rounded-full py-2.5 text-sm font-bold hover:opacity-90 disabled:opacity-40 active-scale">
-          Créer le projet
-        </button>
+        )}
+        <label className="block text-[10px] font-bold uppercase tracking-wider text-bc-text-secondary">Échéance</label>
+        <input type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} className="w-full border border-bc-border rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-bc-green" />
       </div>
-    </div>
+      <button onClick={submit} disabled={!name.trim() || !pmo.trim()} className="w-full mt-5 bg-bc-green text-white rounded-full py-2.5 text-sm font-bold hover:opacity-90 disabled:opacity-40 active-scale">
+        Créer le projet
+      </button>
+    </Modal>
   );
 }

@@ -67,7 +67,7 @@ Compte **super-utilisateur seedé au développement**. Autorité **technique et 
 | **Audit** | consulter/filtrer/exporter le **journal global immuable** |
 
 ## 1.5 Boutons d'action
-Accès à **toutes** les actions de création (« ➕ Nouveau » membre, créer département/ministère/événement, etc.). Les boutons d'action contextuels propres aux départements (ex. « 📝 Rapport de culte », « ➕ Enregistrer un Nouveau » ADN) restent liés à l'**appartenance départementale** — un super admin ne les voit que s'il est membre du département concerné (ou via autorisation spéciale).
+Accès à **toutes** les actions de création (« ➕ Nouveau » membre, créer département/ministère/événement, etc.). Le bouton flottant « ➕ Enregistrer un Nouveau » ADN (formulaire Nouveau + OJ) est visible sur **toutes les pages**, uniquement pour les rôles ADN, Admin et Super Admin — pas pour Intégration/Portier/GDC, ce bouton étant spécifique au module ADN.
 
 ## 1.6 Capacités
 **Toutes** les capacités de la plateforme, sur les 2 branches — **promotion de tous les axes, y compris le cursus pastoral** — sous réserve des règles de gouvernance ci-dessous. **Exception** : il n'accède **pas** au contenu des rapports pastoraux/spirituels confidentiels.

@@ -87,9 +87,21 @@ export interface Member {
   // Organisation interne — appartenance à une section/pôle du département: deptId -> sectionId
   deptSections?: { [deptId: string]: string };
   
+  // Profil de test : rôle UI forcé pour ce compte (remplace le panneau « Simuler profil »
+  // retiré). Quand présent, App l'utilise tel quel comme simulatedRole au lieu de le dériver
+  // via resolveMemberRole — permet un compte de connexion réel par rôle testable, y compris
+  // les rôles non dérivables (Pasteur Principal, ADN, Portier, GDC, Intégration).
+  testRole?: string;
+
   // Special territorial coordinates
   bloomBusId?: string; // Attached bus ID
-  
+
+  // Enregistrement direct par un responsable hiérarchique Bloom Bus (hors procédure ADN
+  // "nouveau") — rattachement département en attente de validation par le responsable de
+  // département. undefined = pas concerné (membre créé normalement).
+  deptAttachmentStatus?: 'pending' | 'validated' | 'rejected';
+  deptAttachmentOrigin?: 'bloom_bus';
+
   // Integration tracking for Nouveaux
   integrationState?: IntegrationState;
   integrationFollowStatus?: IntegrationFollowStatus; // Integrator follow-up status (Espace Intégrateur). undefined = 'Non suivi'
@@ -191,7 +203,8 @@ export interface Report {
   authorRole: string;
   targetBranch: Branch;
   date: string;
-  reportType: 
+  weekOf?: string; // Id de semaine calendaire visée (lundi 'YYYY-MM-DD') — cf. src/data/week.ts
+  reportType:
     | 'rapport_service' 
     | 'rapport_rsa' 
     | 'rapport_bloom_bus_member'

@@ -20,6 +20,7 @@ import {
 import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts';
 import { motion } from 'motion/react';
 import { staggerParent, staggerItem } from './ui/motion';
+import { Modal } from './ui/Modal';
 import { Event, Branch, Report, Member, FormDef } from '../types';
 import { useProjects } from '../data';
 
@@ -396,19 +397,13 @@ export default function EventsView({
 
       {/* Saisir Comptages Modal */}
       {showCounterModal && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-[2.5rem] max-w-lg w-full p-6 border border-bc-border shadow-2xl relative max-h-[90vh] overflow-y-auto">
-            <button
-              onClick={() => setShowCounterModal(false)}
-              className="absolute top-4 right-4 p-2 text-bc-text-secondary hover:text-bc-text transition-colors active:scale-95"
-            >
-              <X size={20} />
-            </button>
-
-            <h3 className="text-base font-ui font-bold text-bc-text flex items-center gap-2 mb-4">
-              <CheckCircle size={18} className="text-bc-success" />
-              Clôturer : Saisie des Comptages
-            </h3>
+        <Modal
+          open={showCounterModal}
+          onClose={() => setShowCounterModal(false)}
+          title="Clôturer : Saisie des Comptages"
+          icon={<CheckCircle size={18} className="text-bc-success" />}
+          maxWidth="max-w-lg"
+        >
 
             <form onSubmit={handleSaveCounters} className="space-y-4">
               {/* 1. Portiers physical counters */}
@@ -658,8 +653,7 @@ export default function EventsView({
                 </button>
               </div>
             </form>
-          </div>
-        </div>
+        </Modal>
       )}
 
       </div>
@@ -789,20 +783,13 @@ export default function EventsView({
 
       {/* Plan Event Modal */}
       {showAddEventModal && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-[2.5rem] max-w-md w-full p-6 border border-bc-border shadow-2xl relative">
-            <button
-              id="close-add-event-modal-btn"
-              onClick={() => setShowAddEventModal(false)}
-              className="absolute top-4 right-4 p-2 text-bc-text-secondary hover:text-bc-purple transition-colors active:scale-95"
-            >
-              <X size={20} />
-            </button>
-
-            <h3 className="text-base font-ui font-bold text-bc-text flex items-center gap-2 mb-4">
-              <Calendar size={18} className={'text-bc-text'} />
-              Planifier un Culte ou Rassemblement
-            </h3>
+        <Modal
+          open={showAddEventModal}
+          onClose={() => setShowAddEventModal(false)}
+          title="Planifier un Culte ou Rassemblement"
+          icon={<Calendar size={18} className="text-bc-text" />}
+          maxWidth="max-w-md"
+        >
 
             <form onSubmit={handleCreateEvent} className="space-y-4">
               <div>
@@ -907,8 +894,7 @@ export default function EventsView({
                 </button>
               </div>
             </form>
-          </div>
-        </div>
+        </Modal>
       )}
 
 

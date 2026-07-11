@@ -3,12 +3,16 @@
 // db.ts for the reasoning). Mirrors exactly the collections the frontend
 // already persists to localStorage (src/data/index.ts's `seeds`), so wiring
 // is a drop-in: same names, same whole-array-replace shape.
+// Charge .env EN PREMIER : auth.ts/db.ts lisent process.env au chargement du module.
+import 'dotenv/config';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import express from 'express';
-import { db, getCollection, getKv, setKv } from './db.ts';
+import { db, getCollection, appendToCollection, getKv, setKv } from './db.ts';
 import { hashPassword, verifyPassword, signToken, verifyToken, createOneTimeToken, consumeOneTimeToken, upsertCredentials, requireSecret } from './auth.ts';
 import { ensureSeeded } from './seed.ts';
 import { applyWrite, readCollection, GuardError } from './guards.ts';
-import { buildContext, assertCanWrite, filterReadable, RbacContext } from './rbac.ts';
+import { buildContext, assertCanWrite, filterReadable, preservedIds, RbacContext } from './rbac.ts';
 import { dispatch } from './notify.ts';
 import { startScheduler } from './scheduler.ts';
 
@@ -40,6 +44,7 @@ app.use((req, res, next) => {
 const ARRAY_COLLECTIONS = new Set([
   'members', 'events', 'reports', 'audits', 'notifications', 'forms',
   'delegations', 'ministries', 'departments', 'certifications', 'admins', 'activities', 'integration_reports',
+  'projects', 'bus_lines',
 ]);
 const KV_KEYS = new Set(['permissions', 'settings']);
 
@@ -231,7 +236,10 @@ app.put('/api/v1/:name', requireAuth, (req, res) => {
     if (ARRAY_COLLECTIONS.has(name)) {
       if (!Array.isArray(req.body)) return res.status(400).json({ error: 'expected an array' });
       assertCanWrite(name, (req as any).rbac, req.body);
-      const { added } = applyWrite(name, req.body);
+      const asOf = typeof req.query.asOf === 'string' ? req.query.asOf : undefined;
+      // Préserve les items hors de la portée de lecture de l'opérateur : un client scopé
+      // n'a qu'un sous-ensemble, son PUT ne doit pas tombstoner ce qu'il ne voit pas.
+      const { added, conflicts } = applyWrite(name, req.body, asOf, preservedIds(name, (req as any).rbac));
       // Fan-out multicanal des notifications nouvellement créées (in-app déjà
       // réel côté client ; email/SMS/WhatsApp via adapters, simulés sans clés).
       if (name === 'notifications' && added.length) {
@@ -242,7 +250,7 @@ app.put('/api/v1/:name', requireAuth, (req, res) => {
       if (name === 'members' && added.length) {
         for (const m of added) issueAuthLink(m, 'activate');
       }
-      return res.json({ ok: true });
+      return res.json({ ok: true, syncedAt: new Date().toISOString(), conflicts });
     }
     if (KV_KEYS.has(name)) {
       assertCanWrite(name, (req as any).rbac, []);
@@ -265,10 +273,11 @@ app.post('/api/v1/sync/batch', requireAuth, (req, res) => {
   const applied: string[] = [];
   const skipped: string[] = [];
   const errors: { opId: string; error: string }[] = [];
+  const conflicts: string[] = [];
   const seen = db.prepare('SELECT 1 FROM sync_ops WHERE op_id = ?');
   const mark = db.prepare('INSERT INTO sync_ops (op_id, applied_at) VALUES (?, ?)');
   for (const op of ops) {
-    const { opId, name, value } = op ?? {};
+    const { opId, name, value, asOf } = op ?? {};
     if (!opId || !name) {
       errors.push({ opId: String(opId ?? '?'), error: 'opId et name requis' });
       continue;
@@ -281,7 +290,8 @@ app.post('/api/v1/sync/batch', requireAuth, (req, res) => {
       if (ARRAY_COLLECTIONS.has(name)) {
         if (!Array.isArray(value)) throw new GuardError(400, 'expected an array');
         assertCanWrite(name, (req as any).rbac, value);
-        applyWrite(name, value);
+        const { conflicts: opConflicts } = applyWrite(name, value, typeof asOf === 'string' ? asOf : undefined, preservedIds(name, (req as any).rbac));
+        conflicts.push(...opConflicts);
       } else if (KV_KEYS.has(name)) {
         assertCanWrite(name, (req as any).rbac, []);
         setKv(name, value);
@@ -295,7 +305,7 @@ app.post('/api/v1/sync/batch', requireAuth, (req, res) => {
       errors.push({ opId, error: e instanceof GuardError ? e.message : 'internal error' });
     }
   }
-  res.json({ applied, skipped, errors });
+  res.json({ applied, skipped, errors, syncedAt: new Date().toISOString(), conflicts });
 });
 
 // École Bloom — contrat d'entrée seulement (phase 2 spec) : signature HMAC-SHA256
@@ -325,7 +335,44 @@ app.post('/api/v1/webhooks/academy', (req, res) => {
     'academy', new Date().toISOString(), raw.toString('utf8'), expected,
   );
   if ((ins as any).changes === 0) return res.status(409).json({ error: 'événement déjà reçu (rejeu)' });
+  // Traitement : consomme le payload puis marque processed=1. En cas d'échec, on laisse
+  // processed=0 pour inspection/rejeu manuel (la ligne est déjà stockée, pas re-signable).
+  try {
+    processAcademyEvent(JSON.parse(raw.toString('utf8')));
+    db.prepare('UPDATE webhook_events SET processed = 1 WHERE id = ?').run((ins as any).lastInsertRowid);
+  } catch (e) {
+    console.error('[webhook] traitement échoué (payload conservé):', (e as Error).message);
+  }
   res.status(202).json({ ok: true });
+});
+
+// École Bloom → certification. Payload attendu :
+// { type:'certification', memberId, courseTitle, level?, externalRef? }. Point d'extension
+// pour d'autres types d'événements de l'école.
+function processAcademyEvent(payload: any): void {
+  if (payload?.type === 'certification' && payload.memberId && payload.courseTitle) {
+    appendToCollection('certifications', [{
+      id: `cert_academy_${payload.externalRef ?? payload.memberId}_${Date.now()}`,
+      memberId: String(payload.memberId),
+      source: 'ecole_bloom',
+      courseTitle: String(payload.courseTitle),
+      level: payload.level ? String(payload.level) : '',
+      certifiedAt: new Date().toISOString().slice(0, 10),
+      externalRef: payload.externalRef ? String(payload.externalRef) : null,
+    }]);
+  }
+}
+
+// Sert le frontend buildé (vite build → dist/) sur le même process/port que l'API,
+// pour un déploiement mono-service (Dockerfile). En dev, dist/ n'existe pas encore
+// (Vite sert son propre serveur) : express.static ignore silencieusement l'absence.
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const DIST_DIR = path.join(__dirname, '../dist');
+app.use(express.static(DIST_DIR));
+app.get(/^(?!\/api\/).*/, (_req, res) => {
+  res.sendFile(path.join(DIST_DIR, 'index.html'), (err) => {
+    if (err) res.status(404).end();
+  });
 });
 
 const PORT = Number(process.env.API_PORT) || 4000;

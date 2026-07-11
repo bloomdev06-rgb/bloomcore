@@ -38,8 +38,68 @@ function send(channel: Channel, member: Member, subject: string, body: string, d
   if ((inserted as any).changes > 0 && status === 'simulated') {
     console.log(`[notify:${channel}→${maskRecipient(to)}] ${subject}`);
   }
-  // ponytail: status 'pending' n'est jamais consommé aujourd'hui (aucun transport
-  // réel branché) — le worker d'envoi arrivera avec les clés.
+  // status 'pending' est consommé par drainOutbox() (appelé par le scheduler).
+}
+
+// --- Transport réel -------------------------------------------------------
+// Email via SMTP (nodemailer, import dynamique optionnel : si le paquet n'est pas
+// installé, l'envoi échoue proprement et la ligne reste 'failed', pas de crash).
+async function deliverEmail(to: string, subject: string, body: string): Promise<void> {
+  const mod: any = await import('nodemailer' as any).catch(() => null);
+  if (!mod?.createTransport) throw new Error('nodemailer indisponible (npm i nodemailer)');
+  const transport = mod.createTransport({
+    host: process.env.SMTP_HOST,
+    port: Number(process.env.SMTP_PORT) || 587,
+    secure: process.env.SMTP_SECURE === 'true',
+    auth: process.env.SMTP_USER ? { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS } : undefined,
+  });
+  await transport.sendMail({ from: process.env.SMTP_FROM || process.env.SMTP_USER, to, subject, text: body });
+}
+
+// SMS / WhatsApp via l'API REST Twilio (fetch, aucune dépendance).
+async function deliverTwilio(channel: 'sms' | 'whatsapp', to: string, body: string): Promise<void> {
+  const sid = process.env.TWILIO_ACCOUNT_SID;
+  const token = process.env.TWILIO_AUTH_TOKEN;
+  if (!sid || !token) throw new Error('Twilio non configuré (TWILIO_ACCOUNT_SID / TWILIO_AUTH_TOKEN)');
+  const from = channel === 'whatsapp' ? `whatsapp:${process.env.TWILIO_WHATSAPP_FROM ?? ''}` : (process.env.TWILIO_FROM ?? '');
+  const dest = channel === 'whatsapp' ? `whatsapp:${to}` : to;
+  const params = new URLSearchParams({ To: dest, From: from, Body: body });
+  const res = await fetch(`https://api.twilio.com/2010-04-01/Accounts/${sid}/Messages.json`, {
+    method: 'POST',
+    headers: {
+      Authorization: 'Basic ' + Buffer.from(`${sid}:${token}`).toString('base64'),
+      'Content-Type': 'application/x-www-form-urlencoded',
+    },
+    body: params.toString(),
+  });
+  if (!res.ok) throw new Error(`Twilio ${res.status}: ${(await res.text()).slice(0, 200)}`);
+}
+
+async function deliver(channel: Channel, to: string, subject: string, body: string): Promise<void> {
+  if (channel === 'email') return deliverEmail(to, subject, body);
+  return deliverTwilio(channel, to, body);
+}
+
+// Worker : draine les lignes outbox 'pending' et tente l'envoi réel. Idempotent
+// (statut → 'sent'/'failed'), appelé périodiquement par le scheduler.
+export async function drainOutbox(limit = 50): Promise<{ sent: number; failed: number }> {
+  const rows = db
+    .prepare("SELECT id, channel, recipient, subject, body FROM outbox WHERE status = 'pending' ORDER BY id LIMIT ?")
+    .all(limit) as any[];
+  let sent = 0;
+  let failed = 0;
+  for (const row of rows) {
+    try {
+      await deliver(row.channel, row.recipient, row.subject, row.body);
+      db.prepare("UPDATE outbox SET status = 'sent', sent_at = ? WHERE id = ?").run(new Date().toISOString(), row.id);
+      sent++;
+    } catch (e) {
+      db.prepare("UPDATE outbox SET status = 'failed', error = ? WHERE id = ?").run(String((e as Error).message).slice(0, 300), row.id);
+      failed++;
+    }
+  }
+  if (sent || failed) console.log(`[outbox] ${sent} envoyé(s), ${failed} échec(s)`);
+  return { sent, failed };
 }
 
 // Déclencheur d'un AppNotification : les ids temporels sont déterministes

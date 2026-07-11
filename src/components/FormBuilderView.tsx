@@ -18,14 +18,16 @@ const FIELD_TYPES: { value: FieldType; label: string }[] = [
   { value: 'date', label: 'Date' },
 ];
 
-// ponytail: P1.4 — persisted (bc_forms) and wired for fd_bus_sante/fd_adn: BloomBusView and
-// EventsView now read those two forms' field labels live instead of hardcoding them. The other
-// FormDefs (fd_nouveau/fd_membre/fd_service/fd_rsa/fd_bapteme) stay a documentary catalog — their
-// real modals already have richer custom widgets (multi-select members, event pickers, repeatable
-// lists) that don't map onto this simple Field schema; building those P2.9 field types into the
-// builder is the next step, out of scope here. Reordering/adding/removing fields on the two wired
-// forms only affects the builder's own display — the live modals keep fixed input positions bound
-// to fixed KPI/report fields, so only label text is actually consumed downstream.
+// ponytail: P1.4 — persisted (bc_forms) and wired for all 7 catalogs: fd_bus_sante (BloomBusView),
+// fd_adn (EventsView), fd_membre (MembersView), fd_service/fd_rsa (DepartmentsView rapport modal),
+// fd_bapteme (Member360View's baptism Stepper) and fd_nouveau (App.tsx's "Fiche d'Accueil ADN & OJ"
+// quick-add modal, opened from the ADN department's "+ Formulaire Nouveau" button). Each screen
+// reads that form's field/step labels live instead of hardcoding them. Richer custom widgets
+// (multi-select members, event pickers, repeatable action lists) still don't map onto this simple
+// Field schema; building those P2.9 field types into the builder is the next step, out of scope
+// here. Reordering/adding/removing fields on these forms only affects the builder's own display —
+// the live modals keep fixed input positions bound to fixed KPI/report fields, so only label text
+// is actually consumed downstream.
 export default function FormBuilderView({ activeBranch, simulatedRole, forms, onUpdateForms }: FormBuilderViewProps) {
   const [editId, setEditId] = useState<string | null>(null);
   const editing = forms.find((f) => f.id === editId) ?? null;
@@ -96,7 +98,7 @@ export default function FormBuilderView({ activeBranch, simulatedRole, forms, on
             ))}
             {editing.fields.length === 0 && <p className="text-xs text-bc-text-secondary italic">Aucun champ.</p>}
             <button
-              onClick={() => update(editing.id, { fields: [...editing.fields, { id: `f${Date.now()}`, label: 'Nouveau champ', type: 'text', required: false }] })}
+              onClick={() => update(editing.id, { fields: [...editing.fields, { id: `f${Date.now()}_${Math.random().toString(36).slice(2, 7)}`, label: 'Nouveau champ', type: 'text', required: false }] })}
               className="flex items-center gap-1.5 text-xs font-bold text-bc-green hover:underline mt-2 active-scale"
             >
               <Plus size={14} /> Ajouter un champ
@@ -126,7 +128,7 @@ export default function FormBuilderView({ activeBranch, simulatedRole, forms, on
               </div>
             ))}
             <button
-              onClick={() => update(editing.id, { steps: [...(editing.steps ?? []), { id: `s${Date.now()}`, label: 'Nouvelle étape', validator: 'Responsable' }] })}
+              onClick={() => update(editing.id, { steps: [...(editing.steps ?? []), { id: `s${Date.now()}_${Math.random().toString(36).slice(2, 7)}`, label: 'Nouvelle étape', validator: 'Responsable' }] })}
               className="flex items-center gap-1.5 text-xs font-bold text-bc-green hover:underline mt-2 active-scale"
             >
               <Plus size={14} /> Ajouter une étape

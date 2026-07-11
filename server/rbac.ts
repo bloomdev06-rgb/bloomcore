@@ -2,10 +2,9 @@
 // qui n'est qu'un commutateur de démo côté client). Réutilise les modules purs
 // du frontend (permissions.ts, scope.ts) pour que client et serveur ne puissent
 // pas diverger sur la sémantique des capacités et du scope.
-import { Member, Ministry, PermissionMatrix, Delegation, AdminAccount, Department } from '../src/types.ts';
+import { Member, Ministry, PermissionMatrix, Delegation, AdminAccount, Department, BloomBusEntity } from '../src/types.ts';
 import { hasCapability } from '../src/data/permissions.ts';
-import { inMemberScope } from '../src/data/scope.ts';
-import { INITIAL_BUS_LINES } from '../src/mockData.ts';
+import { inMemberScope, canFillReportFor } from '../src/data/scope.ts';
 import { getKv } from './db.ts';
 import { GuardError, readCollection, canonical } from './guards.ts';
 
@@ -19,7 +18,7 @@ const ABOVE_MEMBER_ROLES = [
 // Ordre de résolution du rôle de scope pour inMemberScope (qui attend UN rôle).
 const SCOPE_ROLE_ORDER: [string, string][] = [
   ['Ministre', 'Ministre'],
-  ['Capitaine de Bus', 'Capitaine'],
+  ['Capitaine de Bus', 'Capitaine de Bus'],
   ['Responsable de Zone', 'Responsable de Zone'],
   ['Responsable de Commune', 'Responsable de Commune'],
   ['Responsable', 'Responsable'],
@@ -78,15 +77,29 @@ function touchedItems(name: string, incoming: any[]): any[] {
   });
 }
 
-// Items vivants absents du payload → seront transformés en tombstone par applyWrite.
-// Le scoping DOIT aussi les couvrir : sinon un opérateur supprime par omission des
-// items hors de son périmètre (S3 — un Responsable envoie ses seuls membres et
-// tombstone toute l'église). En usage normal le client renvoie le tableau complet,
-// donc removedItems est vide et rien n'est bloqué.
-function removedItems(name: string, incoming: any[]): any[] {
+// Ids stockés HORS de la portée de LECTURE de l'opérateur (symétrie avec filterReadable) :
+// ce que la lecture cache est exactement ce que l'écriture doit préserver. Un client scopé
+// ne détient qu'un sous-ensemble ; son PUT whole-array omet le reste non pour le supprimer
+// mais parce qu'il ne l'a jamais reçu. Ces ids ne sont donc ni des suppressions (pas de 403)
+// ni des tombstones (préservés par applyWrite). Full-scope → ensemble vide → LWW classique.
+export function preservedIds(name: string, ctx: RbacContext): Set<string> {
+  const stored = readCollection(name, true).filter((s: any) => !s.deletedAt);
+  const visible = new Set(filterReadable(name, ctx, stored).map((s: any) => String(s.id)));
+  return new Set(
+    stored.filter((s: any) => !visible.has(String(s.id))).map((s: any) => String(s.id)),
+  );
+}
+
+// Items vivants VISIBLES par l'opérateur mais absents du payload → suppressions
+// intentionnelles, transformées en tombstone par applyWrite. Le scoping DOIT les couvrir
+// (S3 — on ne supprime que dans son périmètre). Les items hors-portée sont exclus ici
+// (préservés, cf. preservedIds) : un Capitaine renvoyant ses seuls membres ne tombstone
+// plus — et n'est plus 403 par — le reste de l'église qu'il ne voit pas.
+function removedItems(name: string, incoming: any[], ctx: RbacContext): any[] {
   const incomingIds = new Set(incoming.map((it) => String(it.id)));
+  const preserve = preservedIds(name, ctx);
   return readCollection(name, true).filter(
-    (s: any) => !s.deletedAt && !incomingIds.has(String(s.id)),
+    (s: any) => !s.deletedAt && !incomingIds.has(String(s.id)) && !preserve.has(String(s.id)),
   );
 }
 
@@ -120,10 +133,28 @@ export function assertCanWrite(name: string, ctx: RbacContext, incoming: any[]):
       const scopeRole = SCOPE_ROLE_ORDER.find(([r]) => roles.includes(r))?.[1] ?? 'Membre';
       const departments = readCollection('departments') as Department[];
       const ministries = readCollection('ministries') as Ministry[];
+      // Bus lines LIVES (pas le seed figé) : un bus créé/déplacé change les zones/communes
+      // servant au scoping Responsable de Zone/Commune.
+      const busLines = readCollection('bus_lines') as BloomBusEntity[];
       // Écritures ET suppressions par omission : les deux doivent rester dans le périmètre.
-      for (const target of [...touchedItems(name, incoming), ...removedItems(name, incoming)]) {
-        if (!inMemberScope(member, target as Member, scopeRole, INITIAL_BUS_LINES, departments, ministries)) {
+      for (const target of [...touchedItems(name, incoming), ...removedItems(name, incoming, ctx)]) {
+        if (!inMemberScope(member, target as Member, scopeRole, busLines, departments, ministries)) {
           throw new GuardError(403, `members: ${target.id} hors de votre périmètre (${scopeRole})`);
+        }
+      }
+      // C1 — défense en profondeur : un opérateur non full-scope ne peut pas s'AUTO-promouvoir
+      // en modifiant les champs privilégiés de SA PROPRE fiche (`departments` alimente
+      // resolveRoles → escalade de rôle). Les responsables gèrent bien ces champs sur les
+      // AUTRES membres (target.id ≠ self, non bloqué ici) — jamais sur eux-mêmes.
+      const selfBefore = readCollection(name, true).find((s: any) => String(s.id) === String(member.id));
+      if (selfBefore) {
+        for (const item of touchedItems(name, incoming)) {
+          if (String(item.id) !== String(member.id)) continue;
+          for (const f of ['departments', 'level', 'pastoralCursus', 'bloomBusId', 'deptAttachmentStatus', 'deptAttachmentOrigin', 'testRole']) {
+            if (canonical((item as any)[f]) !== canonical((selfBefore as any)[f])) {
+              throw new GuardError(403, `members: champ privilégié '${f}' non modifiable sur votre propre fiche`);
+            }
+          }
         }
       }
       return;
@@ -135,7 +166,7 @@ export function assertCanWrite(name: string, ctx: RbacContext, incoming: any[]):
     case 'ministries':
       if (!hasAny(roles, STAFF_ROLES)) throw new GuardError(403, `${name}: réservé aux Responsables et plus`);
       if (name === 'events' && !hasAny(roles, FULL_SCOPE_ROLES)) {
-        for (const ev of [...touchedItems(name, incoming), ...removedItems(name, incoming)]) {
+        for (const ev of [...touchedItems(name, incoming), ...removedItems(name, incoming, ctx)]) {
           if (ev.branch && ev.branch !== 'global' && member.branch && ev.branch !== member.branch) {
             throw new GuardError(403, `events: ${ev.id} appartient à l'autre branche`);
           }
@@ -148,9 +179,22 @@ export function assertCanWrite(name: string, ctx: RbacContext, incoming: any[]):
         throw new GuardError(403, 'reports: rôle serviteur ou délégation requis');
       }
       if (!hasAny(roles, FULL_SCOPE_ROLES)) {
-        for (const r of [...touchedItems(name, incoming), ...removedItems(name, incoming)]) {
+        const scopeRole = SCOPE_ROLE_ORDER.find(([r]) => roles.includes(r))?.[1] ?? 'Membre';
+        const allMembers = readCollection('members') as Member[];
+        const busLines = readCollection('bus_lines') as BloomBusEntity[];
+        const departments = readCollection('departments') as Department[];
+        for (const r of [...touchedItems(name, incoming), ...removedItems(name, incoming, ctx)]) {
           if (r.targetBranch && r.targetBranch !== 'global' && member.branch && r.targetBranch !== member.branch) {
             throw new GuardError(403, `reports: ${r.id} appartient à l'autre branche`);
+          }
+          // Miroir serveur de canFillReportFor (client) : un rapport santé Bloom Bus ne peut
+          // viser qu'un subordonné direct (ou soi-même) dans la hiérarchie Bloom Bus. Empêche
+          // le bypass par appel API direct que l'UI interdisait déjà.
+          if (r.reportType === 'rapport_bloom_bus_member' && r.content?.memberId) {
+            const target = allMembers.find((m) => m.id === r.content.memberId);
+            if (target && !canFillReportFor(member, target, scopeRole, allMembers, busLines, departments)) {
+              throw new GuardError(403, `reports: ${r.id} hors de votre hiérarchie Bloom Bus`);
+            }
           }
         }
       }
@@ -159,6 +203,9 @@ export function assertCanWrite(name: string, ctx: RbacContext, incoming: any[]):
 
     case 'integration_reports':
     case 'certifications':
+    case 'projects':
+    case 'bus_lines':
+      // Données opérationnelles (projets, lignes Bloom Bus) — écriture réservée à l'encadrement.
       if (!hasAny(roles, ABOVE_MEMBER_ROLES)) throw new GuardError(403, `${name}: rôle d'encadrement requis`);
       return;
 
@@ -224,9 +271,10 @@ export function filterReadable(name: string, ctx: RbacContext, items: any[]): an
       if (!scopeEntry) return items.filter((m) => m.id === member.id);
       const departments = readCollection('departments') as Department[];
       const ministries = readCollection('ministries') as Ministry[];
+      const busLines = readCollection('bus_lines') as BloomBusEntity[];
       return items.filter((m) =>
         m.id === member.id ||
-        inMemberScope(member, m as Member, scopeEntry[1], INITIAL_BUS_LINES, departments, ministries),
+        inMemberScope(member, m as Member, scopeEntry[1], busLines, departments, ministries),
       );
     }
 

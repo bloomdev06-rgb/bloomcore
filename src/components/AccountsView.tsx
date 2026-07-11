@@ -5,6 +5,7 @@ import { INITIAL_ADMINS } from '../mockData';
 import { UserCog, ShieldAlert, History, X, AlertTriangle, Check } from 'lucide-react';
 import { motion } from 'motion/react';
 import { staggerParent, staggerItem } from './ui/motion';
+import { Modal } from './ui/Modal';
 
 interface AccountsViewProps {
   activeBranch: Branch;
@@ -205,17 +206,13 @@ export default function AccountsView({ activeBranch, simulatedRole, members, aud
       </div>
 
       {/* Grant modal */}
-      {granting && (
-        <div className="fixed inset-0 bg-bc-text/50 flex items-center justify-center z-50 p-4" onClick={() => setGranting(false)}>
-          <div className="bg-white rounded-[2rem] w-full max-w-md p-6 border border-bc-border shadow-2xl relative" onClick={e => e.stopPropagation()}>
-            <button onClick={() => setGranting(false)} className="absolute top-4 right-4 p-2 text-bc-text-secondary hover:text-bc-text transition-colors active-scale">
-              <X size={20} />
-            </button>
-            <div className="flex items-center gap-2 mb-4">
-              <UserCog size={20} className="text-bc-text" />
-              <h3 className="text-base font-ui font-bold text-bc-text">Nommer un {grantingRole}</h3>
-            </div>
-
+      <Modal
+        open={granting}
+        onClose={() => setGranting(false)}
+        maxWidth="max-w-md"
+        title={`Nommer un ${grantingRole}`}
+        icon={<UserCog size={20} className="text-bc-text" />}
+      >
             <label className="text-xs font-bold text-bc-text-secondary block mb-1">Membre</label>
             <select
               value={pickedId}
@@ -256,9 +253,7 @@ export default function AccountsView({ activeBranch, simulatedRole, members, aud
                 <Check size={14} /> {picked && !pickedEligible ? 'Confirmer l\'exception' : 'Nommer'}
               </button>
             </div>
-          </div>
-        </div>
-      )}
+      </Modal>
     </div>
   );
 }

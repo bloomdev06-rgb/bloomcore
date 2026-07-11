@@ -1,16 +1,20 @@
 import React, { useState } from 'react';
 import { ChevronLeft, ChevronRight, X } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
+import { Event } from '../types';
 
-// Fake event data for the calendar
-const EVENTS = [
-  { date: '2026-06-24', title: 'Culte Dominical 1', time: '08:00', location: 'Bloom Church', type: 'church' },
-  { date: '2026-06-28', title: 'Réunion de prière', time: '18:30', location: 'Salle A', type: 'prayer' },
-  { date: '2026-07-02', title: 'Formation des Leaders', time: '19:00', location: 'En ligne', type: 'training' },
-];
+const BRANCH_LABEL: Record<string, string> = { church: 'Bloom Church', light: 'Bloom Light', global: '2 branches' };
 
-export default function MiniCalendar() {
-  const [currentDate, setCurrentDate] = useState(new Date(2026, 5, 1)); // June 2026 as base
+export default function MiniCalendar({ events = [] }: { events?: Event[] }) {
+  // Événements réels mappés à la forme du calendrier (plus de données factices).
+  const EVENTS = events.map((e) => ({
+    date: e.date,
+    title: e.title,
+    location: BRANCH_LABEL[e.branch] ?? e.branch,
+    type: e.type,
+    closed: e.closed,
+  }));
+  const [currentDate, setCurrentDate] = useState(new Date()); // mois courant
   const [selectedEvent, setSelectedEvent] = useState<any | null>(null);
 
   const nextMonth = () => setCurrentDate(new Date(currentDate.getFullYear(), currentDate.getMonth() + 1, 1));
@@ -94,7 +98,7 @@ export default function MiniCalendar() {
                 {new Date(selectedEvent.date).toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long' })}
               </span>
               <h4 className="font-bold text-bc-text text-sm mb-1">{selectedEvent.title}</h4>
-              <p className="text-xs text-bc-text-secondary">{selectedEvent.time} • {selectedEvent.location}</p>
+              <p className="text-xs text-bc-text-secondary">{selectedEvent.location}{selectedEvent.closed ? ' • Clôturé' : ''}</p>
             </div>
           </motion.div>
         )}

@@ -4,6 +4,7 @@ import { Member, Branch, PermissionMatrix, Delegation } from '../types';
 import { load, save, hasCapability } from '../data';
 import { motion } from 'motion/react';
 import { staggerParent, staggerItem } from './ui/motion';
+import { Modal } from './ui/Modal';
 
 interface FormationsViewProps {
   members?: Member[];
@@ -135,35 +136,25 @@ export default function FormationsView({ members = [], activeBranch, simulatedRo
 
       {/* Add certification modal */}
       {adding && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4" onClick={() => setAdding(false)}>
-          <div className="bg-white rounded-[2rem] w-full max-w-md p-6 border border-bc-border shadow-2xl relative" onClick={e => e.stopPropagation()}>
-            <button onClick={() => setAdding(false)} className="absolute top-4 right-4 p-2 text-bc-text-secondary hover:text-bc-text transition-colors active-scale">
-              <X size={20} />
+        <Modal open={adding} onClose={() => setAdding(false)} title="Enregistrer une certification" icon={<Award size={20} className="text-bc-text" />} maxWidth="max-w-md">
+          <label className="text-xs font-bold text-bc-text-secondary block mb-1">Membre</label>
+          <select value={memberId} onChange={e => setMemberId(e.target.value)} className="w-full p-2 border border-bc-border rounded-lg text-sm bg-white mb-4">
+            <option value="">— Sélectionner —</option>
+            {scoped.map(m => <option key={m.id} value={m.id}>{m.firstName} {m.lastName}</option>)}
+          </select>
+
+          <label className="text-xs font-bold text-bc-text-secondary block mb-1">Formation</label>
+          <select value={formation} onChange={e => setFormation(e.target.value)} className="w-full p-2 border border-bc-border rounded-lg text-sm bg-white mb-4">
+            {FORMATIONS.map(f => <option key={f} value={f}>{f}</option>)}
+          </select>
+
+          <div className="flex gap-3 justify-end pt-3 border-t border-bc-border">
+            <button onClick={() => setAdding(false)} className="px-4 py-2 border border-bc-border text-bc-text-secondary rounded-full text-xs hover:bg-bc-canvas active-scale">Annuler</button>
+            <button onClick={addCertification} disabled={!memberId} className="px-5 py-2 bg-bc-green text-white rounded-full text-xs font-ui font-bold hover:opacity-90 disabled:opacity-40 flex items-center gap-1.5 active-scale">
+              <Check size={14} /> Enregistrer
             </button>
-            <div className="flex items-center gap-2 mb-4">
-              <Award size={20} className="text-bc-text" />
-              <h3 className="text-base font-ui font-bold text-bc-text">Enregistrer une certification</h3>
-            </div>
-
-            <label className="text-xs font-bold text-bc-text-secondary block mb-1">Membre</label>
-            <select value={memberId} onChange={e => setMemberId(e.target.value)} className="w-full p-2 border border-bc-border rounded-lg text-sm bg-white mb-4">
-              <option value="">— Sélectionner —</option>
-              {scoped.map(m => <option key={m.id} value={m.id}>{m.firstName} {m.lastName}</option>)}
-            </select>
-
-            <label className="text-xs font-bold text-bc-text-secondary block mb-1">Formation</label>
-            <select value={formation} onChange={e => setFormation(e.target.value)} className="w-full p-2 border border-bc-border rounded-lg text-sm bg-white mb-4">
-              {FORMATIONS.map(f => <option key={f} value={f}>{f}</option>)}
-            </select>
-
-            <div className="flex gap-3 justify-end pt-3 border-t border-bc-border">
-              <button onClick={() => setAdding(false)} className="px-4 py-2 border border-bc-border text-bc-text-secondary rounded-full text-xs hover:bg-bc-canvas active-scale">Annuler</button>
-              <button onClick={addCertification} disabled={!memberId} className="px-5 py-2 bg-bc-green text-white rounded-full text-xs font-ui font-bold hover:opacity-90 disabled:opacity-40 flex items-center gap-1.5 active-scale">
-                <Check size={14} /> Enregistrer
-              </button>
-            </div>
           </div>
-        </div>
+        </Modal>
       )}
     </div>
   );

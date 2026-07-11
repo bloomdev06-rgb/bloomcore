@@ -1,5 +1,7 @@
-import React, { useState, useEffect } from 'react';
-import { load, save, seeds, useDepartments, useMinistries, useBusLines, deriveTimeBasedNotifications, apiBootstrap, clearAuthToken, enableSync, canView } from './data';
+import React, { useState, useEffect, lazy, Suspense } from 'react';
+import { load, save, seeds, useDepartments, useMinistries, useBusLines, useAdmins, deriveTimeBasedNotifications, apiBootstrap, apiPut, clearAuthToken, enableSync, canView } from './data';
+import { resolveMemberRole } from './data/roles';
+import { MEMBERS_TAB_DEPT_ONLY_ROLES } from './data/scope';
 import { downscaleImage } from './lib/image';
 
 const CULT_TYPES = ['Culte du Dimanche', 'Culte de Prière', 'Veillée', 'Culte des Jeunes', 'Réunion de Maison'];
@@ -20,27 +22,30 @@ import { motion, AnimatePresence } from 'motion/react';
 // Import Views
 import Sidebar from './components/Sidebar';
 import Header from './components/Header';
-import DashboardView from './components/DashboardView';
-import MembersView from './components/MembersView';
-import NouveauxView from './components/NouveauxView';
-import BloomBusView from './components/BloomBusView';
-import EventsView from './components/EventsView';
-import ReportsView from './components/ReportsView';
-import ProgrammesView from './components/ProgrammesView';
-import FormationsView from './components/FormationsView';
-import MinisteresView from './components/MinisteresView';
-import DepartmentsView from './components/DepartmentsView';
-import AccountsView from './components/AccountsView';
-import SettingsView from './components/SettingsView';
-import FormBuilderView from './components/FormBuilderView';
-import PermissionsView from './components/PermissionsView';
-import AuditView from './components/AuditView';
-import ProjectsView from './components/ProjectsView';
-import CursusView from './components/CursusView';
-import ProfileView from './components/ProfileView';
+// Vues chargées à la demande (React.lazy) — seule AuthView (écran avant connexion)
+// reste dans le bundle principal, tout le reste ne charge qu'au clic sur l'onglet.
+const DashboardView = lazy(() => import('./components/DashboardView'));
+const MembersView = lazy(() => import('./components/MembersView'));
+const NouveauxView = lazy(() => import('./components/NouveauxView'));
+const BloomBusView = lazy(() => import('./components/BloomBusView'));
+const EventsView = lazy(() => import('./components/EventsView'));
+const ReportsView = lazy(() => import('./components/ReportsView'));
+const ProgrammesView = lazy(() => import('./components/ProgrammesView'));
+const FormationsView = lazy(() => import('./components/FormationsView'));
+const MinisteresView = lazy(() => import('./components/MinisteresView'));
+const DepartmentsView = lazy(() => import('./components/DepartmentsView'));
+const AccountsView = lazy(() => import('./components/AccountsView'));
+const SettingsView = lazy(() => import('./components/SettingsView'));
+const FormBuilderView = lazy(() => import('./components/FormBuilderView'));
+const PermissionsView = lazy(() => import('./components/PermissionsView'));
+const AuditView = lazy(() => import('./components/AuditView'));
+const ProjectsView = lazy(() => import('./components/ProjectsView'));
+const CursusView = lazy(() => import('./components/CursusView'));
+const ProfileView = lazy(() => import('./components/ProfileView'));
 import AuthView from './components/AuthView';
+import { ToastContainer } from './components/ui/Toast';
 
-import { UserCheck, Sparkles, X, Heart } from 'lucide-react';
+import { UserCheck, Sparkles, X, Heart, Loader2 } from 'lucide-react';
 
 export default function App() {
   // Navigation states
@@ -83,6 +88,13 @@ export default function App() {
   useEffect(() => {
     if (activeTab !== 'profile' && !canView(permissionMatrix, activeTab, simulatedRole)) {
       setActiveTab('dashboard');
+      return;
+    }
+    // Responsable/Adjoint : pas d'onglet Membres global, même si la matrice
+    // l'autorise encore (elle reste nécessaire côté serveur pour l'onglet
+    // Membres de leur page Département — cf. Sidebar.tsx).
+    if (activeTab === 'members' && MEMBERS_TAB_DEPT_ONLY_ROLES.includes(simulatedRole)) {
+      setActiveTab('dashboard');
     }
   }, [simulatedRole, activeTab, permissionMatrix]);
   useEffect(() => { save('bc_settings', settings); }, [settings]);
@@ -103,7 +115,16 @@ export default function App() {
       if (!data) return;
       // Normalise departments (C3) : un membre serveur sans ce champ ferait crasher
       // Object.keys(m.departments) dans Members/Departments/scope.
-      if (data.members) setMembers((data.members as Member[]).map(m => ({ ...m, departments: m.departments ?? {} })));
+      if (data.members) {
+        const list = (data.members as Member[]).map(m => ({ ...m, departments: m.departments ?? {} }));
+        setMembers(list);
+        // #11 — si le membre connecté n'est pas dans la liste serveur faisant autorité
+        // (supprimé), déconnecter plutôt que poursuivre sous l'identité de members[0].
+        if (loggedInMemberId && !list.some(m => m.id === loggedInMemberId)) {
+          clearAuthToken();
+          setLoggedInMemberId(null);
+        }
+      }
       if (data.events) setEvents(data.events as Event[]);
       if (data.reports) setReports(data.reports as Report[]);
       if (data.audits) setAudits(data.audits as AuditLog[]);
@@ -116,7 +137,7 @@ export default function App() {
       // rafraîchit leur source localStorage — les vues montées ensuite lisent
       // les données serveur via load(). ponytail: une vue déjà ouverte garde son
       // état jusqu'au prochain montage, acceptable en offline-first.
-      for (const name of ['delegations', 'ministries', 'certifications', 'admins', 'activities', 'integration_reports']) {
+      for (const name of ['delegations', 'ministries', 'certifications', 'admins', 'activities', 'integration_reports', 'projects', 'bus_lines']) {
         if (data[name]) localStorage.setItem(`bc_${name}`, JSON.stringify(data[name]));
       }
     }).finally(() => {
@@ -159,6 +180,11 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [members, settings]);
 
+  // P1.4 — labels read live from FormBuilder's fd_nouveau FormDef, id-matched.
+  const nouveauForm = forms.find((f) => f.id === 'fd_nouveau');
+  const nouveauLabel = (fieldId: string, fallback: string) =>
+    nouveauForm?.fields.find((f) => f.id === fieldId)?.label ?? fallback;
+
   // Global Quick Form State (ADN)
   const [showGlobalQuickForm, setShowGlobalQuickForm] = useState(false);
   const [quickFirstname, setQuickFirstname] = useState('');
@@ -177,7 +203,18 @@ export default function App() {
   const [quickSource, setQuickSource] = useState('Invitation');
   const departmentOptions = useDepartments();
   const ministrySeeds = useMinistries();
+  const adminAccounts = useAdmins();
   const busLines = useBusLines();
+
+  // Le rôle qui pilote l'UI est dérivé du membre connecté (le panneau « Simuler profil »
+  // a été retiré). Un compte de test peut forcer son rôle via `testRole` (profils de test,
+  // un par rôle) ; sinon on le dérive via resolveMemberRole. Sans ça, tout le monde resterait « Pasteur ».
+  useEffect(() => {
+    if (!loggedInMemberId) return;
+    const op = members.find((m) => m.id === loggedInMemberId);
+    if (op) setSimulatedRole(op.testRole || resolveMemberRole(op, adminAccounts, ministrySeeds));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loggedInMemberId, members]);
 
   // P1.2 — un seul constructeur de notification, mêmes conventions que AuditLog.
   // ID unique même en boucle synchrone (B8) : Date.now() seul collisionne quand
@@ -209,7 +246,10 @@ export default function App() {
 
   const handleAddMember = (m: Member) => {
     // P4.15 (b) — affectation auto au Bloom Bus de la commune, si pas déjà rattaché.
-    const bus = !m.bloomBusId && m.gps?.commune
+    // Exclut l'enregistrement direct Bloom Bus : là le bus est choisi explicitement dans le
+    // formulaire (cascade Commune→Zone→Bus) ; ne pas le remplacer par le 1er bus de la commune
+    // (souvent d'une autre zone) quand un Resp. de Zone/Commune l'a laissé vide.
+    const bus = !m.bloomBusId && m.gps?.commune && m.deptAttachmentOrigin !== 'bloom_bus'
       ? busLines.find(b => b.commune === m.gps!.commune)
       : undefined;
     // P4.15 (c) — un "Oui à Jésus" rejoint aussi le département Baptême (parcours à étapes).
@@ -232,8 +272,8 @@ export default function App() {
       id: genId('aud_reg'),
       timestamp: new Date().toISOString(),
       actionType: enriched.level === 'Nouveau' ? 'MEMBER_REGISTERED_ADN' : 'MEMBER_CREATED_MANUAL',
-      operatorName: 'Affeny Grah',
-      operatorId: 'mem_1',
+      operatorName: operator ? `${operator.firstName} ${operator.lastName}` : 'Affeny Grah',
+      operatorId: operator?.id ?? 'mem_1',
       details: `Création du profil de ${enriched.firstName} ${enriched.lastName} (${enriched.level}).`,
       branch: enriched.branch
     };
@@ -254,8 +294,8 @@ export default function App() {
         id: genId('aud_dup'),
         timestamp: new Date().toISOString(),
         actionType: 'MEMBER_DUPLICATE_FLAGGED',
-        operatorName: 'Affeny Grah',
-        operatorId: 'mem_1',
+        operatorName: operator ? `${operator.firstName} ${operator.lastName}` : 'Affeny Grah',
+        operatorId: operator?.id ?? 'mem_1',
         details: `${enriched.firstName} ${enriched.lastName} signalé(e) doublon potentiel avec ${dupe.firstName} ${dupe.lastName} (${dupe.id}).`,
         branch: enriched.branch,
       });
@@ -303,8 +343,8 @@ export default function App() {
       id: genId('aud_upd'),
       timestamp: new Date().toISOString(),
       actionType: isPromotion ? 'MEMBER_PROMOTED' : isBranchTransfer ? 'BRANCH_TRANSFER' : isDrachmeChange ? 'MEMBER_DRACHME_FLAGGED' : 'MEMBER_PROFILE_UPDATED',
-      operatorName: 'Affeny Grah',
-      operatorId: 'mem_1',
+      operatorName: operator ? `${operator.firstName} ${operator.lastName}` : 'Affeny Grah',
+      operatorId: operator?.id ?? 'mem_1',
       details: isPromotion
         ? `Promotion de ${m.firstName} ${m.lastName} : ${before!.pastoralCursus} → ${m.pastoralCursus}.`
         : isBranchTransfer
@@ -319,8 +359,39 @@ export default function App() {
     handleAddAuditLog(log);
   };
 
+  // Suppression de profil — un membre peut effacer son propre profil, un
+  // admin/pasteur peut effacer celui de n'importe qui (voir MembersView/ProfileView
+  // pour le gate de rôle ; le serveur autorise déjà les deux via inMemberScope).
+  const handleDeleteMember = async (id: string) => {
+    const target = members.find(m => m.id === id);
+    if (!target) return;
+    const isSelf = id === loggedInMemberId;
+    const updated = members.filter(m => m.id !== id);
+    setMembers(updated);
+    handleAddAuditLog({
+      id: genId('aud_del'),
+      timestamp: new Date().toISOString(),
+      actionType: isSelf ? 'MEMBER_SELF_DELETED' : 'MEMBER_DELETED',
+      operatorName: operator ? `${operator.firstName} ${operator.lastName}` : 'Affeny Grah',
+      operatorId: operator?.id ?? 'mem_1',
+      details: `Suppression du profil de ${target.firstName} ${target.lastName}.`,
+      branch: target.branch,
+    });
+    if (isSelf) {
+      // handleLogout() reload()-e immédiatement : le useEffect qui persiste `members`
+      // (et donc son PUT serveur fire-and-forget) n'a jamais l'occasion de tourner avant
+      // que la page ne se recharge. On pousse explicitement la liste filtrée avant de
+      // partir, sinon la suppression de son propre profil ne survit pas au reload.
+      await apiPut('members', updated).catch(() => {});
+      handleLogout();
+    }
+  };
+
   const handleAddReport = (r: Report) => {
-    setReports(prev => [r, ...prev]);
+    // Upsert par id : les rapports à id unique (Date.now) s'insèrent normalement ; ceux à id
+    // déterministe (ex. rapport santé Bloom Bus par membre+semaine) REMPLACENT l'existant au
+    // lieu de créer un doublon lors d'une correction/rattrapage.
+    setReports(prev => [r, ...prev.filter(x => x.id !== r.id)]);
 
     // D5 — un rapport de suivi coach EST un contact : réinitialise l'horloge "au rouge" du membre suivi.
     if (r.reportType === 'rapport_suivi_coach' && r.content?.memberId) {
@@ -517,6 +588,7 @@ export default function App() {
             members={members}
             onUpdateMember={handleUpdateMember}
             onAddMember={handleAddMember}
+            onDeleteMember={handleDeleteMember}
             reports={reports}
             onAddReport={handleAddReport}
             activeBranch={activeBranch}
@@ -524,6 +596,7 @@ export default function App() {
             operator={operator}
             audits={audits}
             permissionMatrix={permissionMatrix}
+            forms={forms}
           />
         );
       case 'integration':
@@ -543,9 +616,11 @@ export default function App() {
             events={events}
             onUpdateMember={handleUpdateMember}
             onAddReport={handleAddReport}
+            onAddMember={handleAddMember}
             activeBranch={activeBranch}
             simulatedRole={simulatedRole}
             forms={forms}
+            operator={operator}
           />
         );
       case 'events':
@@ -584,7 +659,7 @@ export default function App() {
       case 'ministeres':
         return <MinisteresView activeBranch={activeBranch} simulatedRole={simulatedRole} members={members} reports={reports} operator={operator} departments={departments} onUpdateDepartments={setDepartments} onAddAuditLog={handleAddAuditLog} />;
       case 'departments':
-        return <DepartmentsView activeBranch={activeBranch} simulatedRole={simulatedRole} members={members} reports={reports} events={events} audits={audits} permissionMatrix={permissionMatrix} departments={departments} onUpdateDepartments={setDepartments} onUpdateMember={handleUpdateMember} onAddReport={handleAddReport} onAddAuditLog={handleAddAuditLog} selectedDept={selectedDept} setSelectedDept={setSelectedDept} operatorId={operator?.id} />;
+        return <DepartmentsView activeBranch={activeBranch} simulatedRole={simulatedRole} members={members} reports={reports} events={events} audits={audits} permissionMatrix={permissionMatrix} forms={forms} departments={departments} onUpdateDepartments={setDepartments} onUpdateMember={handleUpdateMember} onAddMember={handleAddMember} busLines={busLines} onAddReport={handleAddReport} onAddAuditLog={handleAddAuditLog} selectedDept={selectedDept} setSelectedDept={setSelectedDept} operatorId={operator?.id} onOpenQuickNewForm={() => setShowGlobalQuickForm(true)} />;
       case 'formations':
         return <FormationsView activeBranch={activeBranch} simulatedRole={simulatedRole} members={members} operator={operator} permissionMatrix={permissionMatrix} />;
       case 'programs':
@@ -609,7 +684,7 @@ export default function App() {
       case 'audit':
         return <AuditView audits={audits} activeBranch={activeBranch} />;
       case 'profile':
-        return <ProfileView operator={operator} simulatedRole={simulatedRole} onUpdateMember={handleUpdateMember} onLogout={handleLogout} />;
+        return <ProfileView operator={operator} simulatedRole={simulatedRole} onUpdateMember={handleUpdateMember} onDeleteMember={handleDeleteMember} onLogout={handleLogout} />;
       default:
         return <div className="p-8">Section en cours de construction.</div>;
     }
@@ -629,10 +704,11 @@ export default function App() {
         setCollapsed={setSidebarCollapsed}
         activeBranch={activeBranch}
         simulatedRole={simulatedRole}
-        setSimulatedRole={setSimulatedRole}
         selectedDept={selectedDept}
         setSelectedDept={setSelectedDept}
         permissionMatrix={permissionMatrix}
+        members={members}
+        operator={operator}
       />
 
       {/* Main content viewport */}
@@ -665,15 +741,17 @@ export default function App() {
                 transition={{ type: 'spring', stiffness: 380, damping: 30 }}
                 className="flex-1 flex flex-col min-h-full"
               >
-                {renderActiveView()}
+                <Suspense fallback={<div className="flex-1 flex items-center justify-center py-24"><Loader2 className="animate-spin text-bc-green" size={28} /></div>}>
+                  {renderActiveView()}
+                </Suspense>
               </motion.div>
             </AnimatePresence>
           </div>
         </main>
       </div>
 
-      {/* Floating Action Buttons per Tab */}
-      {activeTab === 'dashboard' && ['ADN', 'Intégration', 'Portier', 'GDC'].includes(simulatedRole) && (
+      {/* Floating Action Buttons — visible sur toutes les pages pour ces rôles */}
+      {['ADN', 'Admin', 'Super Admin'].includes(simulatedRole) && (
         <button
           id="floating-adn-btn"
           onClick={() => setShowGlobalQuickForm(true)}
@@ -709,7 +787,7 @@ export default function App() {
             <form onSubmit={handleSaveQuickNouveau} className="space-y-4">
               {/* Type de membre (OJ / Nouveau) */}
               <div>
-                <label className="block text-xs font-bold text-bc-text mb-1">Type de membre *</label>
+                <label className="block text-xs font-bold text-bc-text mb-1">{nouveauLabel('f0', 'Type de membre')} *</label>
                 <div className="grid grid-cols-2 gap-2">
                   <button
                     type="button"
@@ -733,7 +811,7 @@ export default function App() {
               {/* Date d'activité (culte) + Type de culte */}
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-xs font-bold text-bc-text mb-1">Date d'activité (culte) *</label>
+                  <label className="block text-xs font-bold text-bc-text mb-1">{nouveauLabel('f1', "Date d'activité (culte)")} *</label>
                   <input
                     type="date"
                     required
@@ -743,7 +821,7 @@ export default function App() {
                   />
                 </div>
                 <div>
-                  <label className="block text-xs font-bold text-bc-text mb-1">Type de culte</label>
+                  <label className="block text-xs font-bold text-bc-text mb-1">{nouveauLabel('f2', 'Type de culte')}</label>
                   <select
                     value={quickCultType}
                     onChange={(e) => setQuickCultType(e.target.value)}
@@ -756,7 +834,7 @@ export default function App() {
 
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-xs font-bold text-bc-text mb-1">Prénom *</label>
+                  <label className="block text-xs font-bold text-bc-text mb-1">{nouveauLabel('f3', 'Prénom')} *</label>
                   <input
                     id="quick-firstname"
                     type="text"
@@ -767,7 +845,7 @@ export default function App() {
                   />
                 </div>
                 <div>
-                  <label className="block text-xs font-bold text-bc-text mb-1">Nom *</label>
+                  <label className="block text-xs font-bold text-bc-text mb-1">{nouveauLabel('f4', 'Nom')} *</label>
                   <input
                     id="quick-lastname"
                     type="text"
@@ -782,7 +860,7 @@ export default function App() {
               {/* Contact + Genre */}
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-xs font-bold text-bc-text mb-1">Contact *</label>
+                  <label className="block text-xs font-bold text-bc-text mb-1">{nouveauLabel('f5', 'Contact')} *</label>
                   <input
                     id="quick-phone"
                     type="text"
@@ -794,7 +872,7 @@ export default function App() {
                   />
                 </div>
                 <div>
-                  <label className="block text-xs font-bold text-bc-text mb-1">Genre</label>
+                  <label className="block text-xs font-bold text-bc-text mb-1">{nouveauLabel('f6', 'Genre')}</label>
                   <select
                     value={quickGender}
                     onChange={(e) => setQuickGender(e.target.value as 'H' | 'F')}
@@ -809,7 +887,7 @@ export default function App() {
               {/* Date de naissance + Commune */}
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-xs font-bold text-bc-text mb-1">Date de naissance</label>
+                  <label className="block text-xs font-bold text-bc-text mb-1">{nouveauLabel('f7', 'Date de naissance')}</label>
                   <input
                     type="date"
                     value={quickBirthDate}
@@ -818,7 +896,7 @@ export default function App() {
                   />
                 </div>
                 <div>
-                  <label className="block text-xs font-bold text-bc-text mb-1">Commune / Quartier</label>
+                  <label className="block text-xs font-bold text-bc-text mb-1">{nouveauLabel('f8', 'Commune / Quartier')}</label>
                   <select
                     id="quick-commune-select"
                     value={quickCommune}
@@ -836,7 +914,7 @@ export default function App() {
               {/* Photo (obligatoire) + Source */}
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-xs font-bold text-bc-text mb-1">Photo *</label>
+                  <label className="block text-xs font-bold text-bc-text mb-1">{nouveauLabel('f9', 'Photo')} *</label>
                   <input
                     id="quick-photo-input"
                     type="file"
@@ -856,7 +934,7 @@ export default function App() {
                   )}
                 </div>
                 <div>
-                  <label className="block text-xs font-bold text-bc-text mb-1">Comment nous a-t-il connu ?</label>
+                  <label className="block text-xs font-bold text-bc-text mb-1">{nouveauLabel('f10', 'Comment nous a-t-il connu ?')}</label>
                   <select
                     value={quickSource}
                     onChange={(e) => setQuickSource(e.target.value)}
@@ -893,7 +971,7 @@ export default function App() {
 
               {/* Souhaites-tu être… (membre vs simple visiteur) */}
               <div>
-                <label className="block text-xs font-bold text-bc-text mb-1">Souhaites-tu être…</label>
+                <label className="block text-xs font-bold text-bc-text mb-1">{nouveauLabel('f11', 'Souhaites-tu être…')}</label>
                 <div className="grid grid-cols-2 gap-2">
                   {(['Membre', 'Visiteur'] as const).map(opt => (
                     <button
@@ -912,7 +990,7 @@ export default function App() {
 
               {/* Département d'intérêt */}
               <div>
-                <label className="block text-xs font-bold text-bc-text mb-1">Département d'intérêt</label>
+                <label className="block text-xs font-bold text-bc-text mb-1">{nouveauLabel('f12', "Département d'intérêt")}</label>
                 <select
                   value={quickDept}
                   onChange={(e) => setQuickDept(e.target.value)}
@@ -943,6 +1021,8 @@ export default function App() {
           </div>
         </div>
       )}
+
+      <ToastContainer />
     </div>
   );
 }

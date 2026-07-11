@@ -7,26 +7,35 @@ import {
   Users,
   ChevronDown,
   ChevronRight,
-  Activity,
   Plus,
   X,
   TrendingUp,
+  Trash2,
 } from "lucide-react";
 import { LineChart, Line, XAxis, YAxis, Tooltip, Legend } from "recharts";
 import { Member, Branch, BloomBusEntity, Report, Event, FormDef } from "../types";
-import { useBusLines, save } from "../data";
-import { busMobilisationRate, moissonTotal, busVisitesTotal, dominantHealthLevel } from "../data/kpi";
+import { useBusLines, useDepartments, save } from "../data";
+import { busInScope, bloomBusRoleOf, fullBloomBusAccess, canFillReportFor, directReportsOf, canRegisterMemberViaBloomBus, FULL_SCOPE_ROLES } from "../data/scope";
+import { moissonTotal, busVisitesTotal, busPresenceCulteTotal, busActivitesTotal, dominantHealthLevel, Period, PeriodInput } from "../data/kpi";
+import { reportingWindow, weekId, weekLabel } from "../data/week";
+import { memberReportStatus, subordinateFillRate, rosterFillDetail } from "../data/completude";
 import { ResponsiveChart } from "./ui/ResponsiveChart";
-import { HEALTH_AXES } from "./DashboardView";
+import { HEALTH_AXES, Ring } from "./DashboardView";
 import { HealthSmiley } from "./ui/HealthSmiley";
 import { motion } from "motion/react";
 import { staggerParent, staggerItem } from "./ui/motion";
 import { Avatar } from "./ui/Avatar";
+import { Modal } from "./ui/Modal";
+import { ConfirmDialog } from "./ui/ConfirmDialog";
+import { TerritoryMap, TerritoryMapMode } from "./ui/TerritoryMap";
+import MemberFormModal from "./MemberFormModal";
 
 // §Accueil-1.3/§5 — les 4 critères réellement saisis par le rapport de suivi Bloom Bus
 // (presenceCulte/presenceService sont des compteurs, pas une échelle 1-5 : exclus du smiley/courbe ici).
 const BUS_HEALTH_KEYS = new Set(["spirituel", "social", "physique", "financier"]);
 const BUS_HEALTH_AXES = HEALTH_AXES.filter((a) => BUS_HEALTH_KEYS.has(a.key));
+
+const CULTE_OPTIONS = ["1er culte Bloom Church", "2e culte Bloom Church", "Culte Bloom Light"] as const;
 
 // Rapports rapport_bloom_bus_member → série temporelle moyenne par critère (un point par date de rapport).
 function healthEvolutionSeries(matchReports: Report[]) {
@@ -59,7 +68,7 @@ const RATINGS = [
   { v: 4, label: "Bien" },
   { v: 5, label: "Très bien" },
 ];
-function RatingRow({ label, value, onChange }: { label: string; value: number; onChange: (v: number) => void }) {
+function RatingRow({ label, value, onChange }: { label: string; value: number | null; onChange: (v: number) => void }) {
   return (
     <div>
       <label className="block text-xs font-bold text-bc-text-secondary mb-1.5">{label}</label>
@@ -85,24 +94,11 @@ interface BloomBusViewProps {
   events?: Event[];
   onUpdateMember: (member: Member) => void;
   onAddReport: (report: Report) => void;
+  onAddMember?: (member: Member) => void;
   activeBranch: Branch;
   simulatedRole: string;
   forms?: FormDef[];
-}
-
-// Real OpenStreetMap embed, bbox fitted to the selected territory (marker at centroid).
-function osmUrl(buses: BloomBusEntity[]): string {
-  const pts = buses.length ? buses : [{ centerLat: 5.35, centerLng: -4.02 } as BloomBusEntity];
-  const lats = pts.map((b) => b.centerLat);
-  const lngs = pts.map((b) => b.centerLng);
-  const pad = 0.02;
-  const minLat = Math.min(...lats) - pad;
-  const maxLat = Math.max(...lats) + pad;
-  const minLng = Math.min(...lngs) - pad;
-  const maxLng = Math.max(...lngs) + pad;
-  const mLat = (minLat + maxLat) / 2;
-  const mLng = (minLng + maxLng) / 2;
-  return `https://www.openstreetmap.org/export/embed.html?bbox=${minLng},${minLat},${maxLng},${maxLat}&layer=mapnik&marker=${mLat},${mLng}`;
+  operator?: Member;
 }
 
 export default function BloomBusView({
@@ -111,12 +107,19 @@ export default function BloomBusView({
   events = [],
   onUpdateMember,
   onAddReport,
+  onAddMember,
   activeBranch,
   simulatedRole,
   forms = [],
+  operator,
 }: BloomBusViewProps) {
-  // ponytail: pas de sélecteur de période ici (KPIS.md ne précise pas de granularité par vue) ; mois par défaut, comme le Dashboard.
-  const kpiPeriod = "month" as const;
+  // Sélecteur de période KPI — même pattern que DepartmentsView (Semaine calendaire par défaut).
+  const [period, setPeriod] = useState<Period>("week");
+  const [customFrom, setCustomFrom] = useState("");
+  const [customTo, setCustomTo] = useState("");
+  const kpiPeriod: PeriodInput = period === "custom" && customFrom && customTo
+    ? { from: new Date(customFrom), to: new Date(`${customTo}T23:59:59`) }
+    : period;
   // P1.4 — labels read live from FormBuilder's fd_bus_sante FormDef, id-matched (not
   // position-matched) so reordering fields in the builder doesn't relabel the wrong value.
   const santeForm = forms.find((f) => f.id === "fd_bus_sante");
@@ -126,47 +129,105 @@ export default function BloomBusView({
   // ponytail: local session state; persist via ./data at backend time.
   const [busLines, setBusLines] = useState<BloomBusEntity[]>(seedBus);
   useEffect(() => { save('bc_bus_lines', busLines); }, [busLines]);
+  const [deletingBus, setDeletingBus] = useState<BloomBusEntity | null>(null);
+  const deleteBusLine = (bus: BloomBusEntity) => {
+    setBusLines((prev) => prev.filter((b) => b.id !== bus.id));
+    // Casse le rattachement des membres orphelins (kpi.ts/completude.ts s'appuient sur
+    // ce champ pour toute agrégation par bus — un id qui pointe dans le vide fausserait
+    // silencieusement les KPI de leur nouveau bus par défaut).
+    members.filter((m) => m.bloomBusId === bus.id).forEach((m) => onUpdateMember({ ...m, bloomBusId: undefined }));
+    if (selectedLevel.type === "bus" && selectedLevel.id === bus.id) setSelectedLevel({ type: "root" });
+  };
+
+  // P4.4bis — hiérarchie/cloisonnement : le TITRE organisationnel (Ministre, Responsable
+  // d'un autre département, etc.) ne donne aucun accès automatique. Seul le rôle réellement
+  // occupé DANS Bloom Bus (lu dans le département spécial, pas dans le rôle organisationnel
+  // résolu qui peut le masquer) détermine la portée ; seule exception : les pasteurs
+  // (accès complet, cf. ./data/scope).
+  const departments = useDepartments();
+  const bloomBusRole = operator ? bloomBusRoleOf(operator, departments) : undefined;
+  const hasFullBloomBusAccess = operator ? fullBloomBusAccess(operator, simulatedRole, departments) : false;
+  const visibleBusLines = operator
+    ? busLines.filter((b) => busInScope(operator, b, simulatedRole, busLines, departments))
+    : busLines;
+
+  const ownBus = operator ? busLines.find((b) => b.id === operator.bloomBusId) : undefined;
+  let defaultLevel: { type: "commune" | "zone" | "bus"; id: string } = { type: "commune", id: "Cocody" };
+  let defaultCommune = "Cocody";
+  let defaultZone = "Zone Est";
+  const isOwnBusScoped = !hasFullBloomBusAccess &&
+    bloomBusRole !== "Responsable de Zone" && bloomBusRole !== "Responsable de Commune";
+  if (isOwnBusScoped && ownBus) {
+    defaultLevel = { type: "bus", id: ownBus.id };
+    defaultCommune = ownBus.commune;
+    defaultZone = ownBus.zone;
+  } else if (!hasFullBloomBusAccess && bloomBusRole === "Responsable de Zone" && ownBus) {
+    defaultLevel = { type: "zone", id: ownBus.zone };
+    defaultCommune = ownBus.commune;
+    defaultZone = ownBus.zone;
+  } else if (!hasFullBloomBusAccess && bloomBusRole === "Responsable de Commune") {
+    const commune = ownBus?.commune ?? operator?.gps?.commune;
+    if (commune) {
+      defaultLevel = { type: "commune", id: commune };
+      defaultCommune = commune;
+      const communeBus = busLines.find((b) => b.commune === commune);
+      if (communeBus) defaultZone = communeBus.zone;
+    }
+  }
+
   const [showAddBus, setShowAddBus] = useState(false);
+  const [showDirectRegister, setShowDirectRegister] = useState(false);
   const [expandedCommunes, setExpandedCommunes] = useState<string[]>([
-    "Cocody",
+    defaultCommune,
   ]);
-  const [expandedZones, setExpandedZones] = useState<string[]>(["Zone Est"]);
-  const [selectedLevel, setSelectedLevel] = useState<{
-    type: "commune" | "zone" | "bus";
-    id: string;
-  }>({ type: "commune", id: "Cocody" });
+  const [expandedZones, setExpandedZones] = useState<string[]>([defaultZone]);
+  const [selectedLevel, setSelectedLevel] = useState<
+    { type: "root" } | { type: "commune" | "zone" | "bus"; id: string }
+  >(defaultLevel);
 
   const [showMemberReportModal, setShowMemberReportModal] = useState(false);
   const [showLifeReportModal, setShowLifeReportModal] = useState(false);
   const [targetMemberId, setTargetMemberId] = useState<string>("");
 
-  // Member health report sliders
-  const [sprVal, setSprVal] = useState(3);
-  const [socVal, setSocVal] = useState(3);
-  const [finVal, setFinVal] = useState(3);
-  const [phyVal, setPhyVal] = useState(3);
-  // P2.8 — sélection du/des culte(s) auxquels le membre était présent, plutôt qu'une échelle 1-5.
-  const [culteIds, setCulteIds] = useState<string[]>([]);
-  const toggleCulte = (id: string) =>
-    setCulteIds((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
+  // Member health report — null tant que non renseigné (validation bloquante à la saisie).
+  const [sprVal, setSprVal] = useState<number | null>(null);
+  const [socVal, setSocVal] = useState<number | null>(null);
+  const [finVal, setFinVal] = useState<number | null>(null);
+  const [phyVal, setPhyVal] = useState<number | null>(null);
+  const [culte, setCulte] = useState<string | null>(null);
+  const [observation, setObservation] = useState("");
+  const [selectedWeek, setSelectedWeek] = useState<string>("");
+  const [fillPopover, setFillPopover] = useState<string | null>(null);
+
+  const now = new Date();
+  const { s1, s2 } = reportingWindow(now);
+
+  const openMemberReport = (id: string) => {
+    setTargetMemberId(id);
+    setSprVal(null);
+    setSocVal(null);
+    setFinVal(null);
+    setPhyVal(null);
+    setCulte(null);
+    setObservation("");
+    setSelectedWeek("");
+    setShowMemberReportModal(true);
+  };
 
   // Life report
-  const [mobilisedCount, setMobilisedCount] = useState(30);
-  const [presentCulteCount, setPresentCulteCount] = useState(28);
-  // P2.8 — multi-sélection des membres visités, plutôt qu'un simple compteur.
-  const [visitedMemberIds, setVisitedMemberIds] = useState<string[]>([]);
-  const toggleVisitedMember = (id: string) =>
-    setVisitedMemberIds((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
-  const [newArrvCount, setNewArrvCount] = useState(2);
-  const [incidents, setIncidents] = useState("Aucun incident signalé.");
-
-  const culteEvents = events.filter(
-    (e) => e.type.startsWith("dimanche_") && (activeBranch === "global" || e.branch === activeBranch || e.branch === "global"),
-  );
+  const [activityName, setActivityName] = useState("");
+  const [activityDay, setActivityDay] = useState("");
+  const [description, setDescription] = useState("");
+  const [activityObservation, setActivityObservation] = useState("");
+  const [lifeReportTab, setLifeReportTab] = useState<"infos" | "observation">("infos");
+  const [presenceList, setPresenceList] = useState<string[]>([]);
+  const togglePresence = (id: string) =>
+    setPresenceList((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
+  const [soulsWon, setSoulsWon] = useState(0);
 
   // Grouping
   const busByCommune: Record<string, Record<string, BloomBusEntity[]>> = {};
-  busLines.forEach((bus) => {
+  visibleBusLines.forEach((bus) => {
     if (!busByCommune[bus.commune]) busByCommune[bus.commune] = {};
     if (!busByCommune[bus.commune][bus.zone])
       busByCommune[bus.commune][bus.zone] = [];
@@ -183,16 +244,55 @@ export default function BloomBusView({
     );
 
   let activeBuses: BloomBusEntity[] = [];
-  if (selectedLevel.type === "bus") {
-    const b = busLines.find((b) => b.id === selectedLevel.id);
+  if (selectedLevel.type === "root") {
+    activeBuses = visibleBusLines;
+  } else if (selectedLevel.type === "bus") {
+    const b = visibleBusLines.find((b) => b.id === selectedLevel.id);
     if (b) activeBuses = [b];
   } else if (selectedLevel.type === "zone") {
-    activeBuses = busLines.filter((b) => b.zone === selectedLevel.id);
+    activeBuses = visibleBusLines.filter((b) => b.zone === selectedLevel.id);
   } else {
-    activeBuses = busLines.filter(
+    activeBuses = visibleBusLines.filter(
       (b) => b.commune === selectedLevel.id,
     );
   }
+
+  // §8 — le mode de carte reflète le niveau de drill-down : Bus -> membres, Zone ->
+  // capitaines, Commune -> responsables de zone, Vue globale -> responsables de commune.
+  const mapMode: TerritoryMapMode = selectedLevel.type === "bus" ? "members" : "leaders";
+  // Position d'un responsable = son propre gps, repli sur le centre du bus qui l'ancre
+  // territorialement (aucun capitaine/responsable de zone n'a nécessairement de gps saisi).
+  const leaderPins: { id: string; name: string; lat: number; lng: number }[] = (() => {
+    if (selectedLevel.type === "zone") {
+      return activeBuses.flatMap((bus) => {
+        const captain = members.find((m) => m.bloomBusId === bus.id && bloomBusRoleOf(m, departments) === "Capitaine de Bus");
+        if (!captain) return [];
+        const pos = captain.gps ?? { lat: bus.centerLat, lng: bus.centerLng };
+        return [{ id: captain.id, name: `${captain.firstName} ${captain.lastName} (${bus.name})`, lat: pos.lat, lng: pos.lng }];
+      });
+    }
+    if (selectedLevel.type === "commune") {
+      const zones = Array.from(new Set(activeBuses.map((b) => b.zone)));
+      return zones.flatMap((zone) => {
+        const zoneBus = activeBuses.find((b) => b.zone === zone);
+        const lead = members.find((m) => bloomBusRoleOf(m, departments) === "Responsable de Zone" && busLines.find((b) => b.id === m.bloomBusId)?.zone === zone);
+        if (!lead || !zoneBus) return [];
+        const pos = lead.gps ?? { lat: zoneBus.centerLat, lng: zoneBus.centerLng };
+        return [{ id: lead.id, name: `${lead.firstName} ${lead.lastName} (${zone})`, lat: pos.lat, lng: pos.lng }];
+      });
+    }
+    if (selectedLevel.type === "root") {
+      const communes = Array.from(new Set(visibleBusLines.map((b) => b.commune)));
+      return communes.flatMap((commune) => {
+        const communeBus = visibleBusLines.find((b) => b.commune === commune);
+        const lead = members.find((m) => bloomBusRoleOf(m, departments) === "Responsable de Commune" && (busLines.find((b) => b.id === m.bloomBusId)?.commune ?? m.gps?.commune) === commune);
+        if (!lead || !communeBus) return [];
+        const pos = lead.gps ?? { lat: communeBus.centerLat, lng: communeBus.centerLng };
+        return [{ id: lead.id, name: `${lead.firstName} ${lead.lastName} (${commune})`, lat: pos.lat, lng: pos.lng }];
+      });
+    }
+    return [];
+  })();
 
   const busIds = activeBuses.map((b) => b.id);
   const busMembers = members.filter(
@@ -205,16 +305,37 @@ export default function BloomBusView({
   const branchReports = reports.filter(
     (r) => activeBranch === "global" || r.targetBranch === activeBranch,
   );
-  const tMobBus = busMobilisationRate(busMembers, branchReports, busIds, kpiPeriod);
   const moisson = moissonTotal(branchReports, kpiPeriod, new Date(), busIds);
-  const visites = busVisitesTotal(branchReports, busIds, kpiPeriod);
+  const visites = busVisitesTotal(branchReports, members, busIds, kpiPeriod);
+  const presenceCulte = busPresenceCulteTotal(branchReports, members, busIds, kpiPeriod);
+  const activitesTotal = busActivitesTotal(branchReports, busIds, kpiPeriod);
+  const visitesPct = busMembers.length > 0 ? Math.min(100, Math.round((visites / busMembers.length) * 100)) : null;
+  const presenceCultePct = busMembers.length > 0 ? Math.min(100, Math.round((presenceCulte / busMembers.length) * 100)) : null;
+
+  // §6-7 — au-delà de Capitaine de Bus, le roster de saisie n'est plus "les membres du
+  // bus" mais les subordonnés directs (directReportsOf gère déjà chaque palier).
+  const isHierarchicalOperator = !!operator && (hasFullBloomBusAccess || bloomBusRole === "Responsable de Zone" || bloomBusRole === "Responsable de Commune");
+  const rosterMembers = isHierarchicalOperator && operator
+    ? directReportsOf(operator, simulatedRole, members, busLines, departments)
+    : busMembers;
+  const rosterTitle = !isHierarchicalOperator
+    ? "Membres du Bus"
+    : bloomBusRole === "Responsable de Zone" ? "Mes Capitaines de Bus"
+    : bloomBusRole === "Responsable de Commune" ? "Mes Responsables de Zone"
+    : "Mes Responsables de Commune"; // Responsable (dept-lead) ou accès complet (Pasteur/Admin)
+  // La complétude (anneau) d'un Capitaine ne doit compter que les membres pour qui il PEUT
+  // remplir un rapport (directReportsOf) : sinon un autre capitaine/lead rattaché au même bus,
+  // non remplissable, reste éternellement "incomplet" et l'anneau n'atteint jamais 100 %.
+  const fillableRosterIds = operator && !isHierarchicalOperator
+    ? directReportsOf(operator, simulatedRole, members, busLines, departments).map((m) => m.id)
+    : rosterMembers.map((m) => m.id);
 
   const canEdit = [
     "Pasteur",
     "Admin",
     "Responsable",
     "Coach",
-    "Capitaine",
+    "Capitaine de Bus",
     "Super Admin",
     "Ministre",
     "Responsable de Zone",
@@ -223,6 +344,14 @@ export default function BloomBusView({
   // ECRANS-PAR-ONGLET.md §5.3 — CRUD territorial (créer bus/zone/commune) réservé à l'Admin,
   // distinct de canEdit qui ne couvre que la saisie de rapport de suivi.
   const canAdminTerritory = ["Admin", "Super Admin"].includes(simulatedRole);
+  // Enregistrement direct d'un membre (spec "responsables hiérarchiques Bloom Bus") —
+  // Capitaine/Zone/Commune uniquement, hors procédure ADN "nouveau".
+  const canRegisterMember = !!operator && !!onAddMember && canRegisterMemberViaBloomBus(operator, simulatedRole, departments);
+  // Un Membre n'a accès qu'à son propre bus, sans les stats territoriales — seul son
+  // propre rapport de santé spirituelle lui est ouvert (cf. rendu dédié plus bas). Basé sur
+  // le rôle Bloom Bus réel, pas sur simulatedRole — un Ministre qui n'est que simple membre
+  // de Bloom Bus doit être traité comme un Membre ici (le Capitaine, lui, garde le roster).
+  const isMembre = isOwnBusScoped && bloomBusRole !== "Capitaine de Bus";
 
   // Nombre de membres par territoire (§5 — commune / zone / bus), pour l'arbre de la sidebar.
   const countForBusIds = (ids: string[]) =>
@@ -244,9 +373,12 @@ export default function BloomBusView({
 
   const handleSaveMemberHealth = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!targetMemberId) return;
+    if (!targetMemberId || !operator) return;
     const targetMember = members.find((m) => m.id === targetMemberId);
     if (!targetMember) return;
+    if (!canFillReportFor(operator, targetMember, simulatedRole, members, busLines, departments)) return;
+    // Re-check défensif — le bouton "Enregistrer" est déjà désactivé tant que ces champs manquent.
+    if (!selectedWeek || sprVal == null || socVal == null || finVal == null || phyVal == null || !culte) return;
     const updated: Member = {
       ...targetMember,
       healthKPIs: {
@@ -254,19 +386,21 @@ export default function BloomBusView({
         social: socVal,
         financier: finVal,
         physique: phyVal,
-        // ponytail: presenceCulte reste un nombre agrégé (rollup) — dérivé du nombre de cultes sélectionnés.
-        presenceCulte: culteIds.length,
+        presenceCulte: targetMember.healthKPIs?.presenceCulte || 3,
         presenceService: targetMember.healthKPIs?.presenceService || 3,
       },
     };
     onUpdateMember(updated);
     onAddReport({
-      id: `rep_bus_mem_${Date.now()}`,
-      authorId: "mem_1",
-      authorName: "Affeny Grah",
-      authorRole: "Capitaine de Bus",
+      // id déterministe par membre + semaine : une correction/rattrapage de la même semaine
+      // remplace le rapport (upsert dans handleAddReport) au lieu de créer un doublon.
+      id: `rep_bus_mem_${targetMemberId}_${selectedWeek}`,
+      authorId: operator.id,
+      authorName: `${operator.firstName} ${operator.lastName}`,
+      authorRole: simulatedRole,
       targetBranch: activeBranch,
       date: new Date().toISOString().split("T")[0],
+      weekOf: selectedWeek,
       reportType: "rapport_bloom_bus_member",
       confidential: false,
       content: {
@@ -276,41 +410,65 @@ export default function BloomBusView({
         socVal,
         finVal,
         phyVal,
-        culteIds,
+        culte,
+        observation: observation.trim() || undefined,
       },
     });
     setShowMemberReportModal(false);
-    setCulteIds([]);
   };
 
   const handleSaveLifeReport = (e: React.FormEvent) => {
     e.preventDefault();
-    if (selectedLevel.type !== "bus") return; // rapport de vie = par bus uniquement
+    if (selectedLevel.type !== "bus" || !operator) return; // rapport de vie = par bus uniquement
     onAddReport({
       id: `rep_bus_life_${Date.now()}`,
-      authorId: "mem_1",
-      authorName: "Affeny Grah",
-      authorRole: "Capitaine de Bus",
+      authorId: operator.id,
+      authorName: `${operator.firstName} ${operator.lastName}`,
+      authorRole: simulatedRole,
       targetBranch: activeBranch,
       date: new Date().toISOString().split("T")[0],
       reportType: "rapport_bloom_bus_life",
       confidential: false,
       content: {
         busId: selectedLevel.id,
-        mobilised: mobilisedCount,
-        presencesCulte: presentCulteCount,
-        visitesRealisees: visitedMemberIds,
-        moissonNouveaux: newArrvCount,
-        incidents,
+        activityName,
+        activityDay,
+        description,
+        observation: activityObservation.trim() || undefined,
+        presenceList,
+        soulsWon,
       },
     });
     setShowLifeReportModal(false);
-    setVisitedMemberIds([]);
+    setActivityName("");
+    setActivityDay("");
+    setDescription("");
+    setActivityObservation("");
+    setLifeReportTab("infos");
+    setPresenceList([]);
+    setSoulsWon(0);
   };
 
   return (
     <div className="flex flex-col lg:flex-row gap-6 h-auto lg:h-full lg:overflow-hidden flex-1">
-      {/* Sidebar / Accordion */}
+      {/* Sidebar / Accordion — le rendu "arbre territorial" (commune > zone > bus) doit rester
+          réservé aux rôles dont la portée dépasse un seul bus (Responsable de Zone/Commune/
+          département, pasteurs) : isOwnBusScoped, pas isMembre. Un Capitaine de Bus garde le
+          roster/les stats de son bus dans le contenu principal (piloté par isMembre plus bas),
+          mais ne doit pas voir la navigation par commune/zone qui laisse croire à un accès
+          élargi alors que visibleBusLines le cantonne déjà à son seul bus. */}
+      {isOwnBusScoped ? (
+        <div className="w-full lg:w-72 bg-white rounded-[2rem] border border-bc-border shadow-sm p-4 flex flex-col shrink-0">
+          <h3 className="font-ui font-bold text-bc-text mb-3 px-2">Mon Bloom Bus</h3>
+          <div className="p-3 rounded-xl bg-bc-canvas border border-bc-border flex items-center gap-2">
+            <Bus size={16} className="text-bc-green shrink-0" />
+            <div className="min-w-0">
+              <p className="text-sm font-bold text-bc-text truncate">{ownBus?.name ?? "—"}</p>
+              {ownBus && <p className="text-[10px] text-bc-text-secondary truncate">{ownBus.commune} · {ownBus.zone}</p>}
+            </div>
+          </div>
+        </div>
+      ) : (
       <div className="w-full lg:w-72 bg-white rounded-[2rem] border border-bc-border shadow-sm p-4 flex flex-col shrink-0 overflow-y-auto">
         <div className="flex items-center justify-between mb-4 px-2">
           <h3 className="font-ui font-bold text-bc-text">Territoires Bloom</h3>
@@ -320,6 +478,15 @@ export default function BloomBusView({
             </button>
           )}
         </div>
+        {FULL_SCOPE_ROLES.includes(simulatedRole) && (
+          <button
+            onClick={() => setSelectedLevel({ type: "root" })}
+            className={`flex items-center gap-2 p-2 mb-2 rounded-xl cursor-pointer active-scale font-bold text-sm ${selectedLevel.type === "root" ? "bg-bc-green text-white" : "hover:bg-bc-canvas text-bc-text-secondary"}`}
+          >
+            <Bus size={14} />
+            Vue globale
+          </button>
+        )}
         <motion.div variants={staggerParent} initial="hidden" animate="show" className="space-y-2">
           {Object.entries(busByCommune).map(([commune, zones]) => {
             const communeBusIds = Object.values(zones).flat().map((b) => b.id);
@@ -394,6 +561,15 @@ export default function BloomBusView({
                               <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded-full shrink-0 ${selectedLevel.type === "bus" && selectedLevel.id === bus.id ? "bg-white/20" : "bg-white text-bc-text-secondary border border-bc-border"}`}>
                                 {busCount}
                               </span>
+                              {canAdminTerritory && (
+                                <button
+                                  onClick={(e) => { e.stopPropagation(); setDeletingBus(bus); }}
+                                  className={`ml-1 p-1 rounded-lg shrink-0 transition-colors active-scale ${selectedLevel.type === "bus" && selectedLevel.id === bus.id ? "text-white/80 hover:text-white" : "text-bc-text-secondary hover:text-bc-danger"}`}
+                                  title="Supprimer ce bus"
+                                >
+                                  <Trash2 size={12} />
+                                </button>
+                              )}
                             </div>
                             );
                           })}
@@ -409,6 +585,7 @@ export default function BloomBusView({
           })}
         </motion.div>
       </div>
+      )}
 
       {/* Main Content Area */}
       <div className="flex-1 flex flex-col space-y-6 overflow-y-auto pb-8">
@@ -416,38 +593,50 @@ export default function BloomBusView({
         <div className="bg-white p-5 rounded-[2rem] border border-bc-border flex flex-col md:flex-row gap-4 justify-between md:items-center shrink-0">
           <div>
             <h2 className="font-ui font-extrabold text-xl text-bc-text flex items-center gap-2">
+              {selectedLevel.type === "root" && "Vue globale — Bloom Bus"}
               {selectedLevel.type === "commune" &&
                 `Commune: ${selectedLevel.id}`}
               {selectedLevel.type === "zone" && `Zone: ${selectedLevel.id}`}
               {selectedLevel.type === "bus" &&
                 `Bus: ${busLines.find((b) => b.id === selectedLevel.id)?.name}`}
             </h2>
-            <p className="text-xs text-bc-text-secondary mt-1">
-              {activeBuses.length} ligne(s) couverte(s) - {busMembers.length}{" "}
-              membre(s) rattaché(s)
-            </p>
+            {!isMembre && (
+              <p className="text-xs text-bc-text-secondary mt-1">
+                {activeBuses.length} ligne(s) couverte(s) - {busMembers.length}{" "}
+                membre(s) rattaché(s)
+              </p>
+            )}
           </div>
+          {!isMembre && (
+            <div className="flex items-center gap-2">
+              <select
+                value={period}
+                onChange={(e) => setPeriod(e.target.value as Period)}
+                className="bg-white border border-bc-border text-bc-text rounded-full px-4 py-2 text-xs font-bold focus:outline-none focus:ring-1 focus:ring-bc-green cursor-pointer"
+              >
+                <option value="week">Cette Semaine</option>
+                <option value="month">Ce Mois</option>
+                <option value="quarter">Ce Trimestre</option>
+                <option value="year">Cette Année</option>
+                <option value="custom">Personnalisé</option>
+              </select>
+              {period === "custom" && (
+                <div className="flex items-center gap-2">
+                  <input type="date" value={customFrom} onChange={(e) => setCustomFrom(e.target.value)}
+                    className="bg-white border border-bc-border text-bc-text rounded-full px-3 py-1.5 text-xs font-bold focus:outline-none focus:ring-1 focus:ring-bc-green cursor-pointer" />
+                  <span className="text-bc-text-secondary text-xs">→</span>
+                  <input type="date" value={customTo} onChange={(e) => setCustomTo(e.target.value)}
+                    className="bg-white border border-bc-border text-bc-text rounded-full px-3 py-1.5 text-xs font-bold focus:outline-none focus:ring-1 focus:ring-bc-green cursor-pointer" />
+                </div>
+              )}
+            </div>
+          )}
         </div>
 
-        {/* Dashboard Grid */}
+        {/* Dashboard Grid — statistiques territoriales, masquées pour un Membre */}
+        {!isMembre && (
+        <>
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 shrink-0">
-          <div className="bg-white p-4 rounded-2xl border border-bc-border shadow-sm flex flex-col justify-center items-center">
-            <div className="flex justify-between items-center w-full mb-2">
-              <span className="text-[10px] font-bold uppercase text-bc-text-secondary tracking-wider">
-                T_mob_bus
-              </span>
-              <Activity size={14} className="text-bc-text-secondary" />
-            </div>
-            <div className="text-3xl font-black text-bc-text">{tMobBus === null ? "—" : `${tMobBus}%`}</div>
-            {tMobBus !== null && (
-              <div className="flex h-2 w-full mt-2 rounded-full overflow-hidden bg-bc-canvas">
-                <div className="bg-bc-cerulean transition-all duration-500 ease-out-spring" style={{ width: `${tMobBus}%` }} />
-              </div>
-            )}
-            <div className="text-[10px] text-bc-text-secondary font-bold mt-1 bg-bc-canvas px-2 py-0.5 rounded-full border border-bc-border">
-              Sur le mois
-            </div>
-          </div>
           <div className="bg-white p-4 rounded-2xl border border-bc-border shadow-sm flex flex-col justify-center items-center">
             <div className="flex justify-between items-center w-full mb-2">
               <span className="text-[10px] font-bold uppercase text-bc-text-secondary tracking-wider">
@@ -467,9 +656,43 @@ export default function BloomBusView({
               </span>
               <Heart size={14} className="text-bc-text-secondary" />
             </div>
-            <div className="text-3xl font-black text-bc-text">{visites}</div>
+            <div className="text-3xl font-black text-bc-text">{visites}<span className="text-base font-bold text-bc-text-secondary">/{busMembers.length}</span></div>
+            {visitesPct !== null && (
+              <div className="flex h-2 w-full mt-2 rounded-full overflow-hidden bg-bc-canvas">
+                <div className="bg-bc-cerulean transition-all duration-500 ease-out-spring" style={{ width: `${visitesPct}%` }} />
+              </div>
+            )}
             <div className="text-[10px] text-bc-text-secondary font-bold mt-1 bg-bc-canvas px-2 py-0.5 rounded-full border border-bc-border">
-              Visites réalisées
+              Visites / membres
+            </div>
+          </div>
+          <div className="bg-white p-4 rounded-2xl border border-bc-border shadow-sm flex flex-col justify-center items-center">
+            <div className="flex justify-between items-center w-full mb-2">
+              <span className="text-[10px] font-bold uppercase text-bc-text-secondary tracking-wider">
+                Présence Culte
+              </span>
+              <Users size={14} className="text-bc-text-secondary" />
+            </div>
+            <div className="text-3xl font-black text-bc-text">{presenceCulte}<span className="text-base font-bold text-bc-text-secondary">/{busMembers.length}</span></div>
+            {presenceCultePct !== null && (
+              <div className="flex h-2 w-full mt-2 rounded-full overflow-hidden bg-bc-canvas">
+                <div className="bg-bc-cerulean transition-all duration-500 ease-out-spring" style={{ width: `${presenceCultePct}%` }} />
+              </div>
+            )}
+            <div className="text-[10px] text-bc-text-secondary font-bold mt-1 bg-bc-canvas px-2 py-0.5 rounded-full border border-bc-border">
+              Dimanche / total membres
+            </div>
+          </div>
+          <div className="bg-white p-4 rounded-2xl border border-bc-border shadow-sm flex flex-col justify-center items-center">
+            <div className="flex justify-between items-center w-full mb-2">
+              <span className="text-[10px] font-bold uppercase text-bc-text-secondary tracking-wider">
+                Activités
+              </span>
+              <Sliders size={14} className="text-bc-text-secondary" />
+            </div>
+            <div className="text-3xl font-black text-bc-text">{activitesTotal}</div>
+            <div className="text-[10px] text-bc-text-secondary font-bold mt-1 bg-bc-canvas px-2 py-0.5 rounded-full border border-bc-border">
+              Organisées
             </div>
           </div>
         </div>
@@ -524,6 +747,8 @@ export default function BloomBusView({
             )}
           </div>
         </div>
+        </>
+        )}
 
         {/* Map & List Split */}
         <div className="flex-1 flex flex-col xl:flex-row gap-6 min-h-[400px]">
@@ -533,15 +758,12 @@ export default function BloomBusView({
               <MapIcon size={16} /> Carte Territoriale (OpenStreetMap)
             </h3>
             <div className="flex-1 bg-bc-canvas border border-bc-border rounded-2xl relative overflow-hidden min-h-[300px]">
-              <iframe
-                title="Carte OpenStreetMap"
-                src={osmUrl(activeBuses)}
-                className="absolute inset-0 w-full h-full border-0"
-                loading="lazy"
+              <TerritoryMap
+                mode={mapMode}
+                members={mapMode === "members" ? busMembers : undefined}
+                leaders={mapMode === "leaders" ? leaderPins : undefined}
               />
             </div>
-            {/* ponytail: iframe embed centre le territoire (1 marqueur au centroïde) ; les pins par
-                bus/membre nécessitent leaflet — à ajouter si la fidélité géo devient prioritaire. */}
             <div className="flex flex-wrap gap-1.5 mt-3">
               {activeBuses.map((bus) => (
                 <span key={bus.id} className="inline-flex items-center gap-1 text-[10px] font-bold text-bc-text bg-white border border-bc-border rounded-full px-2 py-1">
@@ -551,66 +773,156 @@ export default function BloomBusView({
             </div>
           </div>
 
+          {/* Right column: action widget + member list, stacked above one another */}
+          <div className="w-full xl:w-80 flex flex-col gap-6">
           {/* Member List (only shown when bus is selected) */}
-          {selectedLevel.type === "bus" && (
-            <div className="w-full xl:w-80 bg-white p-5 rounded-[2rem] border border-bc-border shadow-sm flex flex-col">
+          {selectedLevel.type === "bus" && isMembre && (
+            <div className="bg-white p-5 rounded-[2rem] border border-bc-border shadow-sm flex flex-col items-center justify-center text-center gap-3">
+              <Heart size={28} className="text-bc-green" />
+              <h3 className="text-sm font-ui font-bold text-bc-text">Mon rapport de santé spirituelle</h3>
+              <p className="text-xs text-bc-text-secondary">Un rapport par semaine (S-1 ou S-2), rempli par toi ou ton capitaine.</p>
+              <button
+                onClick={() => { if (operator) openMemberReport(operator.id); }}
+                className="px-5 py-2.5 bg-bc-green text-white rounded-full text-xs font-bold hover:opacity-90 transition-colors active-scale"
+              >
+                Remplir mon rapport
+              </button>
+            </div>
+          )}
+          {(selectedLevel.type === "bus" || isHierarchicalOperator) && !isMembre && operator && (bloomBusRole || (canEdit && selectedLevel.type === "bus")) && (
+            <div className="bg-white p-4 rounded-[2rem] border border-bc-border shadow-sm flex gap-3">
+              {bloomBusRole && (
+                <button
+                  onClick={() => openMemberReport(operator.id)}
+                  className="flex-1 flex flex-col items-center gap-1.5 py-4 rounded-2xl bg-bc-cerulean/10 text-bc-cerulean font-bold hover:bg-bc-cerulean/20 transition-colors active-scale"
+                  title="Remplir mon propre rapport de santé spirituelle"
+                >
+                  <Heart size={20} />
+                  <span className="text-xs">Mon rapport</span>
+                </button>
+              )}
+              {canEdit && selectedLevel.type === "bus" && (
+                <button
+                  onClick={() => { setLifeReportTab("infos"); setShowLifeReportModal(true); }}
+                  className="flex-1 flex flex-col items-center gap-1.5 py-4 rounded-2xl bg-bc-green/10 text-bc-green font-bold hover:bg-bc-green/20 transition-colors active-scale"
+                  title="Rapport d'activité du bus (Capitaine)"
+                >
+                  <Sliders size={20} />
+                  <span className="text-xs">Rapport d'activité</span>
+                </button>
+              )}
+            </div>
+          )}
+          {(selectedLevel.type === "bus" || isHierarchicalOperator) && !isMembre && (
+            <div className="bg-white p-5 rounded-[2rem] border border-bc-border shadow-sm flex flex-col">
               <div className="flex items-center justify-between mb-4">
-                <h3 className="text-sm font-ui font-bold text-bc-text">Membres du Bus</h3>
-                {canEdit && (
+                <h3 className="text-sm font-ui font-bold text-bc-text">{rosterTitle}</h3>
+                {canRegisterMember && (
                   <button
-                    onClick={() => setShowLifeReportModal(true)}
-                    className="text-[10px] font-bold text-bc-green flex items-center gap-1 px-2 py-1 rounded-full hover:bg-bc-green/10 active-scale"
-                    title="Rapport d'activité du bus (Capitaine)"
+                    id="bloombus-add-member-btn"
+                    onClick={() => setShowDirectRegister(true)}
+                    className="flex items-center gap-1 px-3 py-1.5 rounded-full bg-bc-green text-white text-[10px] font-bold active:scale-95 transition-transform"
                   >
-                    <Sliders size={13} /> Rapport d'activité
+                    <Plus size={12} /> Ajouter un membre
                   </button>
                 )}
               </div>
               <p className="text-[10px] text-bc-text-secondary mb-3">Clique un membre pour faire son rapport de suivi.</p>
+              {/* §6-7 — disque de remplissage cliquable, visible à tous les niveaux avec un
+                  roster : subordinateFillRate (a-t-il rempli SES subordonnés) au-delà du bus,
+                  rosterFillDetail (a-t-il un rapport direct) au niveau bus/Capitaine. */}
+              {operator && rosterMembers.length > 0 && (
+                <div className="flex items-center gap-4 mb-3 px-1 pb-3 border-b border-bc-border">
+                  {([s2, s1] as const).map((w) => {
+                    const rate = isHierarchicalOperator
+                      ? subordinateFillRate(operator, simulatedRole, members, branchReports, busLines, departments, w)
+                      : rosterFillDetail(fillableRosterIds, w, branchReports);
+                    return (
+                      <button
+                        key={w}
+                        type="button"
+                        onClick={() => setFillPopover(fillPopover === w ? null : w)}
+                        className="flex items-center gap-2 active-scale"
+                        title="Voir qui a complété son roster"
+                      >
+                        <Ring value={rate.pct} total={100} color={rate.pct === 100 ? "var(--color-bc-success)" : rate.pct > 0 ? "var(--color-bc-warning)" : "var(--color-bc-danger)"} size={28} onClick={() => setFillPopover(fillPopover === w ? null : w)} />
+                        <span className="text-[10px] font-bold text-bc-text-secondary text-left">
+                          {weekLabel(w)}<br />{rate.pct}%
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+              {operator && fillPopover && (() => {
+                const rate = isHierarchicalOperator
+                  ? subordinateFillRate(operator, simulatedRole, members, branchReports, busLines, departments, fillPopover)
+                  : rosterFillDetail(rosterMembers.map((m) => m.id), fillPopover, branchReports);
+                const nameOf = (id: string) => { const m = members.find((mm) => mm.id === id); return m ? `${m.firstName} ${m.lastName}` : id; };
+                return (
+                  <div className="mb-3 p-3 bg-bc-canvas border border-bc-border rounded-xl text-[11px] space-y-2">
+                    <p className="font-bold text-bc-text">{weekLabel(fillPopover)}</p>
+                    {rate.filled.length > 0 && (
+                      <p><span className="text-bc-success font-bold">✓ Complet :</span> {rate.filled.map(nameOf).join(", ")}</p>
+                    )}
+                    {rate.missing.length > 0 && (
+                      <p><span className="text-bc-danger font-bold">✗ Incomplet :</span> {rate.missing.map(nameOf).join(", ")}</p>
+                    )}
+                    {rate.filled.length === 0 && rate.missing.length === 0 && (
+                      <p className="text-bc-text-secondary italic">{isHierarchicalOperator ? "Aucun subordonné." : "Aucun membre."}</p>
+                    )}
+                  </div>
+                );
+              })()}
               <div className="space-y-3 overflow-y-auto flex-1 pr-2">
-                {busMembers.length === 0 ? (
+                {rosterMembers.length === 0 ? (
                   <div className="text-center py-8">
                     <p className="text-xs text-bc-text-secondary font-bold">
                       Aucun membre rattaché à ce bus.
                     </p>
                   </div>
                 ) : (
-                  busMembers.map((m) => (
-                    <button
-                      key={m.id}
-                      onClick={() => { if (canEdit) { setTargetMemberId(m.id); setShowMemberReportModal(true); } }}
-                      disabled={!canEdit}
-                      className="w-full text-left p-3 bg-bc-canvas border border-bc-border rounded-xl flex items-center gap-3 hover:bg-bc-border/40 transition-colors disabled:cursor-default active-scale"
-                    >
-                      <Avatar
-                        src={m.avatarUrl}
-                        initials={`${m.firstName[0]}${m.lastName[0]}`}
-                        size="sm"
-                        className="w-10 h-10 bg-white border border-bc-border text-bc-text text-xs shadow-sm"
-                      />
-                      <div className="min-w-0 flex-1">
-                        <p className="text-sm font-bold text-bc-text truncate">
-                          {m.firstName} {m.lastName}
-                        </p>
-                        <p className="text-[10px] text-bc-text-secondary">{m.phone}</p>
-                      </div>
-                      {canEdit && <Heart size={14} className="text-bc-green shrink-0" />}
-                    </button>
-                  ))
+                  rosterMembers.map((m) => {
+                    const editable = !!operator && canFillReportFor(operator, m, simulatedRole, members, busLines, departments);
+                    const status = memberReportStatus(m.id, branchReports, now);
+                    const statusDot = status === "green" ? "bg-bc-success" : status === "orange" ? "bg-bc-warning" : "bg-bc-danger";
+                    return (
+                      <button
+                        key={m.id}
+                        onClick={() => { if (editable) openMemberReport(m.id); }}
+                        disabled={!editable}
+                        className="w-full text-left p-3 bg-bc-canvas border border-bc-border rounded-xl flex items-center gap-3 hover:bg-bc-border/40 transition-colors disabled:cursor-default active-scale"
+                      >
+                        <div className="relative shrink-0">
+                          <Avatar
+                            src={m.avatarUrl}
+                            initials={`${m.firstName[0]}${m.lastName[0]}`}
+                            size="sm"
+                            className="w-10 h-10 bg-white border border-bc-border text-bc-text text-xs shadow-sm"
+                          />
+                          <span className={`absolute -bottom-0.5 -right-0.5 w-3 h-3 rounded-full border-2 border-white ${statusDot}`} title={`Rapports S-1/S-2 : ${status}`} />
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          <p className="text-sm font-bold text-bc-text truncate">
+                            {m.firstName} {m.lastName}
+                          </p>
+                          <p className="text-[10px] text-bc-text-secondary">{m.phone}</p>
+                        </div>
+                        {editable && <Heart size={14} className="text-bc-green shrink-0" />}
+                      </button>
+                    );
+                  })
                 )}
               </div>
             </div>
           )}
+          </div>
         </div>
       </div>
 
       {/* Modals */}
       {showMemberReportModal && (
-        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-[2rem] p-6 w-full max-w-md shadow-2xl border border-bc-border">
-            <h3 className="font-ui font-bold text-xl text-bc-text mb-2">
-              Suivi Spirituel Membre
-            </h3>
+        <Modal open={showMemberReportModal} onClose={() => setShowMemberReportModal(false)} title="Suivi Spirituel Membre" maxWidth="max-w-md">
             <p className="text-xs text-bc-text-secondary mb-6">
               Évaluez la santé spirituelle (Rapport hebdomadaire).
             </p>
@@ -643,26 +955,56 @@ export default function BloomBusView({
                 </div>
               )}
 
+              <div>
+                <label className="block text-xs font-bold text-bc-text-secondary mb-1.5">Semaine concernée</label>
+                <div className="grid grid-cols-2 gap-2">
+                  {[s2, s1].map((w) => {
+                    const already = branchReports.some(
+                      (r) => r.reportType === "rapport_bloom_bus_member" && r.content?.memberId === targetMemberId && (r.weekOf ?? weekId(r.date)) === w,
+                    );
+                    return (
+                      <button
+                        type="button"
+                        key={w}
+                        onClick={() => setSelectedWeek(w)}
+                        className={`py-2 px-2 rounded-xl text-[11px] font-bold border transition-colors active-scale text-center ${selectedWeek === w ? "bg-bc-green text-white border-bc-green" : "bg-white text-bc-text-secondary border-bc-border hover:bg-bc-canvas"}`}
+                      >
+                        {weekLabel(w)}
+                        {already && <span className="block text-[9px] font-normal opacity-80 mt-0.5">déjà rempli</span>}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
               <div className="space-y-4">
                 <RatingRow label={santeLabel("f0", "Spiritualité")} value={sprVal} onChange={setSprVal} />
                 <RatingRow label={santeLabel("f1", "Social")} value={socVal} onChange={setSocVal} />
                 <RatingRow label={santeLabel("f2", "Physique")} value={phyVal} onChange={setPhyVal} />
                 <RatingRow label={santeLabel("f3", "Financier")} value={finVal} onChange={setFinVal} />
                 <div>
-                  <label className="block text-xs font-bold text-bc-text-secondary mb-1.5">Présence au culte / événement</label>
+                  <label className="block text-xs font-bold text-bc-text-secondary mb-1.5">Présence au culte</label>
                   <div className="flex flex-wrap gap-2">
-                    {culteEvents.map((ev) => (
+                    {CULTE_OPTIONS.map((c) => (
                       <button
                         type="button"
-                        key={ev.id}
-                        onClick={() => toggleCulte(ev.id)}
-                        className={`text-xs font-medium px-3 py-1.5 rounded-full border active-scale ${culteIds.includes(ev.id) ? "bg-bc-green text-white border-bc-green" : "bg-white text-bc-text border-bc-border"}`}
+                        key={c}
+                        onClick={() => setCulte(c)}
+                        className={`text-xs font-medium px-3 py-1.5 rounded-full border active-scale ${culte === c ? "bg-bc-green text-white border-bc-green" : "bg-white text-bc-text border-bc-border"}`}
                       >
-                        {ev.title} · {ev.date}
+                        {c}
                       </button>
                     ))}
-                    {culteEvents.length === 0 && <p className="text-xs text-bc-text-secondary italic">Aucun culte enregistré.</p>}
                   </div>
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-bc-text-secondary mb-1.5">Observation (optionnel)</label>
+                  <textarea
+                    value={observation}
+                    onChange={(e) => setObservation(e.target.value)}
+                    className="w-full p-3 border border-bc-border rounded-xl text-sm font-medium h-20 bg-bc-canvas focus:bg-white focus:outline-none resize-none"
+                    placeholder="Remarques, points d'attention…"
+                  />
                 </div>
               </div>
               <div className="flex justify-end gap-3 pt-4">
@@ -675,71 +1017,83 @@ export default function BloomBusView({
                 </button>
                 <button
                   type="submit"
-                  className="px-5 py-2.5 bg-bc-green text-white rounded-full text-xs font-bold hover:opacity-90 transition-colors active-scale"
+                  disabled={!selectedWeek || sprVal == null || socVal == null || finVal == null || phyVal == null || !culte}
+                  className="px-5 py-2.5 bg-bc-green text-white rounded-full text-xs font-bold hover:opacity-90 transition-colors active-scale disabled:opacity-40 disabled:cursor-not-allowed"
                 >
                   Enregistrer
                 </button>
               </div>
             </form>
-          </div>
-        </div>
+        </Modal>
       )}
 
       {showLifeReportModal && (
-        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-[2rem] p-6 w-full max-w-md shadow-2xl border border-bc-border">
-            <h3 className="font-ui font-bold text-xl text-bc-text mb-4">
-              Rapport d'Activité Bus
-            </h3>
+        <Modal open={showLifeReportModal} onClose={() => setShowLifeReportModal(false)} title="Rapport d'Activité Bus" maxWidth="max-w-md">
             <form onSubmit={handleSaveLifeReport} className="space-y-4">
+              <div className="flex gap-2">
+                {([
+                  { id: "infos" as const, label: "Détails" },
+                  { id: "observation" as const, label: "Observation" },
+                ]).map((tab) => (
+                  <button
+                    key={tab.id}
+                    type="button"
+                    onClick={() => setLifeReportTab(tab.id)}
+                    className={`px-3 py-1.5 rounded-full text-xs font-bold active-scale transition-colors ${lifeReportTab === tab.id ? "bg-bc-green text-white" : "text-bc-text-secondary hover:bg-bc-canvas"}`}
+                  >
+                    {tab.label}
+                  </button>
+                ))}
+              </div>
+
+              {lifeReportTab === "infos" && (
+              <>
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <label className="block text-xs font-bold text-bc-text-secondary mb-1">
-                    Mobilisation
+                    Nom de l'activité
                   </label>
                   <input
-                    type="number"
-                    value={mobilisedCount}
-                    onChange={(e) => setMobilisedCount(Number(e.target.value))}
+                    type="text"
+                    value={activityName}
+                    onChange={(e) => setActivityName(e.target.value)}
                     className="w-full p-2.5 border border-bc-border rounded-xl bg-bc-canvas text-sm font-bold focus:bg-white focus:outline-none"
                   />
                 </div>
                 <div>
                   <label className="block text-xs font-bold text-bc-text-secondary mb-1">
-                    Présence Culte
+                    Date
                   </label>
                   <input
-                    type="number"
-                    value={presentCulteCount}
-                    onChange={(e) =>
-                      setPresentCulteCount(Number(e.target.value))
-                    }
+                    type="date"
+                    value={activityDay}
+                    onChange={(e) => setActivityDay(e.target.value)}
                     className="w-full p-2.5 border border-bc-border rounded-xl bg-bc-canvas text-sm font-bold focus:bg-white focus:outline-none"
                   />
                 </div>
                 <div>
                   <label className="block text-xs font-bold text-bc-text-secondary mb-1">
-                    Nouveaux gagnés
+                    Âmes gagnées
                   </label>
                   <input
                     type="number"
-                    value={newArrvCount}
-                    onChange={(e) => setNewArrvCount(Number(e.target.value))}
+                    value={soulsWon}
+                    onChange={(e) => setSoulsWon(Number(e.target.value))}
                     className="w-full p-2.5 border border-bc-border rounded-xl bg-bc-canvas text-sm font-bold focus:bg-white focus:outline-none"
                   />
                 </div>
               </div>
               <div>
                 <label className="block text-xs font-bold text-bc-text-secondary mb-1">
-                  Membres visités
+                  Membres présents
                 </label>
                 <div className="flex flex-wrap gap-2 max-h-32 overflow-y-auto">
                   {busMembers.map((m) => (
                     <button
                       type="button"
                       key={m.id}
-                      onClick={() => toggleVisitedMember(m.id)}
-                      className={`text-xs font-medium px-3 py-1.5 rounded-full border active-scale ${visitedMemberIds.includes(m.id) ? "bg-bc-green text-white border-bc-green" : "bg-white text-bc-text border-bc-border"}`}
+                      onClick={() => togglePresence(m.id)}
+                      className={`text-xs font-medium px-3 py-1.5 rounded-full border active-scale ${presenceList.includes(m.id) ? "bg-bc-green text-white border-bc-green" : "bg-white text-bc-text border-bc-border"}`}
                     >
                       {m.firstName} {m.lastName}
                     </button>
@@ -749,14 +1103,33 @@ export default function BloomBusView({
               </div>
               <div>
                 <label className="block text-xs font-bold text-bc-text-secondary mb-1">
-                  Incidents / Activité
+                  Brève description
                 </label>
                 <textarea
-                  value={incidents}
-                  onChange={(e) => setIncidents(e.target.value)}
-                  className="w-full p-3 border border-bc-border rounded-xl text-sm font-medium h-24 bg-bc-canvas focus:bg-white focus:outline-none resize-none"
+                  value={description}
+                  onChange={(e) => setDescription(e.target.value)}
+                  maxLength={220}
+                  placeholder="Résumé en quelques mots…"
+                  className="w-full p-3 border border-bc-border rounded-xl text-sm font-medium h-16 bg-bc-canvas focus:bg-white focus:outline-none resize-none"
                 />
               </div>
+              </>
+              )}
+
+              {lifeReportTab === "observation" && (
+                <div>
+                  <label className="block text-xs font-bold text-bc-text-secondary mb-1">
+                    Observation (optionnel)
+                  </label>
+                  <textarea
+                    value={activityObservation}
+                    onChange={(e) => setActivityObservation(e.target.value)}
+                    className="w-full p-3 border border-bc-border rounded-xl text-sm font-medium h-32 bg-bc-canvas focus:bg-white focus:outline-none resize-none"
+                    placeholder="Remarques, points d'attention…"
+                  />
+                </div>
+              )}
+
               <div className="flex justify-end gap-3 pt-4">
                 <button
                   type="button"
@@ -773,12 +1146,12 @@ export default function BloomBusView({
                 </button>
               </div>
             </form>
-          </div>
-        </div>
+        </Modal>
       )}
 
       {showAddBus && (
         <AddBusModal
+          busLines={busLines}
           onClose={() => setShowAddBus(false)}
           onAdd={(bus) => {
             setBusLines((prev) => [...prev, bus]);
@@ -786,40 +1159,97 @@ export default function BloomBusView({
           }}
         />
       )}
+
+      {showDirectRegister && operator && onAddMember && (
+        <MemberFormModal
+          open={showDirectRegister}
+          member={null}
+          onClose={() => setShowDirectRegister(false)}
+          onAdd={(m) => { onAddMember(m); setShowDirectRegister(false); }}
+          onUpdate={() => {}}
+          existingMembers={members}
+          departments={departments}
+          busLines={busLines}
+          activeBranch={activeBranch}
+          simulatedRole={simulatedRole}
+          forms={forms}
+          operator={operator}
+          directBloomBusRegistration
+        />
+      )}
+
+      <ConfirmDialog
+        open={!!deletingBus}
+        onCancel={() => setDeletingBus(null)}
+        onConfirm={() => { if (deletingBus) deleteBusLine(deletingBus); }}
+        title="Supprimer ce bus"
+        message={deletingBus ? `Le bus "${deletingBus.name}" sera définitivement supprimé. Les membres qui y sont rattachés seront détachés. Cette action est irréversible.` : ""}
+        confirmLabel="Supprimer"
+      />
     </div>
   );
 }
 
-function AddBusModal({ onClose, onAdd }: { onClose: () => void; onAdd: (b: BloomBusEntity) => void }) {
+const NEW_OPTION = "__new__";
+
+function AddBusModal({ busLines, onClose, onAdd }: { busLines: BloomBusEntity[]; onClose: () => void; onAdd: (b: BloomBusEntity) => void }) {
+  // Chaque bus porte sa propre paire commune+zone (pas d'entité Zone séparée avec une
+  // commune parente unique) : une zone n'est donc pas exclusive à une seule commune,
+  // toutes deux sont de simples listes de valeurs déjà utilisées dans l'app.
+  const communes = Array.from(new Set(busLines.map((b) => b.commune))).sort();
+  const zones = Array.from(new Set(busLines.map((b) => b.zone))).sort();
+
   const [name, setName] = useState("");
-  const [commune, setCommune] = useState("");
-  const [zone, setZone] = useState("");
+  const [commune, setCommune] = useState(communes[0] ?? NEW_OPTION);
+  const [newCommune, setNewCommune] = useState("");
+  const effectiveCommune = commune === NEW_OPTION ? newCommune.trim() : commune;
+
+  const [zone, setZone] = useState(zones[0] ?? NEW_OPTION);
+  const [newZone, setNewZone] = useState("");
+  const effectiveZone = zone === NEW_OPTION ? newZone.trim() : zone;
+
   const [lat, setLat] = useState("5.35");
   const [lng, setLng] = useState("-4.02");
 
   const submit = () => {
-    if (!name.trim() || !commune.trim() || !zone.trim()) return;
+    if (!name.trim() || !effectiveCommune || !effectiveZone) return;
     onAdd({
       id: `bus_${Date.now()}`,
       name: name.trim(),
-      commune: commune.trim(),
-      zone: zone.trim(),
+      commune: effectiveCommune,
+      zone: effectiveZone,
       centerLat: parseFloat(lat) || 5.35,
       centerLng: parseFloat(lng) || -4.02,
     });
   };
 
   return (
-    <div className="fixed inset-0 bg-bc-text/30 backdrop-blur-sm z-50 flex items-center justify-center p-4" onClick={onClose}>
-      <div className="bg-white rounded-[2rem] p-6 w-full max-w-md shadow-xl" onClick={(e) => e.stopPropagation()}>
-        <div className="flex justify-between items-center mb-4">
-          <h3 className="font-ui font-bold text-bc-text">Ajouter un bus</h3>
-          <button onClick={onClose} className="text-bc-text-secondary hover:text-bc-text active-scale"><X size={18} /></button>
-        </div>
+    <Modal open={true} onClose={onClose} title="Ajouter un bus" maxWidth="max-w-md">
         <div className="space-y-3">
           <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Nom du bus" className="w-full border border-bc-border rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-bc-green" />
-          <input value={commune} onChange={(e) => setCommune(e.target.value)} placeholder="Commune" className="w-full border border-bc-border rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-bc-green" />
-          <input value={zone} onChange={(e) => setZone(e.target.value)} placeholder="Zone" className="w-full border border-bc-border rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-bc-green" />
+
+          <div>
+            <label className="block text-[10px] font-bold uppercase tracking-wider text-bc-text-secondary mb-1">Commune</label>
+            <select value={commune} onChange={(e) => setCommune(e.target.value)} className="w-full border border-bc-border rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-bc-green bg-white">
+              {communes.map((c) => <option key={c} value={c}>{c}</option>)}
+              <option value={NEW_OPTION}>+ Nouvelle commune…</option>
+            </select>
+            {commune === NEW_OPTION && (
+              <input value={newCommune} onChange={(e) => setNewCommune(e.target.value)} placeholder="Nom de la nouvelle commune" className="w-full mt-2 border border-bc-border rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-bc-green" />
+            )}
+          </div>
+
+          <div>
+            <label className="block text-[10px] font-bold uppercase tracking-wider text-bc-text-secondary mb-1">Zone</label>
+            <select value={zone} onChange={(e) => setZone(e.target.value)} className="w-full border border-bc-border rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-bc-green bg-white">
+              {zones.map((z) => <option key={z} value={z}>{z}</option>)}
+              <option value={NEW_OPTION}>+ Nouvelle zone…</option>
+            </select>
+            {zone === NEW_OPTION && (
+              <input value={newZone} onChange={(e) => setNewZone(e.target.value)} placeholder="Nom de la nouvelle zone" className="w-full mt-2 border border-bc-border rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-bc-green" />
+            )}
+          </div>
+
           <div className="grid grid-cols-2 gap-2">
             <div>
               <label className="block text-[10px] font-bold uppercase tracking-wider text-bc-text-secondary mb-1">Centre — Latitude</label>
@@ -831,10 +1261,9 @@ function AddBusModal({ onClose, onAdd }: { onClose: () => void; onAdd: (b: Bloom
             </div>
           </div>
         </div>
-        <button onClick={submit} disabled={!name.trim() || !commune.trim() || !zone.trim()} className="w-full mt-5 bg-bc-green text-white rounded-full py-2.5 text-sm font-bold hover:opacity-90 disabled:opacity-40 active-scale">
+        <button onClick={submit} disabled={!name.trim() || !effectiveCommune || !effectiveZone} className="w-full mt-5 bg-bc-green text-white rounded-full py-2.5 text-sm font-bold hover:opacity-90 disabled:opacity-40 active-scale">
           Ajouter le bus
         </button>
-      </div>
-    </div>
+    </Modal>
   );
 }

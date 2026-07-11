@@ -1,25 +1,27 @@
 import React, { useEffect, useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Branch, PermissionMatrix } from '../types';
+import { Branch, Member, PermissionMatrix } from '../types';
 import {
   LayoutDashboard, Users, Grid, LayoutList, Bus, Calendar,
   Activity, Heart, GraduationCap, Shield, UserCog, Settings,
-  FormInput, History, User, X, UserPlus, ChevronDown, FileText, Droplet
+  FormInput, History, X, UserPlus, ChevronDown, FileText, Droplet
 } from 'lucide-react';
 import { useMediaQuery } from '../hooks/useMediaQuery';
 import { useDepartments, useMinistries, canView as canViewTab } from '../data';
+import { MEMBERS_TAB_DEPT_ONLY_ROLES } from '../data/scope';
 
 interface SidebarProps {
   collapsed: boolean;
   setCollapsed: (collapsed: boolean) => void;
   activeBranch: Branch;
   simulatedRole: string;
-  setSimulatedRole: (role: string) => void;
   activeTab: string;
   setActiveTab: (tab: string) => void;
   selectedDept: string | null;
   setSelectedDept: (id: string | null) => void;
   permissionMatrix: PermissionMatrix;
+  members: Member[];
+  operator?: Member;
 }
 
 export default function Sidebar({
@@ -27,12 +29,13 @@ export default function Sidebar({
   setCollapsed,
   activeBranch,
   simulatedRole,
-  setSimulatedRole,
   activeTab,
   setActiveTab,
   selectedDept,
   setSelectedDept,
-  permissionMatrix
+  permissionMatrix,
+  members,
+  operator
 }: SidebarProps) {
   const isChurch = activeBranch === 'church';
   const isDesktop = useMediaQuery('(min-width: 1024px)');
@@ -50,7 +53,7 @@ export default function Sidebar({
   useEffect(() => {
     if (!selectedDept) return;
     const ministryId = departments.find(d => d.id === selectedDept)?.ministryId;
-    if (ministryId) setExpandedMinistries(prev => new Set(prev).add(ministryId));
+    if (ministryId) setExpandedMinistries(prev => (prev.has(ministryId) ? prev : new Set(prev).add(ministryId)));
   }, [selectedDept, departments]);
 
   // On desktop, we might want to respect the collapsed state from the parent.
@@ -90,8 +93,28 @@ export default function Sidebar({
   // P1.1 — la visibilité des onglets est pilotée par la PermissionMatrix (capability view_<tab>).
   // Règle partagée avec App.tsx (src/data/permissions.ts) pour ne jamais diverger.
   const canView = (tabId: string, role: string = simulatedRole) => canViewTab(permissionMatrix, tabId, role);
+  // Tout profil non-STAFF ayant accès à l'onglet Départements est cantonné à son seul
+  // département (DepartmentsView l'y fait atterrir directement via ROLE_HOME_DEPT/defaultDept) :
+  // pas de liste déroulante pour en parcourir d'autres. Seul le STAFF garde la navigation complète.
+  const isDeptScoped = ['Responsable', 'Adjoint', 'Coach', 'Leader', 'ADN', 'Intégration', 'GDC', 'Portier'].includes(simulatedRole);
 
-  const filteredMainItems = mainMenuItems.filter(item => canView(item.id));
+  // Coach/Leader : l'onglet Membres ne sert que si le Responsable leur a réellement
+  // assigné des membres (Member.mentorId, la "ligne de mentorat" posée depuis la fiche
+  // 360 — cf. DepartmentsView onglet Suivi). Le partage de département seul (scope.ts
+  // DEPARTMENT_PROXY_ROLES) est trop large ici : deux membres du même département sans
+  // lien de mentorat ne sont pas "attribués".
+  const hasAssignedMembers = !!operator && members.some(m => m.mentorId === operator.id);
+  const filteredMainItems = mainMenuItems.filter(item => {
+    if (item.id === 'members' && ['Coach', 'Leader'].includes(simulatedRole)) {
+      return canView(item.id) && hasAssignedMembers;
+    }
+    // Responsable/Adjoint gèrent leurs membres depuis l'onglet Membres de leur
+    // page Département, pas depuis un onglet Membres global.
+    if (item.id === 'members' && MEMBERS_TAB_DEPT_ONLY_ROLES.includes(simulatedRole)) {
+      return false;
+    }
+    return canView(item.id);
+  });
   const filteredAdminItems = adminMenuItems.filter(item => canView(item.id));
 
   const sidebarContent = (
@@ -164,7 +187,7 @@ export default function Sidebar({
                     {item.label}
                   </span>
                 )}
-                {item.id === 'departments' && isActive && (!collapsed || !isDesktop) && (
+                {item.id === 'departments' && isActive && !isDeptScoped && (!collapsed || !isDesktop) && (
                   <ChevronDown
                     size={16}
                     className={`z-10 transition-transform text-bc-green ${deptsExpanded ? '' : '-rotate-90'}`}
@@ -172,8 +195,9 @@ export default function Sidebar({
                 )}
               </button>
 
-              {/* Accordéon Ministère → Départements (sous l'item Départements) */}
-              {item.id === 'departments' && isActive && deptsExpanded && (!collapsed || !isDesktop) && (
+              {/* Accordéon Ministère → Départements (sous l'item Départements) — masqué pour un
+                  Responsable/Adjoint, cantonné à son seul département (pas de liste à parcourir). */}
+              {item.id === 'departments' && isActive && deptsExpanded && !isDeptScoped && (!collapsed || !isDesktop) && (
                 <div className="mt-1 mb-2 ml-4 pl-3 border-l-2 border-bc-border space-y-0.5">
                   {ministries.map(ministry => {
                     const mDepts = departments.filter(d => d.ministryId === ministry.id);
@@ -258,42 +282,6 @@ export default function Sidebar({
           </>
         )}
       </nav>
-
-      <div className="p-4 border-t border-bc-border bg-bc-canvas">
-        {(!collapsed || !isDesktop) ? (
-          <div>
-            <label className="text-[10px] font-bold text-bc-text-secondary uppercase tracking-wider mb-2 block">
-              Simuler profil (Test)
-            </label>
-            <div className="flex flex-wrap gap-1.5">
-              {['Super Admin', 'Admin', 'Pasteur Principal', 'Pasteur', 'Ministre', 'Responsable', 'Adjoint', 'Coach', 'Leader', 'Capitaine', 'Responsable de Zone', 'Responsable de Commune', 'ADN', 'Portier', 'GDC', 'Intégration', 'Membre', 'Nouveau'].map(role => (
-                <button
-                  key={role}
-                  onClick={() => {
-                    setSimulatedRole(role);
-                    if (!canView(activeTab, role)) {
-                      setActiveTab('dashboard');
-                    }
-                  }}
-                  className={`min-h-[36px] px-3 py-1.5 rounded-full text-[11px] font-ui font-medium border text-center transition-colors active-scale ease-out-spring ${
-                    simulatedRole === role
-                      ? 'bg-bc-green text-white border-bc-green'
-                      : 'bg-white text-bc-text-secondary border-bc-border hover:bg-bc-canvas'
-                  }`}
-                >
-                  {role}
-                </button>
-              ))}
-            </div>
-          </div>
-        ) : (
-          <div className="flex justify-center">
-            <div className={`p-2 rounded-full text-white bg-bc-green min-h-[44px] min-w-[44px] flex items-center justify-center`} title={`Profil actuel : ${simulatedRole}`}>
-              <User size={20} />
-            </div>
-          </div>
-        )}
-      </div>
     </div>
   );
 

@@ -7,9 +7,10 @@ import { deriveTimeBasedNotifications } from '../src/data/notificationRules.ts';
 import { AppSettings, Member } from '../src/types.ts';
 import { getKv, appendToCollection } from './db.ts';
 import { readCollection } from './guards.ts';
-import { dispatch } from './notify.ts';
+import { dispatch, drainOutbox } from './notify.ts';
 
 const HOUR_MS = 60 * 60 * 1000;
+const OUTBOX_DRAIN_MS = 60 * 1000; // draine l'outbox toutes les minutes
 
 export function runSweep(now: Date = new Date()): number {
   const members = readCollection('members') as Member[];
@@ -43,4 +44,9 @@ export function startScheduler(): void {
   };
   tick(); // au boot
   setInterval(tick, HOUR_MS).unref?.();
+
+  // Worker d'envoi : vide les lignes outbox 'pending' (email/SMS/WhatsApp réels).
+  const drain = () => { drainOutbox().catch((e) => console.error('[outbox] drain failed:', e)); };
+  drain();
+  setInterval(drain, OUTBOX_DRAIN_MS).unref?.();
 }

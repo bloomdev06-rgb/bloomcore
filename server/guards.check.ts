@@ -45,4 +45,30 @@ applyWrite('notifications', [{ id: 'n1' }, { id: 'n2' }]);
 applyWrite('notifications', [{ id: 'n1' }]);
 assert.equal(readCollection('notifications').length, 1, 'dismiss notification ok');
 
+// --- asOf : conflits de version par item ---
+applyWrite('projects', [{ id: 'p1', name: 'Alpha' }]);
+const stampedP1 = getCollection('projects').find((p: any) => p.id === 'p1');
+assert.ok(stampedP1.updatedAt, 'updatedAt stampé sur écriture');
+
+// client périmé (asOf antérieur à la dernière écriture serveur) édite → conflit, valeur serveur conservée
+const staleAsOf = new Date(Date.parse(stampedP1.updatedAt) - 1000).toISOString();
+const r1 = applyWrite('projects', [{ id: 'p1', name: 'Alpha (stale edit)' }], staleAsOf);
+assert.deepEqual(r1.conflicts, ['p1'], 'édition périmée détectée en conflit');
+assert.equal(getCollection('projects').find((p: any) => p.id === 'p1').name, 'Alpha', 'valeur serveur non écrasée par un client périmé');
+
+// client périmé omet p1 (ignorait son existence) → conflit, pas de tombstone
+const r2 = applyWrite('projects', [], staleAsOf);
+assert.deepEqual(r2.conflicts, ['p1'], 'suppression implicite périmée détectée en conflit');
+assert.equal(readCollection('projects').length, 1, 'client périmé : pas de tombstone sur un item hors de sa connaissance');
+
+// client à jour (asOf = updatedAt courant) édite sans conflit
+const r3 = applyWrite('projects', [{ id: 'p1', name: 'Alpha v2' }], stampedP1.updatedAt);
+assert.equal(r3.conflicts.length, 0, 'client à jour : pas de conflit');
+assert.equal(getCollection('projects').find((p: any) => p.id === 'p1').name, 'Alpha v2', 'édition à jour appliquée');
+
+// asOf omis : comportement LWW historique inchangé (cf. test ligne 40)
+const r4 = applyWrite('projects', [], undefined);
+assert.equal(r4.conflicts.length, 0, 'asOf omis : pas de détection de conflit (comportement historique)');
+assert.equal(readCollection('projects').length, 0, 'asOf omis : suppression par omission toujours appliquée (LWW)');
+
 console.log('guards.check OK');

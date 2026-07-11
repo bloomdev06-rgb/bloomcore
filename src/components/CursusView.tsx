@@ -6,6 +6,7 @@ import { inMemberScope } from '../data/scope';
 import { motion } from 'motion/react';
 import { staggerParent, staggerItem } from './ui/motion';
 import { Avatar } from './ui/Avatar';
+import { Modal } from './ui/Modal';
 
 interface CursusViewProps {
   activeBranch: Branch;
@@ -28,8 +29,8 @@ function CursusTreeNode({ member, pool, canManage, onPromote, depth = 0 }: {
   // ponytail: depth cap guards against an operator-created mentorId cycle, not expected in practice.
   const children = depth < 8 ? pool.filter(c => c.mentorId === member.id) : [];
   return (
-    <div className={depth > 0 ? 'ml-6 pl-4 border-l border-bc-border' : ''}>
-      <div className="flex items-center gap-2 py-1.5">
+    <div className="flex flex-col items-center">
+      <div className="flex items-center gap-2 py-1.5 px-3 rounded-2xl border border-bc-border bg-white shadow-sm whitespace-nowrap">
         <Avatar src={member.avatarUrl} initials={`${member.firstName[0]}${member.lastName[0]}`} size="sm" className="w-7 h-7 bg-bc-border/40 text-bc-text-secondary text-[10px] uppercase" />
         <span className="text-xs font-bold text-bc-text">{member.firstName} {member.lastName}</span>
         <span className="text-[10px] font-bold text-bc-text-secondary px-2 py-0.5 rounded-full bg-bc-canvas">{member.pastoralCursus}</span>
@@ -43,11 +44,19 @@ function CursusTreeNode({ member, pool, canManage, onPromote, depth = 0 }: {
           </button>
         )}
       </div>
-      {children.map(c => (
-        <div key={c.id}>
-          <CursusTreeNode member={c} pool={pool} canManage={canManage} onPromote={onPromote} depth={depth + 1} />
-        </div>
-      ))}
+      {children.length > 0 && (
+        <>
+          <div className="w-px h-4 bg-bc-border" />
+          <div className="flex items-start gap-6">
+            {children.map(c => (
+              <div key={c.id} className="flex flex-col items-center">
+                <div className="w-px h-4 bg-bc-border" />
+                <CursusTreeNode member={c} pool={pool} canManage={canManage} onPromote={onPromote} depth={depth + 1} />
+              </div>
+            ))}
+          </div>
+        </>
+      )}
     </div>
   );
 }
@@ -169,14 +178,14 @@ export default function CursusView({ activeBranch, simulatedRole, members = [], 
 
       {viewMode === 'tree' ? (
         /* Organigramme mentor→filleul : racines = pas de mentor, ou mentor hors du pool filtré. */
-        <div className="bg-white p-6 rounded-[2rem] border border-bc-border shadow-sm space-y-3">
+        <div className="bg-white p-6 rounded-[2rem] border border-bc-border shadow-sm divide-y divide-bc-border overflow-x-auto">
           {filteredMembers.filter(m => !m.mentorId || !filteredMembers.some(c => c.id === m.mentorId)).length === 0 ? (
             <p className="text-[11px] italic text-bc-text-secondary p-3">Aucun membre trouvé pour ces filtres.</p>
           ) : (
             filteredMembers
               .filter(m => !m.mentorId || !filteredMembers.some(c => c.id === m.mentorId))
               .map(root => (
-                <div key={root.id}>
+                <div key={root.id} className="flex justify-center py-4 first:pt-0 last:pb-0">
                   <CursusTreeNode
                     member={root}
                     pool={filteredMembers}
@@ -269,29 +278,20 @@ export default function CursusView({ activeBranch, simulatedRole, members = [], 
 
       {/* Promotion confirmation modal */}
       {promoting && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4" onClick={() => setPromoting(null)}>
-          <div className="bg-white rounded-[2rem] w-full max-w-md p-6 border border-bc-border shadow-2xl relative" onClick={e => e.stopPropagation()}>
-            <button onClick={() => setPromoting(null)} className="absolute top-4 right-4 p-2 text-bc-text-secondary hover:text-bc-text transition-colors active-scale">
-              <X size={20} />
-            </button>
-            <div className="flex items-center gap-2 mb-4">
-              <ArrowUpCircle size={20} className="text-bc-green" />
-              <h3 className="text-base font-ui font-bold text-bc-text">Promotion pastorale</h3>
-            </div>
-            <p className="text-sm text-bc-text-secondary mb-5">
-              Promouvoir <span className="font-bold text-bc-text">{promoting.firstName} {promoting.lastName}</span> dans le cursus pastoral ?
-            </p>
-            <div className="flex items-center justify-center gap-3 mb-6">
-              <span className="text-xs font-bold px-3 py-1.5 rounded-full bg-bc-canvas text-bc-text-secondary">{promoting.pastoralCursus}</span>
-              <ArrowUpCircle size={16} className="text-bc-green rotate-90" />
-              <span className="text-xs font-bold px-3 py-1.5 rounded-full bg-bc-green text-white">{nextCursus(promoting.pastoralCursus)}</span>
-            </div>
-            <div className="flex gap-3 justify-end pt-3 border-t border-bc-border">
-              <button onClick={() => setPromoting(null)} className="px-4 py-2 border border-bc-border text-bc-text-secondary rounded-full text-xs hover:bg-bc-canvas active-scale">Annuler</button>
-              <button onClick={confirmPromotion} className="px-5 py-2 bg-bc-green text-white rounded-full text-xs font-ui font-bold hover:opacity-90 active-scale">Confirmer la promotion</button>
-            </div>
+        <Modal open={!!promoting} onClose={() => setPromoting(null)} title="Promotion pastorale" icon={<ArrowUpCircle size={20} className="text-bc-green" />} maxWidth="max-w-md">
+          <p className="text-sm text-bc-text-secondary mb-5">
+            Promouvoir <span className="font-bold text-bc-text">{promoting.firstName} {promoting.lastName}</span> dans le cursus pastoral ?
+          </p>
+          <div className="flex items-center justify-center gap-3 mb-6">
+            <span className="text-xs font-bold px-3 py-1.5 rounded-full bg-bc-canvas text-bc-text-secondary">{promoting.pastoralCursus}</span>
+            <ArrowUpCircle size={16} className="text-bc-green rotate-90" />
+            <span className="text-xs font-bold px-3 py-1.5 rounded-full bg-bc-green text-white">{nextCursus(promoting.pastoralCursus)}</span>
           </div>
-        </div>
+          <div className="flex gap-3 justify-end pt-3 border-t border-bc-border">
+            <button onClick={() => setPromoting(null)} className="px-4 py-2 border border-bc-border text-bc-text-secondary rounded-full text-xs hover:bg-bc-canvas active-scale">Annuler</button>
+            <button onClick={confirmPromotion} className="px-5 py-2 bg-bc-green text-white rounded-full text-xs font-ui font-bold hover:opacity-90 active-scale">Confirmer la promotion</button>
+          </div>
+        </Modal>
       )}
     </div>
   );

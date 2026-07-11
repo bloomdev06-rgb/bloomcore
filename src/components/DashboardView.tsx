@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Branch, Member, Event, Report } from '../types';
-import { Users, Bus, TrendingUp, AlertCircle, Clock, X, FolderKanban } from 'lucide-react';
+import { Users, Bus, TrendingUp, AlertCircle, Clock, X, FolderKanban, Sparkles } from 'lucide-react';
 import { AreaChart, Area, XAxis, Tooltip, ResponsiveContainer } from 'recharts';
 import { ResponsiveChart } from './ui/ResponsiveChart';
 import { motion } from 'motion/react';
@@ -9,9 +9,11 @@ import { HealthSmiley } from './ui/HealthSmiley';
 import {
   isRed, activeMemberIds, activeMemberWindow, activeBusIds, moissonBySource, pendingFollowUps,
   periodHealthLevels, projectProgress, periodRange, Period, PeriodInput,
-  weeklyBaptismCounts, weeklyActiveCounts, weeklyMoissonCounts,
+  weeklyBaptismCounts, weeklyActiveCounts, weeklyMoissonCounts, weeklyGrowthSeries,
+  ojTotal, weeklyOjCounts,
 } from '../data/kpi';
-import { useBusLines, useProjects, useDepartments } from '../data';
+import { useBusLines, useProjects, useDepartments, useMinistries } from '../data';
+import { ROLE_HOME_DEPT } from '../data/scope';
 
 interface DashboardViewProps {
   activeBranch: Branch;
@@ -26,7 +28,7 @@ interface DashboardViewProps {
 }
 
 // Mini courbe de tendance dans une tuile KPI (8 semaines, sans axes ni tooltip).
-function Spark({ data, color }: { data: { week: string; count: number }[]; color: string }) {
+export function Spark({ data, color }: { data: { week: string; count: number }[]; color: string }) {
   return (
     <div className="h-8 mt-1 -mx-1">
       <ResponsiveContainer width="100%" height="100%">
@@ -39,14 +41,21 @@ function Spark({ data, color }: { data: { week: string; count: number }[]; color
 }
 
 // Anneau de proportion (valeur/total) pour les tuiles KPI qui sont une vraie part d'un tout.
-function Ring({ value, total, color }: { value: number; total: number; color: string }) {
-  const C = 2 * Math.PI * 14;
+export function Ring({ value, total, color, size = 32, onClick }: { value: number; total: number; color: string; size?: number; onClick?: () => void }) {
+  const r = (size / 32) * 14;
+  const C = 2 * Math.PI * r;
   const pct = total > 0 ? Math.min(value / total, 1) : 0;
+  const center = size / 2;
   return (
-    <svg width="32" height="32" viewBox="0 0 32 32" className="shrink-0 -rotate-90">
-      <circle cx="16" cy="16" r="14" fill="none" stroke="var(--color-bc-border)" strokeWidth="3" />
+    <svg
+      width={size} height={size} viewBox={`0 0 ${size} ${size}`}
+      className={`shrink-0 -rotate-90 ${onClick ? "cursor-pointer" : ""}`}
+      onClick={onClick}
+      role={onClick ? "button" : undefined}
+    >
+      <circle cx={center} cy={center} r={r} fill="none" stroke="var(--color-bc-border)" strokeWidth="3" />
       <circle
-        cx="16" cy="16" r="14" fill="none" stroke={color} strokeWidth="3" strokeLinecap="round"
+        cx={center} cy={center} r={r} fill="none" stroke={color} strokeWidth="3" strokeLinecap="round"
         strokeDasharray={C} strokeDashoffset={C * (1 - pct)}
         className="transition-[stroke-dashoffset] duration-700 ease-out-spring"
       />
@@ -63,7 +72,7 @@ export const HEALTH_AXES = [
   { key: 'presenceService', label: 'Présence service' },
 ] as const;
 
-export default function DashboardView({ activeBranch, simulatedRole, members = [], reports = [], setActiveTab, operatorId, onMarkReportTreated }: DashboardViewProps) {
+export default function DashboardView({ activeBranch, simulatedRole, members = [], events = [], reports = [], setActiveTab, operatorId, onMarkReportTreated }: DashboardViewProps) {
   const go = (tab: string) => setActiveTab?.(tab);
   const isChurch = activeBranch === 'church';
   // ponytail: défaut "semaine en cours" (fenêtre glissante 7j) — demandé pour la santé globale, appliqué au sélecteur entier.
@@ -75,8 +84,27 @@ export default function DashboardView({ activeBranch, simulatedRole, members = [
     ? { from: new Date(customFrom), to: new Date(`${customTo}T23:59:59`) }
     : period;
 
-  const branchMembers = members.filter(m => activeBranch === 'global' || m.branch === activeBranch);
-  const branchReports = reports.filter(r => activeBranch === 'global' || r.targetBranch === activeBranch);
+  const operator = members.find(m => m.id === operatorId) ?? members[0];
+  const departments = useDepartments();
+  const ministries = useMinistries();
+  const deptName = (id?: string) => departments.find(d => d.id === id)?.name ?? '';
+
+  // §13.3 — Responsable/Coach/Leader ne voient que leur département ; Ministre, son ministère.
+  const homeDeptId = ROLE_HOME_DEPT[simulatedRole]
+    || Object.entries(operator?.departments ?? {}).find(([, fn]) => fn === 'Responsable')?.[0]
+    || Object.keys(operator?.departments ?? {})[0];
+  const ownMinistry = simulatedRole === 'Ministre' ? ministries.find(m => m.tuteurId === operator?.id) : undefined;
+  const scopeDeptIds =
+    simulatedRole === 'Ministre' ? (ownMinistry ? departments.filter(d => d.ministryId === ownMinistry.id).map(d => d.id) : [])
+    : ['Responsable', 'Coach', 'Leader'].includes(simulatedRole) ? (homeDeptId ? [homeDeptId] : [])
+    : null; // null = pas de restriction (Pasteur/Pasteur Principal/Admin/Super Admin voient toute l'église)
+
+  const scopedMembers = scopeDeptIds ? members.filter(m => scopeDeptIds.some(id => id in m.departments)) : members;
+  const scopedReports = scopeDeptIds ? reports.filter(r => r.departmentId && scopeDeptIds.includes(r.departmentId)) : reports;
+
+  const branchMembers = scopedMembers.filter(m => activeBranch === 'global' || m.branch === activeBranch);
+  const branchReports = scopedReports.filter(r => activeBranch === 'global' || r.targetBranch === activeBranch);
+  const branchEvents = events.filter(e => activeBranch === 'global' || e.branch === activeBranch || e.branch === 'global');
   const waitingCount = branchMembers.filter(m => m.integrationState === 'En attente').length;
   const redCount = branchMembers.filter(m => isRed(m)).length;
   const pendingReceptionsCount = branchMembers.filter(m => m.integrationState === 'En attente' && m.receptionValidated === false).length;
@@ -85,6 +113,7 @@ export default function DashboardView({ activeBranch, simulatedRole, members = [
   const activeBusCount = activeBusIds(branchReports, effectivePeriod).size;
   const totalBusLines = useBusLines().length;
   const moisson = moissonBySource(branchReports, effectivePeriod);
+  const oj = ojTotal(branchReports, effectivePeriod);
   const { from: pFrom, to: pTo } = periodRange(effectivePeriod);
   const periodBaptised = branchMembers.filter(m => m.baptismDate && new Date(m.baptismDate) >= pFrom && new Date(m.baptismDate) <= pTo);
   const baptisedViaDept = periodBaptised.filter(m => m.baptismViaDepartment).length;
@@ -97,17 +126,14 @@ export default function DashboardView({ activeBranch, simulatedRole, members = [
   const health = periodHealthLevels(branchReports, effectivePeriod);
   const projectsInProgress = useProjects().filter(p =>
     p.status === 'En cours' && (activeBranch === 'global' || p.scope === activeBranch || p.scope === 'both' || p.scope === 'ministry'));
-  const departments = useDepartments();
-  const deptName = (id?: string) => departments.find(d => d.id === id)?.name ?? '';
 
   // §13.3 — dashboard par profil. Encadrement = tableau décisionnel ; autres = tableau personnel.
   const LEADERSHIP = ['Pasteur', 'Pasteur Principal', 'Ministre', 'Admin', 'Super Admin', 'Responsable', 'Coach', 'Leader'];
   const isLeadership = LEADERSHIP.includes(simulatedRole);
   const scopeLabel =
     ['Pasteur', 'Pasteur Principal', 'Admin', 'Super Admin'].includes(simulatedRole) ? 'les deux branches'
-    : simulatedRole === 'Ministre' ? 'votre ministère'
-    : 'votre département';
-  const operator = members.find(m => m.id === operatorId) ?? members[0];
+    : simulatedRole === 'Ministre' ? `votre ministère${ownMinistry ? ` (${ownMinistry.name})` : ''}`
+    : `votre département${homeDeptId ? ` (${deptName(homeDeptId)})` : ''}`;
 
   // --- Personal dashboard (profils non-encadrants) ---
   if (!isLeadership && operator) {
@@ -157,13 +183,8 @@ export default function DashboardView({ activeBranch, simulatedRole, members = [
     );
   }
 
-  // Dummy data for growth chart
-  const growthData = [
-    { name: 'S1', nouveaux: 45, participants: 320 },
-    { name: 'S2', nouveaux: 52, participants: 340 },
-    { name: 'S3', nouveaux: 38, participants: 310 },
-    { name: 'S4', nouveaux: 65, participants: 380 },
-  ];
+  // Croissance & Participants — données réelles (nouveaux enregistrés + actifs par semaine).
+  const growthData = weeklyGrowthSeries(branchMembers, branchReports, 8);
 
   const containerVariants = {
     hidden: { opacity: 0 },
@@ -273,6 +294,16 @@ export default function DashboardView({ activeBranch, simulatedRole, members = [
             <p className="text-[9px] text-bc-text-secondary mt-1">Intégrés · {moisson.adn} ADN · {moisson.bus} Bus</p>
           </div>
 
+          <div className="bg-white p-4 rounded-2xl border border-bc-border shadow-soft hover:shadow-md transition-shadow">
+            <div className="flex items-center gap-2 text-bc-text-secondary mb-2">
+              <Sparkles size={14} />
+              <span className="text-[9px] font-bold uppercase tracking-wider">OJ « Oui à Jésus »</span>
+            </div>
+            <div className="text-xl font-ui font-extrabold text-bc-text tracking-tight">{oj}</div>
+            <Spark data={weeklyOjCounts(branchReports, 8)} color="var(--color-bc-cerulean)" />
+            <p className="text-[9px] text-bc-text-secondary mt-1">Sur la période · rapports ADN</p>
+          </div>
+
           <button
             type="button"
             onClick={() => setShowFollowUps(true)}
@@ -312,26 +343,23 @@ export default function DashboardView({ activeBranch, simulatedRole, members = [
               </div>
             </div>
           </div>
-        </motion.div>
 
-        {/* Charts & Health Row */}
-        <motion.div variants={itemVariants} className="grid grid-cols-1 lg:grid-cols-2 gap-6 shrink-0">
-          
-          {/* Health Row — les 5 critères du rapport Bloom Bus, scoping = période sélectionnée */}
-          <div className="bg-white p-6 rounded-[2rem] border border-bc-border shadow-sm flex flex-col justify-center">
-            <h3 className="font-ui font-bold text-bc-text mb-4 tracking-tight">Santé Spirituelle Globale</h3>
-            <div className="flex flex-col h-full justify-center space-y-4">
-              <div className="grid grid-cols-5 gap-1 w-full text-center">
-                {HEALTH_AXES.filter(a => a.key !== 'presenceService').map(axis => (
-                  <div key={axis.key} className="min-w-0">
-                    <HealthSmiley value={health[axis.key as keyof typeof health]} size={30} />
-                    <div className="text-[9px] sm:text-[10px] font-bold text-bc-text-secondary truncate mt-1">{axis.label}</div>
-                  </div>
-                ))}
-              </div>
-              <p className="text-center text-[10px] text-bc-text-secondary">Synthèse des rapports Bloom Bus de la période</p>
+          {/* Santé spirituelle — même ligne que les KPI, juste après "Au rouge" */}
+          <div className="bg-white p-4 rounded-2xl border border-bc-border shadow-soft hover:shadow-md transition-shadow col-span-2">
+            <h3 className="text-[9px] font-bold uppercase tracking-wider text-bc-text-secondary mb-2">Santé Spirituelle Globale</h3>
+            <div className="grid grid-cols-5 gap-1 w-full text-center">
+              {HEALTH_AXES.filter(a => a.key !== 'presenceService').map(axis => (
+                <div key={axis.key} className="min-w-0">
+                  <HealthSmiley value={health[axis.key as keyof typeof health]} size={20} />
+                  <div className="text-[7px] sm:text-[8px] font-bold text-bc-text-secondary truncate mt-1">{axis.label}</div>
+                </div>
+              ))}
             </div>
           </div>
+        </motion.div>
+
+        {/* Croissance & Projets — même ligne */}
+        <motion.div variants={itemVariants} className="grid grid-cols-1 lg:grid-cols-2 gap-6 shrink-0">
 
           <div className="bg-white p-6 rounded-[2rem] border border-bc-border shadow-sm">
             <h3 className="font-ui font-bold text-bc-text mb-2 tracking-tight">Croissance & Participants</h3>
@@ -360,34 +388,34 @@ export default function DashboardView({ activeBranch, simulatedRole, members = [
               </ResponsiveChart>
             </div>
           </div>
-        </motion.div>
 
-        {/* Projets en cours (remplace la file d'intégration — les KPIs d'intégration sont déjà plus haut) */}
-        <motion.div variants={itemVariants} className="bg-white p-6 rounded-[2rem] border border-bc-border shadow-sm shrink-0 mb-6">
-          <div className="flex justify-between items-center mb-4">
-            <h3 className="font-ui font-bold text-bc-text tracking-tight flex items-center gap-2"><FolderKanban size={16} /> Projets en cours</h3>
-            <button onClick={() => go('projects')} className="text-xs font-bold text-bc-text-secondary hover:text-bc-text transition-colors">Voir tout →</button>
-          </div>
-          {projectsInProgress.length === 0 ? (
-            <p className="text-xs text-bc-text-secondary italic text-center py-4">Aucun projet en cours.</p>
-          ) : (
-            <div className="space-y-3">
-              {projectsInProgress.map(p => {
-                const pct = projectProgress(p);
-                return (
-                  <div key={p.id} onClick={() => go('projects')} className="cursor-pointer group">
-                    <div className="flex items-center justify-between mb-1">
-                      <span className="text-xs font-bold text-bc-text group-hover:text-bc-green transition-colors truncate">{p.name}</span>
-                      <span className="text-[10px] font-bold text-bc-text-secondary shrink-0 ml-3">{pct}%</span>
-                    </div>
-                    <div className="flex h-2 rounded-full overflow-hidden bg-bc-canvas">
-                      <div className="bg-bc-green transition-all duration-700 ease-out-spring rounded-full" style={{ width: `${pct}%` }} />
-                    </div>
-                  </div>
-                );
-              })}
+          {/* Projets en cours (remplace la file d'intégration — les KPIs d'intégration sont déjà plus haut) */}
+          <div className="bg-white p-6 rounded-[2rem] border border-bc-border shadow-sm flex flex-col">
+            <div className="flex justify-between items-center mb-4">
+              <h3 className="font-ui font-bold text-bc-text tracking-tight flex items-center gap-2"><FolderKanban size={16} /> Projets en cours</h3>
+              <button onClick={() => go('projects')} className="text-xs font-bold text-bc-text-secondary hover:text-bc-text transition-colors">Voir tout →</button>
             </div>
-          )}
+            {projectsInProgress.length === 0 ? (
+              <p className="text-xs text-bc-text-secondary italic text-center py-4">Aucun projet en cours.</p>
+            ) : (
+              <div className="space-y-3 max-h-48 overflow-y-auto pr-1">
+                {projectsInProgress.map(p => {
+                  const pct = projectProgress(p);
+                  return (
+                    <div key={p.id} onClick={() => go('projects')} className="cursor-pointer group">
+                      <div className="flex items-center justify-between mb-1">
+                        <span className="text-xs font-bold text-bc-text group-hover:text-bc-green transition-colors truncate">{p.name}</span>
+                        <span className="text-[10px] font-bold text-bc-text-secondary shrink-0 ml-3">{pct}%</span>
+                      </div>
+                      <div className="flex h-2 rounded-full overflow-hidden bg-bc-canvas">
+                        <div className="bg-bc-green transition-all duration-700 ease-out-spring rounded-full" style={{ width: `${pct}%` }} />
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
         </motion.div>
 
       </motion.div>
@@ -400,7 +428,7 @@ export default function DashboardView({ activeBranch, simulatedRole, members = [
         className="w-full lg:w-80 bg-white rounded-[2rem] border border-bc-border p-6 flex flex-col gap-6 shrink-0 shadow-sm lg:overflow-y-auto no-scrollbar"
       >
         
-        <MiniCalendar />
+        <MiniCalendar events={branchEvents} />
 
         <div>
           <h3 className="font-ui font-bold text-bc-text mb-4 tracking-tight">Agenda Proche</h3>

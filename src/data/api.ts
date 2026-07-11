@@ -2,8 +2,46 @@
 // network errors and resolves null/false — offline-first, matching
 // ARCHITECTURE_TECHNIQUE.md §7's "PWA offline-first, localStorage cache"
 // intent: the app must keep working unmodified when the backend isn't running.
+import { toast } from '../components/ui/Toast';
+
 const API_BASE = (import.meta as any).env?.VITE_API_BASE || 'http://localhost:4000/api/v1';
 const AUTH_TOKEN_KEY = 'bc_authToken';
+
+// --- Versionnage par collection (conflits multi-appareils) ---
+// Dernier instant où CE client a lu chaque collection depuis le serveur ;
+// envoyé comme `asOf` pour que le serveur détecte s'il a écrit une version
+// plus récente entre-temps (voir server/guards.ts applyWrite). Mis à jour
+// uniquement depuis les timestamps RENVOYÉS par le serveur (jamais l'horloge
+// locale) pour ne pas dépendre d'un éventuel décalage d'horloge client/serveur.
+const SYNCED_AT_KEY = 'bc_syncedAt';
+
+function getSyncedAt(name: string): string | undefined {
+  try {
+    return JSON.parse(localStorage.getItem(SYNCED_AT_KEY) ?? '{}')[name];
+  } catch {
+    return undefined;
+  }
+}
+
+function setSyncedAt(name: string, syncedAt: unknown): void {
+  if (typeof syncedAt !== 'string') return;
+  try {
+    const map = JSON.parse(localStorage.getItem(SYNCED_AT_KEY) ?? '{}');
+    map[name] = syncedAt;
+    localStorage.setItem(SYNCED_AT_KEY, JSON.stringify(map));
+  } catch {
+    // localStorage plein/indisponible — tant pis, prochain sync réessaiera sans asOf.
+  }
+}
+
+// Un item en conflit = un autre appareil l'a modifié entre-temps ; ce client
+// périmé n'écrase pas la version serveur (voir applyWrite). L'utilisateur doit
+// le savoir plutôt que de croire son écriture appliquée silencieusement.
+function reportConflicts(conflicts: unknown, context?: string): void {
+  if (!Array.isArray(conflicts) || conflicts.length === 0) return;
+  const where = context ? `${context} : ` : '';
+  toast.error(`${where}${conflicts.length} élément(s) non synchronisé(s) (modifié(s) ailleurs entre-temps)`);
+}
 
 export function getAuthToken(): string | null {
   return localStorage.getItem(AUTH_TOKEN_KEY);
@@ -14,12 +52,14 @@ export function clearAuthToken(): void {
 }
 
 export async function apiBootstrap(): Promise<Record<string, unknown> | null> {
+  // Lecture auth-gated côté serveur : sans token, le serveur répondrait 401 à
+  // coup sûr — inutile de faire l'aller-retour réseau (et le bruit console qui
+  // va avec). App.tsx re-bootstrap de toute façon après login (deps [loggedInMemberId]).
+  const token = getAuthToken();
+  if (!token) return null;
   try {
-    // Lecture auth-gated côté serveur : Bearer si connecté ; pré-login le 401
-    // résout null → fallback localStorage (App.tsx re-bootstrap après login).
-    const token = getAuthToken();
     const res = await fetch(`${API_BASE}/bootstrap`, {
-      headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+      headers: { Authorization: `Bearer ${token}` },
     });
     if (!res.ok) return null;
     void flushSyncQueue(); // serveur joignable → rejouer les écritures en file
@@ -36,13 +76,13 @@ export async function apiBootstrap(): Promise<Record<string, unknown> | null> {
 // réussi et au retour du réseau (event 'online').
 const SYNC_QUEUE_KEY = 'bc_syncQueue';
 
-type QueuedOp = { opId: string; name: string; value: unknown };
+type QueuedOp = { opId: string; name: string; value: unknown; asOf?: string };
 
 function enqueueSync(name: string, value: unknown): void {
   try {
     const queue: QueuedOp[] = JSON.parse(localStorage.getItem(SYNC_QUEUE_KEY) ?? '[]');
     const next = queue.filter((op) => op.name !== name);
-    next.push({ opId: crypto.randomUUID(), name, value });
+    next.push({ opId: crypto.randomUUID(), name, value, asOf: getSyncedAt(name) });
     localStorage.setItem(SYNC_QUEUE_KEY, JSON.stringify(next));
   } catch {
     // localStorage plein/indisponible — tant pis, LWW au prochain save.
@@ -66,10 +106,12 @@ export async function flushSyncQueue(): Promise<void> {
       body: JSON.stringify({ ops: queue }),
     });
     if (!res.ok) return;
-    const { applied, skipped } = await res.json();
+    const { applied, skipped, syncedAt, conflicts } = await res.json();
     const done = new Set([...(applied ?? []), ...(skipped ?? [])]);
     const rest = queue.filter((op) => !done.has(op.opId));
     localStorage.setItem(SYNC_QUEUE_KEY, JSON.stringify(rest));
+    for (const op of queue) if (done.has(op.opId)) setSyncedAt(op.name, syncedAt);
+    reportConflicts(conflicts); // rattrapage : op multi-collections, pas de contexte unique
   } catch {
     // toujours hors-ligne — on réessaiera au prochain flush.
   }
@@ -86,7 +128,9 @@ export async function apiPut(name: string, value: unknown): Promise<boolean> {
   const token = getAuthToken();
   if (!token) return false;
   try {
-    const res = await fetch(`${API_BASE}/${name}`, {
+    const asOf = getSyncedAt(name);
+    const qs = asOf ? `?asOf=${encodeURIComponent(asOf)}` : '';
+    const res = await fetch(`${API_BASE}/${name}${qs}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
       body: JSON.stringify(value),
@@ -95,6 +139,11 @@ export async function apiPut(name: string, value: unknown): Promise<boolean> {
     // 400/403 (rejet permanent : requête invalide ou refus RBAC) NE sont PAS rejoués — les
     // mettre en file les ferait boucler à chaque flush (B5, sans le poison-pill de la file).
     if (!res.ok && (res.status === 401 || res.status >= 500)) enqueueSync(name, value);
+    if (res.ok) {
+      const data = await res.json().catch(() => ({}));
+      setSyncedAt(name, data.syncedAt);
+      reportConflicts(data.conflicts, name);
+    }
     return res.ok;
   } catch {
     enqueueSync(name, value);

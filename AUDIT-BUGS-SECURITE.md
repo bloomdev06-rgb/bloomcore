@@ -208,3 +208,34 @@ _Vérifiés sains :_ ordre des hooks Dashboard OK · tuile « À traiter » câb
 **Durcissement (post-lancement) :** S5–S9, B5–B8, D5–D6.
 
 **Documentation :** réaligner KPIS.md sur le code (membres actifs 37j, bus ≥2 semaines, moisson splittée).
+
+---
+
+## Revue 2026-07-11 — lot Bloom Bus + profils de test
+
+_Méthode : 3 audits parallèles (sécu serveur, bugs frontend, non-régression) + vérification empirique HTTP live de chaque finding critique + smoke Playwright des 17 vues._
+
+### ✅ Corrigés & vérifiés
+
+- **[CRITIQUE serveur] Fuite de scope Capitaine de Bus.** `server/rbac.ts` mappait le rôle `'Capitaine de Bus'` vers la chaîne `'Capitaine'`, non reconnue par `inMemberScope` (`src/data/scope.ts:38`) → fail-open `return true` (scope.ts:62). Un Capitaine authentifié **lisait/écrivait TOUS les membres** de l'église (re-ouverture de S2/S3). Fix : `['Capitaine de Bus', 'Capitaine de Bus']`. Vérifié live : Capitaine 33→5 membres (son bus), PUT hors-scope → 403.
+- **[HAUTE serveur] Comptes admin de test seedés en prod.** `adm_mem_test_1` (Super Admin) / `adm_mem_test_2` (Admin) + 18 `TEST_PROFILES` étaient seedés inconditionnellement (`ensureSeeded`) → backdoor Super Admin si `SEED_DEMO_PASSWORD` défini (staging) ou `npm start` sans `NODE_ENV`. Fix : `SEED_TEST_PROFILES` gate (`server/seed.ts`) — exclus hors dev/`SEED_DEMO_PASSWORD`.
+- **[Défense en profondeur serveur] Garde champ-niveau sur auto-édition.** Aucun contrôle n'empêchait un opérateur non full-scope de modifier les champs privilégiés de SA fiche ; `resolveRoles` lisant `member.departments`, une auto-écriture `departments:{x:'Super Admin'}` escaladerait — bloquée aujourd'hui uniquement par effet de bord du guard `removedItems`. Ajout d'un rejet explicite (`server/rbac.ts`, case members) sur `departments/level/pastoralCursus/bloomBusId/deptAttachmentStatus/testRole` en self-edit. `testRole` reste UI-only (jamais lu serveur). Vérifié : Coach self-escalade → 403.
+- **[Correctness serveur] Scoping sur bus figés.** `rbac.ts` scopait Zone/Commune avec `INITIAL_BUS_LINES` (seed) au lieu de la collection live `bus_lines` → zones/communes périmées après tout ajout/déplacement de bus. Fix : `readCollection('bus_lines')` aux 2 sites.
+- **[HAUTE frontend] Corruption KPI `presenceCulte`.** `BloomBusView.tsx` remettait `presenceCulte: 1` à chaque rapport santé (le membre tombait au minimum). Fix : préserver `targetMember.healthKPIs?.presenceCulte || 3`.
+- **[HAUTE frontend] Contournement de validation Bloom Bus.** Les membres `deptAttachmentStatus:'pending'` apparaissaient aussi dans l'onglet Stagiaires → promotion Boss sans passer par « Réceptions à valider ». Fix : `deptStagiaires` exclut les `pending`.
+- **[MOYENNE frontend] `bloom_bus_reject`** remettait le statut à `undefined` (perte de traçabilité) → désormais `'rejected'`. **Popup de confirmation** validate/reject était **vide** → texte ajouté. **Préremplissage MemberFormModal** relancé par des deps instables (`departments`/`busLines`) écrasait la saisie → deps réduites à `[open]`. **`ROLE_HOME_DEPT`** primait sur l'affectation réelle (un Responsable de Louange gérait Prod & Tech) → affectation réelle d'abord.
+- **[BASSE frontend] Attribution d'audit** codée en dur « Affeny Grah/mem_1 » dans `handleUpdateMember`/`handleDeleteMember` → utilise `operator`.
+
+### ✅ Corrigés 2e passe (2026-07-11) — items précédemment ouverts
+
+- **[ARCHITECTURE] Écriture scoped ↔ PUT whole-array — RÉSOLU.** Merge scope-aware : `preservedIds(name, ctx)` (rbac.ts) dérive de `filterReadable` les ids hors de la portée de LECTURE de l'opérateur (symétrie lecture/écriture) ; `removedItems` les exclut (plus de 403) et `applyWrite(…, preserve)` (guards.ts) ne les tombstone plus. Full-scope → ensemble vide → LWW inchangé. Vérifié live : Capitaine enregistre un membre → **200 persisté**, total 33→34 sans perte ; auto-escalade toujours **403**. Test `rbac.check.ts` (S3) réécrit sur le nouveau modèle.
+- **[MOYENNE] Hiérarchie de rapports miroir serveur — RÉSOLU.** `assertCanWrite('reports')` applique `canFillReportFor` (miroir client) sur les rapports `rapport_bloom_bus_member`. Vérifié : Capitaine rapporte pour un membre de son bus → 200 ; hors hiérarchie → 403.
+- **Bugs frontend restants — CORRIGÉS** : anneau de complétude limité aux membres remplissables (`directReportsOf`) ; auto-rattachement au 1er bus exclu pour l'origine Bloom Bus ; affectations dept videables (plus de repli fantôme) ; re-soumission d'une semaine = upsert par id déterministe (plus de doublon) ; ids FormBuilder suffixés aléatoire ; KPIs bus (`busVisitesTotal`/`busPresenceCulteTotal`) filtrent sur `weekOf` ; déconnexion si le membre connecté n'est plus dans la liste serveur ; popup de confirmation validate/reject renseignée.
+
+### ⚠️ Laissés volontairement (décision produit / hors périmètre)
+
+- **[BASSE] `scope.ts:62` fail-open** conservé : non exploitable en écriture (tous les rôles `view_members` sont mappés, vérifié) ; le passer fail-closed changerait la visibilité membres des rôles ADN/Portier/GDC/Intégration → décision produit.
+- **Frontière de semaine en fuseau < UTC** (kpi.ts `new Date(r.date)` vs minuit local) : invisible à Abidjan (UTC+0) ; fix = parse local partagé, touche le cœur KPI → à faire si déploiement multi-fuseau.
+- **Culte « absent »** (pas d'option), tuiles de compteurs Intégration légèrement divergentes : cosmétique/feature.
+
+_État : `tsc` clean, `npm test` 7/7, `npm run build` OK, 17/17 vues sans erreur console. Scope vérifié live : Super Admin 33 · Resp. Zone 8 · Capitaine 5 · Coach 1 · Membre 1 ; aucun rapport confidentiel fuité ; enregistrement Bloom Bus persisté sans perte de données ; hiérarchie de rapports appliquée serveur._

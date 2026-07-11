@@ -57,8 +57,11 @@ db.exec(`
     subject TEXT NOT NULL,
     body TEXT NOT NULL,
     status TEXT NOT NULL DEFAULT 'simulated',
-    created_at TEXT NOT NULL
+    created_at TEXT NOT NULL,
+    sent_at TEXT,
+    error TEXT
   );
+  CREATE INDEX IF NOT EXISTS idx_outbox_status ON outbox(status);
 `);
 
 // Whole-array collections: the frontend always replaces the full array on

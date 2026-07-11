@@ -17,9 +17,10 @@ import {
   INITIAL_ACTIVITIES,
   INITIAL_SETTINGS,
   INITIAL_FORMS,
+  INITIAL_ADMINS,
 } from '../mockData';
 export { deriveTimeBasedNotifications } from './notificationRules';
-export { apiBootstrap, apiLogin, clearAuthToken } from './api';
+export { apiBootstrap, apiLogin, clearAuthToken, apiPut } from './api';
 export { canView, hasCapability } from './permissions';
 import { apiPut } from './api';
 
@@ -29,6 +30,7 @@ import { apiPut } from './api';
 const SYNCED_NAMES = new Set([
   'members', 'events', 'reports', 'audits', 'notifications', 'permissions', 'settings', 'forms',
   'delegations', 'ministries', 'departments', 'certifications', 'admins', 'activities', 'integration_reports',
+  'projects', 'bus_lines',
 ]);
 
 // --- Persistence helpers (used by App for the mutable collections) ---
@@ -80,8 +82,9 @@ export const seeds = {
 // pendant qu'un autre édite voit la mise à jour à son prochain montage, suffisant.
 export const useMinistries = () => load('bc_ministries', INITIAL_MINISTRIES);
 export const useDepartments = () => load('bc_departments', INITIAL_DEPARTMENTS);
-// projects/bus-lines : désormais éditables (ProjectsView / BloomBusView) → persistés en
-// localStorage pour survivre au changement d'onglet (B4). Hors sync serveur pour l'instant.
+// projects/bus-lines : éditables (ProjectsView / BloomBusView), persistés en localStorage
+// ET synchronisés serveur (SYNCED_NAMES) → survivent au logout/purge et au multi-appareil.
 export const useProjects = () => load('bc_projects', INITIAL_PROJECTS);
 export const useBusLines = () => load('bc_bus_lines', INITIAL_BUS_LINES);
+export const useAdmins = () => load('bc_admins', INITIAL_ADMINS);
 export const activitiesSeed = INITIAL_ACTIVITIES;

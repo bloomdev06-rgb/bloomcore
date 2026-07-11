@@ -2,7 +2,7 @@
 import assert from 'node:assert';
 import {
   periodRange, levelToPercent, dominantHealthLevel, isRed, busMobilisationRate,
-  moissonTotal, moissonBySource, busVisitesTotal, activeBusIds, activeMemberIds, Period,
+  moissonTotal, moissonBySource, busVisitesTotal, busPresenceCulteTotal, busActivitesTotal, activeBusIds, activeMemberIds, Period,
   pendingFollowUps, periodHealthLevels,
 } from './kpi';
 import { Member, Report } from '../types';
@@ -13,11 +13,11 @@ assert.equal(levelToPercent(3), 50);
 assert.equal(levelToPercent(5), 100);
 assert.equal(levelToPercent(9), 100);
 
-// periodRange: week window is 7 days back from now
-const now = new Date('2026-06-30T12:00:00Z');
+// periodRange: 'week' is the calendar week (Monday->now) containing `now`, not a rolling 7 days
+const now = new Date(2026, 5, 30, 12); // mardi 30/6/2026
 const wk = periodRange('week', now);
 assert.equal(wk.to.getTime(), now.getTime());
-assert.equal((now.getTime() - wk.from.getTime()) / 86_400_000, 7);
+assert.equal(wk.from.getTime(), new Date(2026, 5, 29).getTime()); // lundi 29/6
 assert.equal((periodRange('custom' as Period, now)).from.getTime(), 0);
 
 // dominantHealthLevel: returns the most common level on an axis
@@ -26,7 +26,7 @@ assert.equal(dominantHealthLevel([mk(4), mk(4), mk(2)], 'spirituel'), 4);
 assert.equal(dominantHealthLevel([], 'spirituel'), 0);
 
 // isRed: true only past the 7-day threshold, false when the date field is missing (no crash)
-const nowRed = new Date('2026-06-30T12:00:00Z');
+const nowRed = new Date(2026, 5, 30, 12); // mardi 30/6/2026, en heure locale (semaine calendaire = lundi 29/6)
 const mkMember = (over: Partial<Member> = {}): Member => ({
   integrationState: 'En attente',
   integrationDateRegistered: '2026-06-20',
@@ -53,13 +53,31 @@ assert.equal(busMobilisationRate(busMembers, busReports, ['bus_1'], 'week', nowR
 assert.equal(busMobilisationRate([], busReports, ['bus_1'], 'week', nowRed), null);
 assert.equal(busMobilisationRate(busMembers, [], ['bus_1'], 'week', nowRed), null);
 
-// busVisitesTotal: counts distinct visited member IDs for matching busIds within the period
-const visitReports: Report[] = [
-  { reportType: 'rapport_bloom_bus_life', date: '2026-06-29', content: { busId: 'bus_1', visitesRealisees: ['mem_a', 'mem_b'] } } as Report,
-  { reportType: 'rapport_bloom_bus_life', date: '2026-06-29', content: { busId: 'bus_2', visitesRealisees: ['mem_c', 'mem_a'] } } as Report,
+// busVisitesTotal / busPresenceCulteTotal: derived from rapport_bloom_bus_member (memberId
+// scoped to busIds via Member.bloomBusId), not from the activity report.
+const visitMembers: Member[] = [
+  { id: 'mem_a', bloomBusId: 'bus_1' } as Member,
+  { id: 'mem_b', bloomBusId: 'bus_1' } as Member,
+  { id: 'mem_c', bloomBusId: 'bus_2' } as Member,
 ];
-assert.equal(busVisitesTotal(visitReports, ['bus_1'], 'week', nowRed), 2);
-assert.equal(busVisitesTotal(visitReports, ['bus_1', 'bus_2'], 'week', nowRed), 3);
+const visitReports: Report[] = [
+  { reportType: 'rapport_bloom_bus_member', date: '2026-06-29', content: { memberId: 'mem_a', culte: '1er culte Bloom Church' } } as Report,
+  { reportType: 'rapport_bloom_bus_member', date: '2026-06-29', content: { memberId: 'mem_b' } } as Report, // pas de culte renseigné
+  { reportType: 'rapport_bloom_bus_member', date: '2026-06-29', content: { memberId: 'mem_c', culte: 'Culte Bloom Light' } } as Report,
+];
+assert.equal(busVisitesTotal(visitReports, visitMembers, ['bus_1'], 'week', nowRed), 2);
+assert.equal(busVisitesTotal(visitReports, visitMembers, ['bus_1', 'bus_2'], 'week', nowRed), 3);
+assert.equal(busPresenceCulteTotal(visitReports, visitMembers, ['bus_1'], 'week', nowRed), 1);
+assert.equal(busPresenceCulteTotal(visitReports, visitMembers, ['bus_1', 'bus_2'], 'week', nowRed), 2);
+
+// busActivitesTotal: un rapport_bloom_bus_life = une activité, compte de rapports par busIds/période
+const lifeReports: Report[] = [
+  { reportType: 'rapport_bloom_bus_life', date: '2026-06-29', content: { busId: 'bus_1' } } as Report,
+  { reportType: 'rapport_bloom_bus_life', date: '2026-06-29', content: { busId: 'bus_2' } } as Report,
+  { reportType: 'rapport_bloom_bus_life', date: '2026-06-01', content: { busId: 'bus_1' } } as Report, // outside period
+];
+assert.equal(busActivitesTotal(lifeReports, ['bus_1'], 'week', nowRed), 1);
+assert.equal(busActivitesTotal(lifeReports, ['bus_1', 'bus_2'], 'week', nowRed), 2);
 
 // activeBusIds: bus ids with rapport_bloom_bus_life on ≥2 distinct weeks in the period
 const weeklyBusReports: Report[] = [
@@ -75,7 +93,7 @@ assert.deepEqual([...activeBusIds(weeklyBusReports, 'month', new Date('2026-09-0
 const split = moissonBySource(
   [
     { reportType: 'rapport_adn', date: '2026-06-29', content: { nouveauxHommes: 2, nouveauxFemmes: 3 } } as Report,
-    { reportType: 'rapport_bloom_bus_life', date: '2026-06-29', content: { moissonNouveaux: 4 } } as Report,
+    { reportType: 'rapport_bloom_bus_life', date: '2026-06-29', content: { soulsWon: 4 } } as Report,
   ],
   'week',
   nowRed,
@@ -93,9 +111,9 @@ assert.deepEqual(pendingFollowUps(followReports).map((r) => r.id), ['r1', 'r3'])
 
 // periodHealthLevels: dominant per axis from the latest bus member report per member in window
 const healthReports: Report[] = [
-  { reportType: 'rapport_bloom_bus_member', date: '2026-06-28', content: { memberId: 'm1', sprVal: 2, socVal: 3, phyVal: 3, finVal: 1, culteIds: ['e1'] } } as Report,
-  { reportType: 'rapport_bloom_bus_member', date: '2026-06-29', content: { memberId: 'm1', sprVal: 4, socVal: 3, phyVal: 3, finVal: 1, culteIds: ['e1', 'e2'] } } as Report, // supersedes m1
-  { reportType: 'rapport_bloom_bus_member', date: '2026-06-29', content: { memberId: 'm2', sprVal: 4, socVal: 5, phyVal: 2, finVal: 1, culteIds: [] } } as Report,
+  { reportType: 'rapport_bloom_bus_member', date: '2026-06-28', content: { memberId: 'm1', sprVal: 2, socVal: 3, phyVal: 3, finVal: 1, culte: '1er culte Bloom Church' } } as Report,
+  { reportType: 'rapport_bloom_bus_member', date: '2026-06-29', content: { memberId: 'm1', sprVal: 4, socVal: 3, phyVal: 3, finVal: 1, culte: '2e culte Bloom Church' } } as Report, // supersedes m1
+  { reportType: 'rapport_bloom_bus_member', date: '2026-06-29', content: { memberId: 'm2', sprVal: 4, socVal: 5, phyVal: 2, finVal: 1, culte: null } } as Report,
 ];
 assert.equal(periodHealthLevels(healthReports, 'week', nowRed).spirituel, 4);
 assert.equal(periodHealthLevels([], 'week', nowRed).spirituel, 0);
@@ -111,7 +129,7 @@ assert.deepEqual([...activeMemberIds(
 // moissonTotal: sums ADN (H+F) and bus-life moissonNouveaux within the period
 const moissonReports: Report[] = [
   { reportType: 'rapport_adn', date: '2026-06-29', content: { nouveauxHommes: 2, nouveauxFemmes: 3 } } as Report,
-  { reportType: 'rapport_bloom_bus_life', date: '2026-06-29', content: { moissonNouveaux: 4 } } as Report,
+  { reportType: 'rapport_bloom_bus_life', date: '2026-06-29', content: { soulsWon: 4 } } as Report,
   { reportType: 'rapport_adn', date: '2026-01-01', content: { nouveauxHommes: 100 } } as Report, // out of window
 ];
 assert.equal(moissonTotal(moissonReports, 'week', nowRed), 9);
@@ -119,7 +137,7 @@ assert.equal(moissonTotal(moissonReports, 'week', nowRed), 9);
 // activeMemberIds: dedups presencesService across matching reports in period; departmentId scopes, omitted = global
 const deptReports: Report[] = [
   { reportType: 'rapport_service', departmentId: 'dept_x', date: '2026-06-29', content: { presencesService: ['mem_1', 'mem_2'] } } as Report,
-  { reportType: 'rapport_service', departmentId: 'dept_x', date: '2026-06-28', content: { presencesService: ['mem_2', 'mem_3'] } } as Report,
+  { reportType: 'rapport_service', departmentId: 'dept_x', date: '2026-06-29', content: { presencesService: ['mem_2', 'mem_3'] } } as Report, // même semaine calendaire (lundi 29/6) que le report précédent
   { reportType: 'rapport_service', departmentId: 'dept_y', date: '2026-06-29', content: { presencesService: ['mem_9'] } } as Report,
 ];
 assert.deepEqual([...activeMemberIds(deptReports, 'week', nowRed, 'dept_x')].sort(), ['mem_1', 'mem_2', 'mem_3']);

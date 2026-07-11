@@ -6,6 +6,10 @@ import { Member, Department, Ministry, BloomBusEntity, AuditLog, AppNotification
 // irrésolubles côté RBAC, retirés.
 export const INITIAL_ADMINS: AdminAccount[] = [
   { id: 'adm_mem_1', name: 'Affeny Grah', subtitle: 'Super Admin (Système)', role: 'Super Admin' },
+  // Profils de test — comptes admin réels adossés aux membres mem_test_1/2 (voir TEST_PROFILES)
+  // pour que les écritures admin côté serveur (permissions, settings) soient autorisées.
+  { id: 'adm_mem_test_1', name: 'Test SuperAdmin', subtitle: 'Profil de test — Super Admin', role: 'Super Admin' },
+  { id: 'adm_mem_test_2', name: 'Test Admin', subtitle: 'Profil de test — Admin', role: 'Admin' },
 ];
 
 // P1.4 — labels generated for the plain text-only forms; the others list fields explicitly.
@@ -13,10 +17,53 @@ const genFields = (labels: string[]): Field[] =>
   labels.map((label, i) => ({ id: `f${i}`, label, type: 'text', required: i === 0 }));
 
 export const INITIAL_FORMS: FormDef[] = [
-  { id: 'fd_nouveau', name: 'Formulaire Nouveau', scope: 'ADN', version: 1, kind: 'form', fields: genFields(['Nom', 'Prénom', 'Téléphone', 'Genre', 'Oui à Jésus']) },
-  { id: 'fd_membre', name: 'Formulaire Membre', scope: 'Responsable', version: 2, kind: 'form', fields: genFields(['Nom', 'Prénom', 'Téléphone', 'Email', 'Date de naissance', 'Commune']) },
-  { id: 'fd_service', name: 'Rapport de service', scope: 'Standard', version: 1, kind: 'form', fields: genFields(['Serviteurs présents', 'Observation', 'Culte / Événement']) },
-  { id: 'fd_rsa', name: 'Rapport RSA', scope: 'Standard', version: 1, kind: 'form', fields: genFields(['Actions confiées', 'Statut', 'Observation']) },
+  { id: 'fd_nouveau', name: 'Formulaire Nouveau', scope: 'ADN', version: 2, kind: 'form', fields: [
+    { id: 'f0', label: 'Type de membre', type: 'choice', required: true },
+    { id: 'f1', label: "Date d'activité (culte)", type: 'date', required: true },
+    { id: 'f2', label: 'Type de culte', type: 'choice', required: false },
+    { id: 'f3', label: 'Prénom', type: 'text', required: true },
+    { id: 'f4', label: 'Nom', type: 'text', required: true },
+    { id: 'f5', label: 'Contact', type: 'text', required: true },
+    { id: 'f6', label: 'Genre', type: 'choice', required: false },
+    { id: 'f7', label: 'Date de naissance', type: 'date', required: false },
+    { id: 'f8', label: 'Commune / Quartier', type: 'choice', required: false },
+    { id: 'f9', label: 'Photo', type: 'text', required: true },
+    { id: 'f10', label: 'Comment nous a-t-il connu ?', type: 'choice', required: false },
+    { id: 'f11', label: 'Souhaites-tu être…', type: 'choice', required: false },
+    { id: 'f12', label: "Département d'intérêt", type: 'choice', required: false },
+  ] },
+  { id: 'fd_membre', name: 'Formulaire Membre', scope: 'Responsable', version: 5, kind: 'form', fields: [
+    { id: 'f20', label: 'Photo du membre', type: 'text', required: false },
+    { id: 'f0', label: 'Nom de famille', type: 'text', required: true },
+    { id: 'f1', label: 'Prénom(s)', type: 'text', required: true },
+    { id: 'f2', label: 'Téléphone unique', type: 'text', required: true },
+    { id: 'f3', label: 'Téléphone Parent/Proche', type: 'text', required: false },
+    { id: 'f4', label: 'Genre', type: 'choice', required: true },
+    { id: 'f5', label: 'Date de Naissance', type: 'date', required: true },
+    { id: 'f6', label: 'État Matrimonial', type: 'choice', required: false },
+    { id: 'f7', label: 'Email', type: 'text', required: false },
+    { id: 'f8', label: 'Profession', type: 'text', required: false },
+    { id: 'f9', label: 'Commune', type: 'choice', required: false },
+    { id: 'f10', label: 'Latitude', type: 'text', required: false },
+    { id: 'f11', label: 'Longitude', type: 'text', required: false },
+    { id: 'f12', label: 'Niveau Communautaire', type: 'choice', required: false },
+    { id: 'f13', label: 'Cursus Pastoral', type: 'choice', required: false },
+    { id: 'f14', label: "Branche d'affectation", type: 'choice', required: false },
+    { id: 'f15', label: 'Département', type: 'choice', required: false },
+    { id: 'f16', label: 'Fonction occupée', type: 'choice', required: false },
+    { id: 'f17', label: 'Baptême', type: 'choice', required: false },
+    { id: 'f18', label: 'Date de baptême', type: 'date', required: false },
+    { id: 'f19', label: 'Voie de baptême', type: 'choice', required: false },
+  ] },
+  { id: 'fd_service', name: 'Rapport de service', scope: 'Standard', version: 2, kind: 'form', fields: [
+    { id: 'f0', label: 'Évènement concerné', type: 'choice', required: true },
+    { id: 'f1', label: 'Serviteurs présents', type: 'checkbox', required: false },
+    { id: 'f2', label: 'Notes', type: 'text', required: false },
+  ] },
+  { id: 'fd_rsa', name: 'Rapport RSA', scope: 'Standard', version: 2, kind: 'form', fields: [
+    { id: 'f0', label: 'Actions confiées', type: 'text', required: false },
+    { id: 'f1', label: 'Notes', type: 'text', required: false },
+  ] },
   { id: 'fd_bus_sante', name: 'Rapport Bloom Bus (Santé)', scope: 'Capitaine / Leader', version: 1, kind: 'form', fields: [
     { id: 'f0', label: 'Vie spirituelle', type: 'scale', required: true },
     { id: 'f1', label: 'Vie sociale', type: 'scale', required: true },
@@ -76,7 +123,7 @@ export const INITIAL_MINISTRIES: Ministry[] = [
   { id: 'min_intimite', name: "Ministère de l'Intimité", description: 'MRES, Bloom Praise, Intercession, Sainte Cène' },
   { id: 'min_art', name: "Ministère de l'Art", description: 'Bloom Dancers, Bloom Cinema, Trap Church, Bloom Art' },
   { id: 'min_tech_scene', name: "Ministère de la Tech & Scène", description: 'Prod & Tech, Décoration, Traduction, Dirigeants' },
-  { id: 'min_retention', name: "Ministère de la Rétention", description: 'Resho Bloom, ADN, Social, Intégration, OJ' },
+  { id: 'min_retention', name: "Ministère de la Rétention", description: 'Resho Bloom, ADN, Social, Intégration, OJ', tuteurId: 'mem_1' },
   { id: 'min_expansion', name: "Ministère de l'Expansion", description: 'Team Media, Bloom Inter, Bloom Bus, Happy Club, Bloom Vie, La Wev' },
   { id: 'min_coordination', name: "Ministère de la Coordination", description: 'Ushers, GDC, Protocole, Dress Code' },
   { id: 'min_affermissement', name: "Ministère de l'Affermissement", description: 'Eden Zero, Académie, GEMS, Réunion des C&L, Bible Coffee, Baptême' },
@@ -145,6 +192,54 @@ export const INITIAL_BUS_LINES: BloomBusEntity[] = [
   { id: 'bus_coc_rivera', name: 'Cocody Riviera - Ligne 4', commune: 'Cocody', zone: 'Zone Est', centerLat: 5.3621, centerLng: -3.9542 },
   { id: 'bus_abo_gendarmerie', name: 'Abobo Gendarmerie - Ligne 5', commune: 'Abobo', zone: 'Zone Nord', centerLat: 5.4182, centerLng: -4.0194 },
   { id: 'bus_kou_sogefiha', name: 'Koumassi Sogefiha - Ligne 6', commune: 'Koumassi', zone: 'Zone Sud', centerLat: 5.2912, centerLng: -3.9312 }
+];
+
+// Profils de test — un compte de connexion réel par rôle (remplace le panneau « Simuler
+// profil » retiré). Connexion : le téléphone ci-dessous + mot de passe démo `bloom2026`.
+// `testRole` force le rôle UI ; les attributs réels (departments/level/pastoralCursus/
+// bloomBusId) donnent le contexte pour que le scope et les écrans dédiés fonctionnent.
+const testProfile = (n: number, testRole: string, firstName: string, extra: Partial<Member> = {}): Member => ({
+  id: `mem_test_${n}`,
+  lastName: 'Test',
+  firstName,
+  phone: `+22507000000${String(n).padStart(2, '0')}`,
+  email: `test.${firstName.toLowerCase()}@bloom.test`,
+  gender: n % 2 === 0 ? 'F' : 'H',
+  birthDate: '1995-01-01',
+  maritalStatus: 'Célibataire',
+  profession: 'Testeur',
+  branch: 'church',
+  level: 'Boss',
+  pastoralCursus: 'Aucun',
+  departments: {},
+  entryDate: '2024-01-01',
+  hasPassedToBossForm: true,
+  gps: { lat: 5.3854, lng: -3.9781, commune: 'Cocody' },
+  healthKPIs: { spirituel: 4, social: 4, financier: 4, physique: 4, presenceCulte: 4, presenceService: 4 },
+  baptismStatus: 'Baptisé',
+  testRole,
+  ...extra,
+});
+
+export const TEST_PROFILES: Member[] = [
+  testProfile(1, 'Super Admin', 'SuperAdmin'),
+  testProfile(2, 'Admin', 'Admin'),
+  testProfile(3, 'Pasteur Principal', 'PasteurPrincipal', { pastoralCursus: 'Pasteur Titulaire' }),
+  testProfile(4, 'Pasteur', 'Pasteur', { pastoralCursus: 'Pasteur Assistant' }),
+  testProfile(5, 'Ministre', 'Ministre'),
+  testProfile(6, 'Responsable', 'Responsable', { departments: { dept_louange: 'Responsable' } }),
+  testProfile(7, 'Adjoint', 'Adjoint', { departments: { dept_louange: 'Adjoint' } }),
+  testProfile(8, 'Coach', 'Coach', { level: 'Coach' }),
+  testProfile(9, 'Leader', 'Leader', { level: 'Leader' }),
+  testProfile(10, 'Capitaine de Bus', 'Capitaine', { departments: { dept_bloom_bus: 'Capitaine de Bus' }, bloomBusId: 'bus_yop_maroc' }),
+  testProfile(11, 'Responsable de Zone', 'Zone', { departments: { dept_bloom_bus: 'Responsable de Zone' }, bloomBusId: 'bus_coc_angre' }),
+  testProfile(12, 'Responsable de Commune', 'Commune', { departments: { dept_bloom_bus: 'Responsable de Commune' }, bloomBusId: 'bus_coc_angre' }),
+  testProfile(13, 'ADN', 'ADN', { departments: { dept_adn: 'Membre' } }),
+  testProfile(14, 'Portier', 'Portier', { departments: { dept_ushers: 'Membre' } }),
+  testProfile(15, 'GDC', 'GDC', { departments: { dept_gdc: 'Membre' } }),
+  testProfile(16, 'Intégration', 'Integration', { departments: { dept_integration: 'Membre' } }),
+  testProfile(17, 'Membre', 'Membre'),
+  testProfile(18, 'Nouveau', 'Nouveau', { level: 'Nouveau', hasPassedToBossForm: false }),
 ];
 
 export const INITIAL_MEMBERS: Member[] = [
@@ -381,7 +476,8 @@ export const INITIAL_MEMBERS: Member[] = [
     healthKPIs: { spirituel: 4, social: 5, financier: 4, physique: 3, presenceCulte: 5, presenceService: 5 },
     baptismStatus: 'Baptisé',
     baptismDate: '2024-01-10'
-  }
+  },
+  ...TEST_PROFILES,
 ];
 
 export const INITIAL_EVENTS: Event[] = [
@@ -569,20 +665,23 @@ export const INITIAL_SETTINGS: AppSettings = {
 const allow = (...roles: string[]) => Object.fromEntries(roles.map((r) => [r, true]));
 const STAFF = ['Super Admin', 'Admin', 'Pasteur Principal', 'Pasteur', 'Ministre'];
 const ALL_PROFILES = [
-  ...STAFF, 'Responsable', 'Adjoint', 'Coach', 'Leader', 'Capitaine',
+  ...STAFF, 'Responsable', 'Adjoint', 'Coach', 'Leader', 'Capitaine de Bus',
   'Responsable de Zone', 'Responsable de Commune', 'ADN', 'Portier', 'GDC',
   'Intégration', 'Membre', 'Nouveau',
 ];
 
 export const VIEW_PERMISSIONS: PermissionMatrix = {
   'view_dashboard': allow(...ALL_PROFILES),
-  'view_members': allow(...STAFF, 'Responsable', 'Adjoint', 'Coach', 'Leader', 'Capitaine', 'Responsable de Zone', 'Responsable de Commune'),
-  'view_ministeres': allow(...STAFF),
-  'view_departments': allow(...STAFF, 'Responsable', 'Adjoint', 'Coach', 'Leader', 'ADN', 'Portier', 'GDC', 'Intégration'),
+  'view_members': allow(...STAFF, 'Responsable', 'Adjoint', 'Coach', 'Leader', 'Capitaine de Bus', 'Responsable de Zone', 'Responsable de Commune'),
+  // Onglet visible pour les profils Responsable → Pasteur Principal (lecture de la liste +
+  // départements par ministère) ; le détail d'un ministère (clic sur une carte) reste
+  // restreint, cf. MinisteresView canViewDetails.
+  'view_ministeres': allow(...STAFF, 'Responsable', 'Adjoint'),
+  'view_departments': allow(...STAFF, 'Responsable', 'Adjoint', 'ADN', 'Portier', 'GDC', 'Intégration'),
   // D2 — aligné sur CAN_ACCESS_INTEGRATION (NouveauxView) : la Console Intégration est réservée
   // au département Intégration + la ligne pastorale. Coach/Leader/ADN/Portier/GDC ne doivent pas voir l'onglet.
   'view_integration': allow(...STAFF, 'Intégration'),
-  'view_bloombus': allow(...STAFF, 'Responsable', 'Adjoint', 'Coach', 'Capitaine', 'Responsable de Zone', 'Responsable de Commune', 'Membre', 'Nouveau'),
+  'view_bloombus': allow(...STAFF, 'Responsable', 'Adjoint', 'Coach', 'Capitaine de Bus', 'Responsable de Zone', 'Responsable de Commune', 'Membre', 'Nouveau'),
   'view_events': allow(...STAFF, 'Responsable', 'Adjoint', 'ADN', 'Portier', 'GDC'),
   // P4.2 (résiduel) : un équipier de projet peut être de n'importe quel profil
   // (Project.team n'est pas restreint par rôle) — ouvert à tous plutôt qu'une

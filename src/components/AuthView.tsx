@@ -41,7 +41,12 @@ export default function AuthView({ members, onLogin }: AuthViewProps) {
       setError('Identifiant ou mot de passe incorrect.');
       return;
     }
-    // Backend unreachable — fall back to the offline mock (any password passes).
+    // Backend injoignable. Le repli mock (n'importe quel mot de passe passe) n'est
+    // autorisé qu'en DEV — en prod on refuse plutôt que d'ouvrir une session non vérifiée.
+    if (!import.meta.env.DEV) {
+      setError('Service indisponible. Réessayez plus tard.');
+      return;
+    }
     const member = members.find(m => m.phone.replace(/\s/g, '') === phone.replace(/\s/g, '')
       || (m.email && m.email.toLowerCase() === phone.trim().toLowerCase()));
     if (!member) {

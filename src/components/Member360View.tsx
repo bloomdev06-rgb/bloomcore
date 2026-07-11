@@ -1,12 +1,14 @@
 import React, { useState, useRef } from 'react';
-import { Member, Branch, Report, AuditLog, PermissionMatrix, Delegation } from '../types';
+import { Member, Branch, Report, AuditLog, PermissionMatrix, Delegation, FormDef } from '../types';
 import { useDepartments, useBusLines, useProjects, load, hasCapability } from '../data';
 import { isRed } from '../data/kpi';
 import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend } from 'recharts';
 import { X, Edit, Phone, Mail, Compass, ShieldAlert, Activity, User, Briefcase, Calendar, MapPin, Database, ArrowRight, Clock, CheckCircle2, Coins } from 'lucide-react';
 import { HealthSmiley } from './ui/HealthSmiley';
 import { Avatar } from './ui/Avatar';
+import { PhotoLightbox } from './ui/PhotoLightbox';
 import { Badge } from './ui/Badge';
+import { Modal } from './ui/Modal';
 
 const COMMUNITY_LEVELS = ['Nouveau', 'Stagiaire', 'Boss', 'Leader', 'Coach'];
 const CURSUS_LEVELS = ['Aucun', 'Appelé', 'Serviteur', "Gagneur d'âme", 'Assistant Pasteur', 'Pasteur Assistant', 'Pasteur Titulaire'];
@@ -41,13 +43,21 @@ interface Member360ViewProps {
   audits?: AuditLog[];
   operator?: Member;
   permissionMatrix: PermissionMatrix;
+  forms?: FormDef[];
 }
 
-export default function Member360View({ member, onClose, onEdit, onUpdate, reports = [], onAddReport, simulatedRole, audits = [], operator, permissionMatrix }: Member360ViewProps) {
-  const canManage = ['Pasteur', 'Ministre', 'Responsable', 'Coach', 'Admin', 'Super Admin'].includes(simulatedRole);
+export default function Member360View({ member, onClose, onEdit, onUpdate, reports = [], onAddReport, simulatedRole, audits = [], operator, permissionMatrix, forms = [] }: Member360ViewProps) {
+  const canManage = ['Pasteur Principal', 'Pasteur', 'Ministre', 'Responsable', 'Coach', 'Admin', 'Super Admin'].includes(simulatedRole);
+  // P1.4 — dept_bapteme's step labels read live from FormBuilder's fd_bapteme FormDef when
+  // present, falling back to the static PARCOURS_STEPS catalog otherwise.
+  const baptemeForm = forms.find((f) => f.id === 'fd_bapteme');
+  const parcoursSteps: Record<string, string[]> = {
+    ...PARCOURS_STEPS,
+    ...(baptemeForm?.steps?.length ? { dept_bapteme: baptemeForm.steps.map((s) => s.label) } : {}),
+  };
   // Même liste que l'icône d'édition de MembersView (MembersView.tsx:572,784) — la fiche 360
   // ouvre le même formulaire d'édition complet et doit être gardée à l'identique.
-  const canEditProfile = ['Pasteur', 'Admin', 'Responsable', 'Super Admin'].includes(simulatedRole);
+  const canEditProfile = ['Pasteur Principal', 'Pasteur', 'Ministre', 'Admin', 'Responsable', 'Super Admin'].includes(simulatedRole);
   const fullName = `${member.firstName} ${member.lastName}`;
   const memberReports = reports.filter(r => r.content?.memberId === member.id && r.reportType === 'rapport_suivi_coach');
   // P4.9(a) — AuditLog.details est du texte libre qui embarque déjà le nom complet (cf. handleAddMember/handleUpdateMember dans App.tsx).
@@ -67,6 +77,7 @@ export default function Member360View({ member, onClose, onEdit, onUpdate, repor
       Financier: r.content.finVal,
       Physique: r.content.phyVal,
     }));
+  const [showPhotoLightbox, setShowPhotoLightbox] = useState(false);
   const [showCoachReportModal, setShowCoachReportModal] = useState(false);
   const [coachReportNotes, setCoachReportNotes] = useState('');
   const handleSaveCoachReport = (e: React.FormEvent) => {
@@ -140,12 +151,19 @@ export default function Member360View({ member, onClose, onEdit, onUpdate, repor
 
           <div className="flex flex-col md:flex-row justify-between items-start md:items-end gap-4">
             <div className="flex items-center gap-4">
-              <Avatar
-                src={member.avatarUrl}
-                initials={`${member.firstName[0]}${member.lastName[0]}`}
-                size="lg"
-                className="bg-bc-green text-white font-black shadow-sm"
-              />
+              <button
+                type="button"
+                onClick={() => member.avatarUrl && setShowPhotoLightbox(true)}
+                className={member.avatarUrl ? 'cursor-zoom-in active-scale' : 'cursor-default'}
+                aria-label="Agrandir la photo"
+              >
+                <Avatar
+                  src={member.avatarUrl}
+                  initials={`${member.firstName[0]}${member.lastName[0]}`}
+                  size="lg"
+                  className="bg-bc-green text-white font-black shadow-sm"
+                />
+              </button>
               <div>
                 <h2 className="text-2xl font-ui font-extrabold text-bc-text">
                   {member.firstName} {member.lastName}
@@ -414,8 +432,8 @@ export default function Member360View({ member, onClose, onEdit, onUpdate, repor
                     <div className="bg-white p-6 rounded-2xl border border-bc-border shadow-sm">
                       <h4 className="font-ui font-bold text-bc-text mb-4">Parcours à étapes — {parcoursDept.name}</h4>
                       {member.currentStepId ? (
-                        PARCOURS_STEPS[parcoursDept.id] ? (
-                          <Stepper steps={PARCOURS_STEPS[parcoursDept.id]} current={member.currentStepId} />
+                        parcoursSteps[parcoursDept.id] ? (
+                          <Stepper steps={parcoursSteps[parcoursDept.id]} current={member.currentStepId} />
                         ) : (
                           <p className="text-xs text-bc-text-secondary">Étape actuelle : <span className="font-bold text-bc-text">{member.currentStepId}</span></p>
                         )
@@ -618,12 +636,12 @@ export default function Member360View({ member, onClose, onEdit, onUpdate, repor
       </div>
 
       {showCoachReportModal && (
-        <div className="fixed inset-0 bg-bc-text/30 backdrop-blur-sm z-[60] flex items-center justify-center p-4" onClick={() => setShowCoachReportModal(false)}>
-          <div className="bg-white rounded-[2rem] p-6 w-full max-w-lg shadow-xl" onClick={(e) => e.stopPropagation()}>
-            <div className="flex justify-between items-center mb-4">
-              <h3 className="font-ui font-bold text-bc-text">Rapport de suivi — {member.firstName} {member.lastName}</h3>
-              <button onClick={() => setShowCoachReportModal(false)} className="text-bc-text-secondary hover:text-bc-text active-scale"><X size={18} /></button>
-            </div>
+        <Modal
+          open={showCoachReportModal}
+          onClose={() => setShowCoachReportModal(false)}
+          title={`Rapport de suivi — ${member.firstName} ${member.lastName}`}
+          maxWidth="max-w-lg"
+        >
             <form onSubmit={handleSaveCoachReport} className="space-y-4">
               <div>
                 <label className="text-xs font-bold text-bc-text-secondary">Notes de suivi</label>
@@ -639,8 +657,15 @@ export default function Member360View({ member, onClose, onEdit, onUpdate, repor
                 Soumettre le rapport
               </button>
             </form>
-          </div>
-        </div>
+        </Modal>
+      )}
+
+      {showPhotoLightbox && member.avatarUrl && (
+        <PhotoLightbox
+          src={member.avatarUrl}
+          alt={`${member.firstName} ${member.lastName}`}
+          onClose={() => setShowPhotoLightbox(false)}
+        />
       )}
     </div>
   );

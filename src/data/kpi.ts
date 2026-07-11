@@ -1,5 +1,6 @@
 // Pure KPI/period helpers reused across dashboards (Accueil, Ministères, Bloom Bus…).
 import { Member, Project, Report } from '../types';
+import { mondayOf, weekId } from './week';
 
 export type Period = 'week' | 'month' | 'quarter' | 'year' | 'custom';
 // Une période nommée, ou un range explicite (option "Personnalisé" du sélecteur).
@@ -8,8 +9,7 @@ export type PeriodInput = Period | { from: Date; to: Date };
 // Rolling windows back from `now` — matches the spec's "≤ 1 mois" style thresholds.
 // ponytail: rolling days, not calendar boundaries. Switch to start-of-month etc.
 // if the commanditaire asks for calendar periods.
-const WINDOW_DAYS: Record<Exclude<Period, 'custom'>, number> = {
-  week: 7,
+const WINDOW_DAYS: Record<Exclude<Period, 'custom' | 'week'>, number> = {
   month: 30,
   quarter: 90,
   year: 365,
@@ -18,6 +18,8 @@ const WINDOW_DAYS: Record<Exclude<Period, 'custom'>, number> = {
 export function periodRange(period: PeriodInput, now: Date = new Date()): { from: Date; to: Date } {
   if (typeof period === 'object') return period;
   if (period === 'custom') return { from: new Date(0), to: now };
+  // 'week' = semaine calendaire lundi->dimanche en cours (pas glissant) — cf. src/data/week.ts.
+  if (period === 'week') return { from: mondayOf(now), to: now };
   const from = new Date(now);
   from.setDate(from.getDate() - WINDOW_DAYS[period]);
   return { from, to: now };
@@ -102,53 +104,89 @@ export function busMobilisationRate(
 // KPIS.md §5/§4 — moisson (Bloom Bus + ADN), Σ nouveaux gagnés sur la période.
 // busIds : scope Bloom Bus à un sous-ensemble de bus (zone/commune/bus). Sans busIds, agrège tout (vue globale/ministère) ;
 // les rapports ADN n'ont pas d'attribution bus, donc ils ne comptent que dans l'agrégat global.
-export function moissonTotal(reports: Report[], period: Period, now: Date = new Date(), busIds?: string[]): number {
+export function moissonTotal(reports: Report[], period: PeriodInput, now: Date = new Date(), busIds?: string[]): number {
   const { from } = periodRange(period, now);
   let total = 0;
   for (const r of reports) {
     if (new Date(r.date) < from) continue;
     if (busIds) {
       if (r.reportType === 'rapport_bloom_bus_life' && busIds.includes(r.content?.busId)) {
-        total += Number(r.content?.moissonNouveaux ?? 0);
+        total += Number(r.content?.soulsWon ?? 0);
       }
       continue;
     }
     if (r.reportType === 'rapport_adn') {
       total += Number(r.content?.nouveauxHommes ?? 0) + Number(r.content?.nouveauxFemmes ?? 0);
     } else if (r.reportType === 'rapport_bloom_bus_life') {
-      total += Number(r.content?.moissonNouveaux ?? 0);
+      total += Number(r.content?.soulsWon ?? 0);
     }
   }
   return total;
 }
 
-// KPIS.md §5 — visite : nombre de membres visités distincts (P2.8 — visitesRealisees est
-// désormais la liste réelle des IDs de membres visités, plus un simple compte).
-export function busVisitesTotal(reports: Report[], busIds: string[], period: Period, now: Date = new Date()): number {
-  const { from } = periodRange(period, now);
+// KPIS.md §5 — visite : nombre de membres rattachés à busIds distincts ayant un
+// rapport_bloom_bus_member (contact individuel réalisé, par eux-mêmes ou leur capitaine) sur
+// la période — le rapport d'activité n'a plus de champ "visites", dérivé des rapports membre.
+export function busVisitesTotal(reports: Report[], members: Member[], busIds: string[], period: PeriodInput, now: Date = new Date()): number {
+  const { from, to } = periodRange(period, now);
+  const busMemberIds = new Set(members.filter((m) => m.bloomBusId && busIds.includes(m.bloomBusId)).map((m) => m.id));
   const visited = new Set<string>();
   for (const r of reports) {
-    if (r.reportType !== 'rapport_bloom_bus_life') continue;
-    if (!busIds.includes(r.content?.busId)) continue;
-    if (new Date(r.date) < from) continue;
-    const ids = r.content?.visitesRealisees;
-    if (Array.isArray(ids)) ids.forEach((id: string) => visited.add(id));
+    if (r.reportType !== 'rapport_bloom_bus_member') continue;
+    const memberId = r.content?.memberId;
+    if (!memberId || !busMemberIds.has(memberId)) continue;
+    // Rattacher le rapport à SA semaine visée (weekOf), pas à sa date de saisie : un rapport
+    // S-2 saisi cette semaine ne doit pas compter dans « Cette Semaine ».
+    const d = new Date(r.weekOf ?? weekId(r.date));
+    if (d < from || d > to) continue;
+    visited.add(memberId);
   }
   return visited.size;
 }
 
+// KPIS.md §5 — présence aux cultes du dimanche : nombre de membres rattachés à busIds ayant
+// renseigné content.culte dans leur rapport_bloom_bus_member sur la période — le rapport
+// d'activité n'a plus de champ "présences culte" dédié, dérivé des rapports membre.
+export function busPresenceCulteTotal(reports: Report[], members: Member[], busIds: string[], period: PeriodInput, now: Date = new Date()): number {
+  const { from, to } = periodRange(period, now);
+  const busMemberIds = new Set(members.filter((m) => m.bloomBusId && busIds.includes(m.bloomBusId)).map((m) => m.id));
+  let count = 0;
+  for (const r of reports) {
+    if (r.reportType !== 'rapport_bloom_bus_member') continue;
+    const memberId = r.content?.memberId;
+    if (!memberId || !busMemberIds.has(memberId) || !r.content?.culte) continue;
+    // Semaine visée (weekOf), pas date de saisie — cohérent avec busVisitesTotal.
+    const d = new Date(r.weekOf ?? weekId(r.date));
+    if (d < from || d > to) continue;
+    count++;
+  }
+  return count;
+}
+
+// KPIS.md §5 — activités organisées par le bus sur la période : un rapport_bloom_bus_life =
+// une activité (plus de compteur agrégé côté formulaire depuis la restructuration §5).
+export function busActivitesTotal(reports: Report[], busIds: string[], period: PeriodInput, now: Date = new Date()): number {
+  const { from, to } = periodRange(period, now);
+  return reports.filter((r) => {
+    if (r.reportType !== 'rapport_bloom_bus_life') return false;
+    if (!busIds.includes(r.content?.busId)) return false;
+    const d = new Date(r.date);
+    return d >= from && d <= to;
+  }).length;
+}
+
 // Accueil — Bloom Bus actifs : bus ayant envoyé un rapport_bloom_bus_life sur ≥ 2 semaines
-// distinctes de la période. ponytail: semaine = bucket epoch de 7 jours, pas ISO calendaire.
+// calendaires distinctes de la période.
 export function activeBusIds(reports: Report[], period: PeriodInput, now: Date = new Date()): Set<string> {
   const { from, to } = periodRange(period, now);
-  const weeksByBus = new Map<string, Set<number>>();
+  const weeksByBus = new Map<string, Set<string>>();
   for (const r of reports) {
     if (r.reportType !== 'rapport_bloom_bus_life') continue;
     const d = new Date(r.date);
     if (d < from || d > to) continue;
     const busId = r.content?.busId;
     if (!busId) continue;
-    const week = Math.floor(d.getTime() / (7 * 24 * 60 * 60 * 1000));
+    const week = r.weekOf ?? weekId(d);
     if (!weeksByBus.has(busId)) weeksByBus.set(busId, new Set());
     weeksByBus.get(busId)!.add(week);
   }
@@ -162,20 +200,43 @@ export function activeBusIds(reports: Report[], period: PeriodInput, now: Date =
 // ponytail: reste vide tant qu'aucun rapport n'est déposé pour ce scope — donnée réelle manquante, pas un bug
 // (voir AUDIT-FRONTEND P1.3). rapport_activite n'a pas encore de constructeur de formulaire (P2, non branché) ;
 // le check est déjà là pour ne rien casser une fois ce type produit avec le même content.presencesService.
-// Dashboard sparklines — fenêtres hebdo glissantes, N dernières semaines.
+// Dashboard sparklines — N dernières semaines calendaires (lundi->dimanche), la plus
+// récente étant la semaine en cours contenant `now`.
 function weekWindows(weeks: number, now: Date): { week: string; from: number; to: number }[] {
+  const currentMonday = mondayOf(now);
   const wins: { week: string; from: number; to: number }[] = [];
   for (let i = weeks - 1; i >= 0; i--) {
-    const to = new Date(now);
-    to.setDate(to.getDate() - i * 7);
-    const from = new Date(to);
-    from.setDate(from.getDate() - 7);
-    wins.push({ week: to.toISOString().slice(0, 10), from: from.getTime(), to: to.getTime() });
+    const from = new Date(currentMonday);
+    from.setDate(from.getDate() - i * 7);
+    const to = new Date(from);
+    to.setDate(to.getDate() + 7);
+    wins.push({ week: weekId(from), from: from.getTime(), to: to.getTime() });
   }
   return wins;
 }
 
 // Nombre de baptêmes physiques par semaine.
+// Croissance & Participants par semaine (remplace les données dummy du dashboard) :
+// nouveaux = membres enregistrés dans la semaine ; participants = membres actifs (ont servi).
+export function weeklyGrowthSeries(
+  members: Member[],
+  reports: Report[],
+  weeks: number = 8,
+  now: Date = new Date(),
+): { name: string; nouveaux: number; participants: number }[] {
+  const active = weeklyActiveCounts(reports, weeks, now);
+  return weekWindows(weeks, now).map(({ week, from, to }, i) => ({
+    name: week,
+    nouveaux: members.filter((m) => {
+      const iso = m.integrationDateRegistered || m.entryDate;
+      if (!iso) return false;
+      const d = new Date(iso).getTime();
+      return d >= from && d < to;
+    }).length,
+    participants: active[i]?.count ?? 0,
+  }));
+}
+
 export function weeklyBaptismCounts(members: Member[], weeks: number = 8, now: Date = new Date()): { week: string; count: number }[] {
   return weekWindows(weeks, now).map(({ week, from, to }) => ({
     week,
@@ -212,7 +273,7 @@ export function weeklyMoissonCounts(reports: Report[], weeks: number = 8, now: D
       if (r.reportType === 'rapport_adn') {
         count += Number(r.content?.nouveauxHommes ?? 0) + Number(r.content?.nouveauxFemmes ?? 0);
       } else if (r.reportType === 'rapport_bloom_bus_life') {
-        count += Number(r.content?.moissonNouveaux ?? 0);
+        count += Number(r.content?.soulsWon ?? 0);
       }
     }
     return { week, count };
@@ -238,6 +299,34 @@ export function activeMemberIds(
   return ids;
 }
 
+// Accueil — OJ « Oui à Jésus » sur la période, Σ rapport_adn.content.ojHommes/ojFemmes (ADN seulement,
+// le Bloom Bus ne trace pas ce flag — cf. PROFILS-INTERFACES.md §10).
+export function ojTotal(reports: Report[], period: PeriodInput, now: Date = new Date()): number {
+  const { from, to } = periodRange(period, now);
+  let total = 0;
+  for (const r of reports) {
+    if (r.reportType !== 'rapport_adn') continue;
+    const d = new Date(r.date);
+    if (d < from || d > to) continue;
+    total += Number(r.content?.ojHommes ?? 0) + Number(r.content?.ojFemmes ?? 0);
+  }
+  return total;
+}
+
+// OJ par semaine (même définition que ojTotal), pour le sparkline du dashboard.
+export function weeklyOjCounts(reports: Report[], weeks: number = 8, now: Date = new Date()): { week: string; count: number }[] {
+  return weekWindows(weeks, now).map(({ week, from, to }) => {
+    let count = 0;
+    for (const r of reports) {
+      if (r.reportType !== 'rapport_adn') continue;
+      const d = new Date(r.date).getTime();
+      if (d < from || d >= to) continue;
+      count += Number(r.content?.ojHommes ?? 0) + Number(r.content?.ojFemmes ?? 0);
+    }
+    return { week, count };
+  });
+}
+
 // Accueil — split moisson ADN vs Bloom Bus sur la période (mêmes règles que moissonTotal sans scope bus).
 export function moissonBySource(reports: Report[], period: PeriodInput, now: Date = new Date()): { adn: number; bus: number } {
   const { from, to } = periodRange(period, now);
@@ -249,7 +338,7 @@ export function moissonBySource(reports: Report[], period: PeriodInput, now: Dat
     if (r.reportType === 'rapport_adn') {
       adn += Number(r.content?.nouveauxHommes ?? 0) + Number(r.content?.nouveauxFemmes ?? 0);
     } else if (r.reportType === 'rapport_bloom_bus_life') {
-      bus += Number(r.content?.moissonNouveaux ?? 0);
+      bus += Number(r.content?.soulsWon ?? 0);
     }
   }
   return { adn, bus };
@@ -291,9 +380,7 @@ export function periodHealthLevels(
     social: axis('socVal'),
     physique: axis('phyVal'),
     financier: axis('finVal'),
-    presenceCulte: dominantLevel(
-      rows.map((r) => Math.min(5, Array.isArray(r.content?.culteIds) ? r.content.culteIds.length : 0)),
-    ),
+    presenceCulte: dominantLevel(rows.map((r) => (r.content?.culte ? 1 : 0))),
   };
 }
 

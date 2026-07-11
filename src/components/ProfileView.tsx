@@ -6,6 +6,8 @@ import { ThemeToggle } from './ui/theme-toggle';
 import { Phone, Mail, Briefcase, Calendar, MapPin, Droplet, ArrowRight, LogOut, Compass, Award, Pencil, Check, X, Smartphone, MessageSquare, Sun, Shield, KeyRound, Monitor, Trash2 } from 'lucide-react';
 import { HealthSmiley } from './ui/HealthSmiley';
 import { Avatar } from './ui/Avatar';
+import { Modal } from './ui/Modal';
+import { ConfirmDialog } from './ui/ConfirmDialog';
 
 // P4.10 — mode Plein Soleil : même mécanisme que ThemeToggle (classe + localStorage),
 // dupliqué en plus simple ici faute de 2e usage ailleurs. Effets CSS réels : P5.2.
@@ -32,11 +34,14 @@ function PleinSoleilToggle() {
   );
 }
 
-// P4.10 — sessions factices, purement démonstratives (pas de vraie gestion de session sans backend).
-const MOCK_SESSIONS = [
-  { id: 's1', device: 'iPhone 14 — Safari', location: 'Abidjan, CI', current: true },
-  { id: 's2', device: 'Chrome — Windows', location: 'Abidjan, CI', current: false },
-];
+// Session actuelle réelle dérivée du navigateur (plus de sessions factices). La liste
+// multi-appareils viendra d'un endpoint /auth/sessions quand la table `tokens` sera exposée.
+function currentSession() {
+  const ua = typeof navigator !== 'undefined' ? navigator.userAgent : '';
+  const browser = /Edg/.test(ua) ? 'Edge' : /Chrome/.test(ua) ? 'Chrome' : /Firefox/.test(ua) ? 'Firefox' : /Safari/.test(ua) ? 'Safari' : 'Navigateur';
+  const os = /iPhone|iPad|iOS/.test(ua) ? 'iOS' : /Android/.test(ua) ? 'Android' : /Mac/.test(ua) ? 'macOS' : /Windows/.test(ua) ? 'Windows' : 'Appareil';
+  return [{ id: 'current', device: `${os} — ${browser}`, location: 'Session actuelle', current: true }];
+}
 
 const DEFAULT_NOTIF_CHANNELS: NotifChannels = { app: true, email: true, sms: false, whatsapp: false };
 // ponytail: duplicated from SettingsView's CHANNELS list (icons differ from the shared
@@ -98,10 +103,11 @@ interface ProfileViewProps {
   operator: Member;
   simulatedRole: string;
   onUpdateMember: (m: Member) => void;
+  onDeleteMember?: (id: string) => void;
   onLogout?: () => void;
 }
 
-export default function ProfileView({ operator, simulatedRole, onUpdateMember, onLogout }: ProfileViewProps) {
+export default function ProfileView({ operator, simulatedRole, onUpdateMember, onDeleteMember, onLogout }: ProfileViewProps) {
   const departments = useDepartments();
   // E1 — si aucun membre chargé (serveur renvoyant members: []), operator est undefined :
   // early-return plutôt que de crasher sur operator.firstName / operator.departments.
@@ -156,7 +162,9 @@ export default function ProfileView({ operator, simulatedRole, onUpdateMember, o
   // Phase 5 — changement de mot de passe réel via POST /auth/change-password.
   // Backend injoignable → message hors-ligne, rien n'est modifié.
   const [showPasswordModal, setShowPasswordModal] = useState(false);
-  const [sessions, setSessions] = useState(MOCK_SESSIONS);
+  const [sessions, setSessions] = useState(currentSession);
+  const [revokingSessionId, setRevokingSessionId] = useState<string | null>(null);
+  const [confirmingSelfDelete, setConfirmingSelfDelete] = useState(false);
   const [pwDraft, setPwDraft] = useState({ current: '', next: '', confirm: '' });
   const submitPasswordChange = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -383,7 +391,7 @@ export default function ProfileView({ operator, simulatedRole, onUpdateMember, o
                       </div>
                     </div>
                     {!s.current && (
-                      <button onClick={() => setSessions(prev => prev.filter(x => x.id !== s.id))} className="p-1.5 text-bc-text-secondary hover:text-bc-danger shrink-0 active-scale" aria-label="Révoquer la session">
+                      <button onClick={() => setRevokingSessionId(s.id)} className="p-1.5 text-bc-text-secondary hover:text-bc-danger shrink-0 active-scale" aria-label="Révoquer la session">
                         <Trash2 size={14} />
                       </button>
                     )}
@@ -391,17 +399,20 @@ export default function ProfileView({ operator, simulatedRole, onUpdateMember, o
                 ))}
               </div>
             </div>
+            {onDeleteMember && (
+              <button
+                onClick={() => setConfirmingSelfDelete(true)}
+                className="w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-full text-xs font-bold text-bc-danger border border-bc-danger/30 hover:bg-bc-danger/10 transition-colors active-scale"
+              >
+                <Trash2 size={15} /> Supprimer mon profil
+              </button>
+            )}
           </div>
         </div>
       </div>
 
       {showPasswordModal && (
-        <div className="fixed inset-0 bg-bc-text/30 backdrop-blur-sm z-[60] flex items-center justify-center p-4" onClick={() => setShowPasswordModal(false)}>
-          <div className="bg-white rounded-[2rem] p-6 w-full max-w-md shadow-xl" onClick={e => e.stopPropagation()}>
-            <div className="flex justify-between items-center mb-4">
-              <h3 className="font-ui font-bold text-bc-text">Changer le mot de passe</h3>
-              <button onClick={() => setShowPasswordModal(false)} className="text-bc-text-secondary hover:text-bc-text active-scale"><X size={18} /></button>
-            </div>
+        <Modal open={showPasswordModal} onClose={() => setShowPasswordModal(false)} title="Changer le mot de passe" maxWidth="max-w-md">
             <form onSubmit={submitPasswordChange} className="space-y-3">
               <EditField label="Mot de passe actuel" type="password" value={pwDraft.current} onChange={v => setPwDraft(d => ({ ...d, current: v }))} />
               <EditField label="Nouveau mot de passe" type="password" value={pwDraft.next} onChange={v => setPwDraft(d => ({ ...d, next: v }))} />
@@ -410,9 +421,24 @@ export default function ProfileView({ operator, simulatedRole, onUpdateMember, o
                 Enregistrer
               </button>
             </form>
-          </div>
-        </div>
+        </Modal>
       )}
+      <ConfirmDialog
+        open={!!revokingSessionId}
+        onCancel={() => setRevokingSessionId(null)}
+        onConfirm={() => setSessions(prev => prev.filter(x => x.id !== revokingSessionId))}
+        title="Révoquer la session"
+        message="Cet appareil sera déconnecté immédiatement. Il devra se reconnecter pour accéder à nouveau au compte."
+        confirmLabel="Révoquer"
+      />
+      <ConfirmDialog
+        open={confirmingSelfDelete}
+        onCancel={() => setConfirmingSelfDelete(false)}
+        onConfirm={() => onDeleteMember?.(operator.id)}
+        title="Supprimer mon profil"
+        message="Votre profil sera définitivement supprimé et vous serez déconnecté(e). Cette action est irréversible."
+        confirmLabel="Supprimer mon profil"
+      />
     </div>
   );
 }

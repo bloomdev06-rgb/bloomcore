@@ -1,8 +1,8 @@
 // Vérifications RBAC — exécuter : npx tsx server/rbac.check.ts
 import assert from 'node:assert';
 process.env.BLOOMCORE_DB = ':memory:';
-const { resolveRoles, buildContext, assertCanWrite, filterReadable } = await import('./rbac.ts');
-const { applyWrite } = await import('./guards.ts');
+const { resolveRoles, buildContext, assertCanWrite, filterReadable, preservedIds } = await import('./rbac.ts');
+const { applyWrite, readCollection } = await import('./guards.ts');
 const { setKv } = await import('./db.ts');
 const { GuardError } = await import('./guards.ts');
 
@@ -66,13 +66,18 @@ assert.throws(
   (e: any) => e instanceof GuardError && e.status === 403,
   'édition hors scope département rejetée',
 );
-// S3 — suppression par omission : un tableau partiel qui omet des membres hors scope
-// les tombstoniserait → doit être rejeté (avant, ça passait silencieusement).
-assert.throws(
-  () => assertCanWrite('members', ctxResp, [allMembers[5]]),
-  (e: any) => e instanceof GuardError && e.status === 403,
-  'suppression par omission hors scope rejetée (S3)',
-);
+// S3 (modèle merge scope-aware) — un client scopé renvoie SON sous-ensemble ; les membres
+// hors-scope absents sont PRÉSERVÉS (ni 403, ni tombstone) au lieu d'être supprimés. Avant,
+// l'omission hors-scope provoquait un 403 sur tout le write, bloquant aussi les ajouts légitimes
+// (ex. l'enregistrement Bloom Bus par un Capitaine).
+const scopedSubset = [resp, allMembers[5]]; // m4 (self) + m6 (dans le scope de m4)
+assertCanWrite('members', ctxResp, scopedSubset); // ne lève plus
+const preserve = preservedIds('members', ctxResp);
+assert.ok(preserve.has('mem_sa') && preserve.has('m5'), 'membres hors-scope marqués à préserver');
+applyWrite('members', scopedSubset, undefined, preserve);
+const afterMerge = readCollection('members', true);
+assert.ok(afterMerge.find((m: any) => m.id === 'm5' && !m.deletedAt), 'm5 hors-scope préservé (pas tombstoné)');
+assert.ok(afterMerge.find((m: any) => m.id === 'mem_sa' && !m.deletedAt), 'mem_sa hors-scope préservé');
 
 // Délégation : simple membre avec délégation toId obtient la capacité.
 applyWrite('delegations', [{ id: 'del1', from: 'm4', to: 'M5', toId: 'm5', scope: 'd1', right: 'view_members' }]);
