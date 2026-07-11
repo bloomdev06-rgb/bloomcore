@@ -4,7 +4,11 @@
 // intent: the app must keep working unmodified when the backend isn't running.
 import { toast } from '../components/ui/Toast';
 
-const API_BASE = (import.meta as any).env?.VITE_API_BASE || 'http://localhost:4000/api/v1';
+// `VITE_API_BASE` explicite gagne toujours. Sinon : en dev, l'API tourne sur un port distinct
+// (4000) du serveur Vite (3000) → URL absolue ; en prod, le frontend est servi par l'API elle-même
+// (mono-service, Dockerfile) → chemin RELATIF same-origin, valable quel que soit l'hôte de déploiement.
+const API_BASE = (import.meta as any).env?.VITE_API_BASE
+  || ((import.meta as any).env?.DEV ? 'http://localhost:4000/api/v1' : '/api/v1');
 const AUTH_TOKEN_KEY = 'bc_authToken';
 
 // --- Versionnage par collection (conflits multi-appareils) ---

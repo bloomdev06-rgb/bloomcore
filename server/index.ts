@@ -63,6 +63,17 @@ function requireAuth(req: express.Request, res: express.Response, next: express.
 
 const isAdmin = (ctx: RbacContext) => ctx.roles.includes('Admin') || ctx.roles.includes('Super Admin');
 
+// Healthcheck public (orchestrateur / load balancer / Docker HEALTHCHECK) — pas d'auth.
+// Vérifie que le process répond ET que la base SQLite est joignable.
+app.get('/api/v1/health', (_req, res) => {
+  try {
+    readCollection('members');
+    res.json({ ok: true, ts: Date.now() });
+  } catch {
+    res.status(503).json({ ok: false });
+  }
+});
+
 // WORKFLOWS §84-85 — login par téléphone OU email (`identifier` ; `phone` reste
 // accepté en alias pour l'ancien client). Pas d'auto-inscription : un membre
 // sans ligne credentials n'est simplement pas encore activé.

@@ -1,0 +1,32 @@
+# Déploiement de test clé en main : `docker compose up -d --build`.
+# Renseigner au minimum AUTH_SECRET (et de préférence ACADEMY_WEBHOOK_SECRET, CORS_ORIGINS)
+# dans un fichier `.env` à côté de ce fichier — Compose le charge automatiquement.
+# Générer un secret : node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
+services:
+  bloomcore:
+    build: .
+    image: bloomcore:latest
+    ports:
+      - "${API_PORT:-4000}:4000"
+    environment:
+      NODE_ENV: production
+      API_PORT: 4000
+      # OBLIGATOIRE (min 16 car.) : le serveur refuse de démarrer sinon (S1).
+      AUTH_SECRET: ${AUTH_SECRET:?AUTH_SECRET requis - voir .env.example}
+      # Obligatoire si le webhook École Bloom est utilisé (POST /api/v1/webhooks/academy).
+      ACADEMY_WEBHOOK_SECRET: ${ACADEMY_WEBHOOK_SECRET:-}
+      # Origines autorisées (CORS). Vide = tout bloqué en prod ; mettre l'URL du frontend
+      # si servi depuis un autre domaine. Le déploiement mono-service (même origine) n'en a pas besoin.
+      CORS_ORIGINS: ${CORS_ORIGINS:-}
+      APP_URL: ${APP_URL:-http://localhost:4000}
+      # SQLite persisté sur le volume nommé ci-dessous (survit aux redéploiements).
+      BLOOMCORE_DB: /data/bloomcore.db
+      # Défini UNIQUEMENT pour un environnement de test/démo : seed des credentials + des
+      # 18 profils de test (mem_test_*). Laisser vide pour une vraie prod (activation requise).
+      SEED_DEMO_PASSWORD: ${SEED_DEMO_PASSWORD:-}
+    volumes:
+      - bloomcore-data:/data
+    restart: unless-stopped
+
+volumes:
+  bloomcore-data:
