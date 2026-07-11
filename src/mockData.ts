@@ -1,4 +1,89 @@
-import { Member, Department, Ministry, BloomBusEntity, AuditLog, AppNotification, Event, Report, PermissionMatrix, Project, Activity } from './types';
+import { Member, Department, Ministry, BloomBusEntity, AuditLog, AppNotification, Event, Report, PermissionMatrix, Project, Activity, AppSettings, FormDef, Field, AdminAccount } from './types';
+
+// Comptes Admin seed. Convention d'id `adm_<memberId>` (voir types.ts AdminAccount) :
+// le serveur en dérive les rôles Admin/Super Admin. Seul Affeny Grah (mem_1) existe
+// dans les membres seed — les anciens "Ps. Kacou"/"Yannick G." étaient fictifs et
+// irrésolubles côté RBAC, retirés.
+export const INITIAL_ADMINS: AdminAccount[] = [
+  { id: 'adm_mem_1', name: 'Affeny Grah', subtitle: 'Super Admin (Système)', role: 'Super Admin' },
+  // Profils de test — comptes admin réels adossés aux membres mem_test_1/2 (voir TEST_PROFILES)
+  // pour que les écritures admin côté serveur (permissions, settings) soient autorisées.
+  { id: 'adm_mem_test_1', name: 'Test SuperAdmin', subtitle: 'Profil de test — Super Admin', role: 'Super Admin' },
+  { id: 'adm_mem_test_2', name: 'Test Admin', subtitle: 'Profil de test — Admin', role: 'Admin' },
+];
+
+// P1.4 — labels generated for the plain text-only forms; the others list fields explicitly.
+const genFields = (labels: string[]): Field[] =>
+  labels.map((label, i) => ({ id: `f${i}`, label, type: 'text', required: i === 0 }));
+
+export const INITIAL_FORMS: FormDef[] = [
+  { id: 'fd_nouveau', name: 'Formulaire Nouveau', scope: 'ADN', version: 2, kind: 'form', fields: [
+    { id: 'f0', label: 'Type de membre', type: 'choice', required: true },
+    { id: 'f1', label: "Date d'activité (culte)", type: 'date', required: true },
+    { id: 'f2', label: 'Type de culte', type: 'choice', required: false },
+    { id: 'f3', label: 'Prénom', type: 'text', required: true },
+    { id: 'f4', label: 'Nom', type: 'text', required: true },
+    { id: 'f5', label: 'Contact', type: 'text', required: true },
+    { id: 'f6', label: 'Genre', type: 'choice', required: false },
+    { id: 'f7', label: 'Date de naissance', type: 'date', required: false },
+    { id: 'f8', label: 'Commune / Quartier', type: 'choice', required: false },
+    { id: 'f9', label: 'Photo', type: 'text', required: true },
+    { id: 'f10', label: 'Comment nous a-t-il connu ?', type: 'choice', required: false },
+    { id: 'f11', label: 'Souhaites-tu être…', type: 'choice', required: false },
+    { id: 'f12', label: "Département d'intérêt", type: 'choice', required: false },
+  ] },
+  { id: 'fd_membre', name: 'Formulaire Membre', scope: 'Responsable', version: 5, kind: 'form', fields: [
+    { id: 'f20', label: 'Photo du membre', type: 'text', required: false },
+    { id: 'f0', label: 'Nom de famille', type: 'text', required: true },
+    { id: 'f1', label: 'Prénom(s)', type: 'text', required: true },
+    { id: 'f2', label: 'Téléphone unique', type: 'text', required: true },
+    { id: 'f3', label: 'Téléphone Parent/Proche', type: 'text', required: false },
+    { id: 'f4', label: 'Genre', type: 'choice', required: true },
+    { id: 'f5', label: 'Date de Naissance', type: 'date', required: true },
+    { id: 'f6', label: 'État Matrimonial', type: 'choice', required: false },
+    { id: 'f7', label: 'Email', type: 'text', required: false },
+    { id: 'f8', label: 'Profession', type: 'text', required: false },
+    { id: 'f9', label: 'Commune', type: 'choice', required: false },
+    { id: 'f10', label: 'Latitude', type: 'text', required: false },
+    { id: 'f11', label: 'Longitude', type: 'text', required: false },
+    { id: 'f12', label: 'Niveau Communautaire', type: 'choice', required: false },
+    { id: 'f13', label: 'Cursus Pastoral', type: 'choice', required: false },
+    { id: 'f14', label: "Branche d'affectation", type: 'choice', required: false },
+    { id: 'f15', label: 'Département', type: 'choice', required: false },
+    { id: 'f16', label: 'Fonction occupée', type: 'choice', required: false },
+    { id: 'f17', label: 'Baptême', type: 'choice', required: false },
+    { id: 'f18', label: 'Date de baptême', type: 'date', required: false },
+    { id: 'f19', label: 'Voie de baptême', type: 'choice', required: false },
+  ] },
+  { id: 'fd_service', name: 'Rapport de service', scope: 'Standard', version: 2, kind: 'form', fields: [
+    { id: 'f0', label: 'Évènement concerné', type: 'choice', required: true },
+    { id: 'f1', label: 'Serviteurs présents', type: 'checkbox', required: false },
+    { id: 'f2', label: 'Notes', type: 'text', required: false },
+  ] },
+  { id: 'fd_rsa', name: 'Rapport RSA', scope: 'Standard', version: 2, kind: 'form', fields: [
+    { id: 'f0', label: 'Actions confiées', type: 'text', required: false },
+    { id: 'f1', label: 'Notes', type: 'text', required: false },
+  ] },
+  { id: 'fd_bus_sante', name: 'Rapport Bloom Bus (Santé)', scope: 'Capitaine / Leader', version: 1, kind: 'form', fields: [
+    { id: 'f0', label: 'Vie spirituelle', type: 'scale', required: true },
+    { id: 'f1', label: 'Vie sociale', type: 'scale', required: true },
+    { id: 'f2', label: 'Santé physique', type: 'scale', required: true },
+    { id: 'f3', label: 'Situation financière', type: 'scale', required: true },
+    { id: 'f4', label: 'Présence au culte', type: 'scale', required: true },
+  ] },
+  { id: 'fd_adn', name: 'Rapport ADN (Comptage)', scope: 'ADN', version: 1, kind: 'form', fields: [
+    { id: 'f0', label: 'Nouveaux (H)', type: 'number', required: true },
+    { id: 'f1', label: 'Nouveaux (F)', type: 'number', required: true },
+    { id: 'f2', label: 'OJ (H)', type: 'number', required: true },
+    { id: 'f3', label: 'OJ (F)', type: 'number', required: true },
+  ] },
+  { id: 'fd_bapteme', name: 'Parcours Baptême', scope: 'Parcours à étapes', version: 1, kind: 'steps', fields: [], steps: [
+    { id: 's0', label: 'Inscription au parcours', validator: 'Responsable' },
+    { id: 's1', label: 'Suivi des 3 cours', validator: 'Leader' },
+    { id: 's2', label: 'Entretien de baptême', validator: 'Responsable' },
+    { id: 's3', label: 'Baptême physique', validator: 'Pasteur' },
+  ] },
+];
 
 export const INITIAL_PROJECTS: Project[] = [
   {
@@ -38,7 +123,7 @@ export const INITIAL_MINISTRIES: Ministry[] = [
   { id: 'min_intimite', name: "Ministère de l'Intimité", description: 'MRES, Bloom Praise, Intercession, Sainte Cène' },
   { id: 'min_art', name: "Ministère de l'Art", description: 'Bloom Dancers, Bloom Cinema, Trap Church, Bloom Art' },
   { id: 'min_tech_scene', name: "Ministère de la Tech & Scène", description: 'Prod & Tech, Décoration, Traduction, Dirigeants' },
-  { id: 'min_retention', name: "Ministère de la Rétention", description: 'Resho Bloom, ADN, Social, Intégration, OJ' },
+  { id: 'min_retention', name: "Ministère de la Rétention", description: 'Resho Bloom, ADN, Social, Intégration, OJ', tuteurId: 'mem_1' },
   { id: 'min_expansion', name: "Ministère de l'Expansion", description: 'Team Media, Bloom Inter, Bloom Bus, Happy Club, Bloom Vie, La Wev' },
   { id: 'min_coordination', name: "Ministère de la Coordination", description: 'Ushers, GDC, Protocole, Dress Code' },
   { id: 'min_affermissement', name: "Ministère de l'Affermissement", description: 'Eden Zero, Académie, GEMS, Réunion des C&L, Bible Coffee, Baptême' },
@@ -65,32 +150,32 @@ export const INITIAL_DEPARTMENTS: Department[] = [
 
   // 4. Ministère de la Rétention
   { id: 'dept_resho_bloom', name: 'Resho Bloom', type: 'service', ministryId: 'min_retention', description: '' },
-  { id: 'dept_adn', name: 'ADN', type: 'spécial', ministryId: 'min_retention', description: 'Accueil des nouveaux' },
+  { id: 'dept_adn', name: 'ADN', type: 'spécial', specialFunction: 'adn', ministryId: 'min_retention', description: 'Accueil des nouveaux' },
   { id: 'dept_social', name: 'Social', type: 'service', ministryId: 'min_retention', description: '' },
-  { id: 'dept_integration', name: 'Intégration', type: 'spécial', ministryId: 'min_retention', description: 'Suivi des nouveaux' },
+  { id: 'dept_integration', name: 'Intégration', type: 'spécial', specialFunction: 'integration', ministryId: 'min_retention', description: 'Suivi des nouveaux' },
   { id: 'dept_oj', name: 'OJ', type: 'service', ministryId: 'min_retention', description: '' },
 
   // 5. Ministère de l'Expansion
   { id: 'dept_media', name: 'Team Media', type: 'service', ministryId: 'min_expansion', description: '' },
   { id: 'dept_inter', name: 'Bloom Inter', type: 'service', ministryId: 'min_expansion', description: '' },
-  { id: 'dept_bloom_bus', name: 'Bloom Bus', type: 'spécial', ministryId: 'min_expansion', description: 'Evangélisation territoriale' },
+  { id: 'dept_bloom_bus', name: 'Bloom Bus', type: 'spécial', specialFunction: 'bloom_bus', ministryId: 'min_expansion', description: 'Evangélisation territoriale' },
   { id: 'dept_happy_club', name: 'Happy Club', type: 'service', ministryId: 'min_expansion', description: '' },
   { id: 'dept_bloom_vie', name: 'Bloom Vie', type: 'service', ministryId: 'min_expansion', description: '' },
   { id: 'dept_la_wev', name: 'La Wev', type: 'service', ministryId: 'min_expansion', description: '' },
 
   // 6. Ministère de la Coordination
-  { id: 'dept_ushers', name: 'Ushers', type: 'spécial', ministryId: 'min_coordination', description: 'Placement et comptage' },
-  { id: 'dept_gdc', name: 'GDC', type: 'spécial', ministryId: 'min_coordination', description: 'Gestion des cultes' },
+  { id: 'dept_ushers', name: 'Ushers', type: 'spécial', specialFunction: 'portiers', ministryId: 'min_coordination', description: 'Placement et comptage' },
+  { id: 'dept_gdc', name: 'GDC', type: 'spécial', specialFunction: 'gestion_cultes', ministryId: 'min_coordination', description: 'Gestion des cultes' },
   { id: 'dept_protocole', name: 'Protocole', type: 'service', ministryId: 'min_coordination', description: '' },
   { id: 'dept_dress_code', name: 'Dress Code', type: 'service', ministryId: 'min_coordination', description: '' },
 
   // 7. Ministère de l'Affermissement
-  { id: 'dept_eden_zero', name: 'Eden Zero', type: 'spécial', ministryId: 'min_affermissement', description: 'Parcours étapes' },
+  { id: 'dept_eden_zero', name: 'Eden Zero', type: 'spécial', specialFunction: 'parcours_etapes', ministryId: 'min_affermissement', description: 'Parcours étapes' },
   { id: 'dept_academie', name: 'Académie', type: 'service', ministryId: 'min_affermissement', description: '' },
   { id: 'dept_gems', name: 'GEMS', type: 'service', ministryId: 'min_affermissement', description: '' },
   { id: 'dept_reunion_cl', name: 'Réunion des C&L', type: 'service', ministryId: 'min_affermissement', description: '' },
   { id: 'dept_bible_coffee', name: 'Bible Coffee', type: 'service', ministryId: 'min_affermissement', description: '' },
-  { id: 'dept_bapteme', name: 'Baptême', type: 'spécial', ministryId: 'min_affermissement', description: 'Parcours étapes' },
+  { id: 'dept_bapteme', name: 'Baptême', type: 'spécial', specialFunction: 'parcours_etapes', ministryId: 'min_affermissement', description: 'Parcours étapes' },
 ];
 
 export const INITIAL_ACTIVITIES: Activity[] = [
@@ -107,6 +192,54 @@ export const INITIAL_BUS_LINES: BloomBusEntity[] = [
   { id: 'bus_coc_rivera', name: 'Cocody Riviera - Ligne 4', commune: 'Cocody', zone: 'Zone Est', centerLat: 5.3621, centerLng: -3.9542 },
   { id: 'bus_abo_gendarmerie', name: 'Abobo Gendarmerie - Ligne 5', commune: 'Abobo', zone: 'Zone Nord', centerLat: 5.4182, centerLng: -4.0194 },
   { id: 'bus_kou_sogefiha', name: 'Koumassi Sogefiha - Ligne 6', commune: 'Koumassi', zone: 'Zone Sud', centerLat: 5.2912, centerLng: -3.9312 }
+];
+
+// Profils de test — un compte de connexion réel par rôle (remplace le panneau « Simuler
+// profil » retiré). Connexion : le téléphone ci-dessous + mot de passe démo `bloom2026`.
+// `testRole` force le rôle UI ; les attributs réels (departments/level/pastoralCursus/
+// bloomBusId) donnent le contexte pour que le scope et les écrans dédiés fonctionnent.
+const testProfile = (n: number, testRole: string, firstName: string, extra: Partial<Member> = {}): Member => ({
+  id: `mem_test_${n}`,
+  lastName: 'Test',
+  firstName,
+  phone: `+22507000000${String(n).padStart(2, '0')}`,
+  email: `test.${firstName.toLowerCase()}@bloom.test`,
+  gender: n % 2 === 0 ? 'F' : 'H',
+  birthDate: '1995-01-01',
+  maritalStatus: 'Célibataire',
+  profession: 'Testeur',
+  branch: 'church',
+  level: 'Boss',
+  pastoralCursus: 'Aucun',
+  departments: {},
+  entryDate: '2024-01-01',
+  hasPassedToBossForm: true,
+  gps: { lat: 5.3854, lng: -3.9781, commune: 'Cocody' },
+  healthKPIs: { spirituel: 4, social: 4, financier: 4, physique: 4, presenceCulte: 4, presenceService: 4 },
+  baptismStatus: 'Baptisé',
+  testRole,
+  ...extra,
+});
+
+export const TEST_PROFILES: Member[] = [
+  testProfile(1, 'Super Admin', 'SuperAdmin'),
+  testProfile(2, 'Admin', 'Admin'),
+  testProfile(3, 'Pasteur Principal', 'PasteurPrincipal', { pastoralCursus: 'Pasteur Titulaire' }),
+  testProfile(4, 'Pasteur', 'Pasteur', { pastoralCursus: 'Pasteur Assistant' }),
+  testProfile(5, 'Ministre', 'Ministre'),
+  testProfile(6, 'Responsable', 'Responsable', { departments: { dept_louange: 'Responsable' } }),
+  testProfile(7, 'Adjoint', 'Adjoint', { departments: { dept_louange: 'Adjoint' } }),
+  testProfile(8, 'Coach', 'Coach', { level: 'Coach' }),
+  testProfile(9, 'Leader', 'Leader', { level: 'Leader' }),
+  testProfile(10, 'Capitaine de Bus', 'Capitaine', { departments: { dept_bloom_bus: 'Capitaine de Bus' }, bloomBusId: 'bus_yop_maroc' }),
+  testProfile(11, 'Responsable de Zone', 'Zone', { departments: { dept_bloom_bus: 'Responsable de Zone' }, bloomBusId: 'bus_coc_angre' }),
+  testProfile(12, 'Responsable de Commune', 'Commune', { departments: { dept_bloom_bus: 'Responsable de Commune' }, bloomBusId: 'bus_coc_angre' }),
+  testProfile(13, 'ADN', 'ADN', { departments: { dept_adn: 'Membre' } }),
+  testProfile(14, 'Portier', 'Portier', { departments: { dept_ushers: 'Membre' } }),
+  testProfile(15, 'GDC', 'GDC', { departments: { dept_gdc: 'Membre' } }),
+  testProfile(16, 'Intégration', 'Integration', { departments: { dept_integration: 'Membre' } }),
+  testProfile(17, 'Membre', 'Membre'),
+  testProfile(18, 'Nouveau', 'Nouveau', { level: 'Nouveau', hasPassedToBossForm: false }),
 ];
 
 export const INITIAL_MEMBERS: Member[] = [
@@ -145,7 +278,7 @@ export const INITIAL_MEMBERS: Member[] = [
     branch: 'church',
     level: 'Coach',
     pastoralCursus: 'Pasteur Assistant',
-    departments: { 'dept_gestion_cultes': 'Responsable' },
+    departments: { 'dept_gdc': 'Responsable' },
     entryDate: '2022-06-10',
     hasPassedToBossForm: true,
     gps: { lat: 5.3621, lng: -3.9542, commune: 'Cocody' },
@@ -188,7 +321,7 @@ export const INITIAL_MEMBERS: Member[] = [
     branch: 'light',
     level: 'Coach',
     pastoralCursus: 'Pasteur Titulaire',
-    departments: { 'dept_portiers': 'Responsable' },
+    departments: { 'dept_ushers': 'Responsable' },
     entryDate: '2021-09-01',
     hasPassedToBossForm: true,
     gps: { lat: 5.2912, lng: -3.9312, commune: 'Koumassi' },
@@ -238,7 +371,7 @@ export const INITIAL_MEMBERS: Member[] = [
     branch: 'church',
     level: 'Nouveau',
     pastoralCursus: 'Aucun',
-    departments: { 'dept_technique': 'Membre' },
+    departments: { 'dept_tech': 'Membre' },
     bloomBusId: 'bus_abo_gendarmerie',
     entryDate: '2026-06-21', // Registered 4 days ago (Trigger 3 days alert!)
     integrationState: 'En attente',
@@ -264,7 +397,7 @@ export const INITIAL_MEMBERS: Member[] = [
     branch: 'light',
     level: 'Nouveau',
     pastoralCursus: 'Aucun',
-    departments: { 'dept_portiers': 'Membre' },
+    departments: { 'dept_ushers': 'Membre' },
     bloomBusId: 'bus_coc_rivera',
     entryDate: '2026-06-15', // Registered 10 days ago (Trigger 7 days alert! Passage au rouge, escalates to Minister!)
     integrationState: 'En attente',
@@ -336,14 +469,15 @@ export const INITIAL_MEMBERS: Member[] = [
     branch: 'light',
     level: 'Boss',
     pastoralCursus: 'Aucun',
-    departments: { 'dept_technique': 'Adjoint' },
+    departments: { 'dept_tech': 'Adjoint' },
     entryDate: '2023-11-05',
     hasPassedToBossForm: true,
     gps: { lat: 5.2912, lng: -3.9312, commune: 'Koumassi' },
     healthKPIs: { spirituel: 4, social: 5, financier: 4, physique: 3, presenceCulte: 5, presenceService: 5 },
     baptismStatus: 'Baptisé',
     baptismDate: '2024-01-10'
-  }
+  },
+  ...TEST_PROFILES,
 ];
 
 export const INITIAL_EVENTS: Event[] = [
@@ -364,6 +498,7 @@ export const INITIAL_REPORTS: Report[] = [
     date: '2026-06-21',
     reportType: 'rapport_culte',
     eventId: 'evt_1',
+    departmentId: 'dept_gdc',
     confidential: false,
     content: {
       attendancePortiers: 1240, // 1240 total
@@ -381,6 +516,7 @@ export const INITIAL_REPORTS: Report[] = [
     date: '2026-06-21',
     reportType: 'rapport_adn',
     eventId: 'evt_3',
+    departmentId: 'dept_adn',
     confidential: false,
     content: {
       nouveauxHommes: 14,
@@ -398,12 +534,13 @@ export const INITIAL_REPORTS: Report[] = [
     targetBranch: 'church',
     date: '2026-06-21',
     reportType: 'rapport_bloom_bus_life',
+    departmentId: 'dept_bloom_bus',
     confidential: false,
     content: {
       busId: 'bus_coc_angre',
-      mobilises: 45,
+      mobilised: 45, // clé alignée sur BloomBusView.handleSaveLifeReport (P1.3 — 'mobilises' était un typo divergent)
       presencesCulte: 42,
-      visitesRealisees: 4,
+      visitesRealisees: ['mem_1'],
       moissonNouveaux: 3,
       incidents: 'Aucun incident signalé. Trajet fluide.'
     }
@@ -416,6 +553,7 @@ export const INITIAL_REPORTS: Report[] = [
     targetBranch: 'church',
     date: '2026-06-21',
     reportType: 'rapport_service',
+    departmentId: 'dept_integration',
     confidential: false,
     content: {
       presencesService: ['mem_1', 'mem_2', 'mem_5'],
@@ -504,8 +642,69 @@ export const INITIAL_NOTIFICATIONS: AppNotification[] = [
   }
 ];
 
+// P1.2b — réglages globaux (branches/thèmes, déclencheurs+canaux, fuseau/langue, périodes).
+export const INITIAL_SETTINGS: AppSettings = {
+  branches: {
+    church: { enabled: true, accent: 'cerulean' },
+    light: { enabled: true, accent: 'orange' },
+  },
+  triggers: [
+    { id: 'integ1', label: 'Intégration — Étape 1 (Réception)', delayDays: 3, channels: { app: true, email: true, sms: false, whatsapp: false } },
+    { id: 'integ2', label: 'Intégration — Étape 2 (Au rouge)', delayDays: 7, channels: { app: true, email: true, sms: true, whatsapp: false } },
+    { id: 'birthday', label: 'Anniversaire d\'un membre', delayDays: 0, channels: { app: true, email: false, sms: false, whatsapp: true } },
+    { id: 'absence', label: 'Absence culte prolongée', delayDays: 14, channels: { app: true, email: false, sms: true, whatsapp: false } },
+  ],
+  timezone: 'Africa/Abidjan',
+  language: 'fr',
+  periods: { activeMemberMonths: 1, weekStart: 'Lundi', fiscalStart: 'Janvier' },
+};
+
+// P1.1 — accès aux onglets piloté par la matrice : une capability `view_<tab>` par onglet.
+// Rôles = spec PROFILS-INTERFACES / ECRANS-PAR-ONGLET (corrige Capitaine/Membre/Leader/Nouveau
+// oubliés par les anciennes listes en dur de la Sidebar). Sparse : seuls les rôles autorisés sont listés.
+const allow = (...roles: string[]) => Object.fromEntries(roles.map((r) => [r, true]));
+const STAFF = ['Super Admin', 'Admin', 'Pasteur Principal', 'Pasteur', 'Ministre'];
+const ALL_PROFILES = [
+  ...STAFF, 'Responsable', 'Adjoint', 'Coach', 'Leader', 'Capitaine de Bus',
+  'Responsable de Zone', 'Responsable de Commune', 'ADN', 'Portier', 'GDC',
+  'Intégration', 'Membre', 'Nouveau',
+];
+
+export const VIEW_PERMISSIONS: PermissionMatrix = {
+  'view_dashboard': allow(...ALL_PROFILES),
+  'view_members': allow(...STAFF, 'Responsable', 'Adjoint', 'Coach', 'Leader', 'Capitaine de Bus', 'Responsable de Zone', 'Responsable de Commune'),
+  // Onglet visible pour les profils Responsable → Pasteur Principal (lecture de la liste +
+  // départements par ministère) ; le détail d'un ministère (clic sur une carte) reste
+  // restreint, cf. MinisteresView canViewDetails.
+  'view_ministeres': allow(...STAFF, 'Responsable', 'Adjoint'),
+  'view_departments': allow(...STAFF, 'Responsable', 'Adjoint', 'ADN', 'Portier', 'GDC', 'Intégration'),
+  // D2 — aligné sur CAN_ACCESS_INTEGRATION (NouveauxView) : la Console Intégration est réservée
+  // au département Intégration + la ligne pastorale. Coach/Leader/ADN/Portier/GDC ne doivent pas voir l'onglet.
+  'view_integration': allow(...STAFF, 'Intégration'),
+  'view_bloombus': allow(...STAFF, 'Responsable', 'Adjoint', 'Coach', 'Capitaine de Bus', 'Responsable de Zone', 'Responsable de Commune', 'Membre', 'Nouveau'),
+  'view_events': allow(...STAFF, 'Responsable', 'Adjoint', 'ADN', 'Portier', 'GDC'),
+  // P4.2 (résiduel) : un équipier de projet peut être de n'importe quel profil
+  // (Project.team n'est pas restreint par rôle) — ouvert à tous plutôt qu'une
+  // liste en dur qui oublierait toujours un profil.
+  'view_projects': allow(...ALL_PROFILES),
+  'view_cursus': allow(...STAFF, 'Responsable', 'Coach', 'Leader', 'ADN', 'Portier', 'GDC', 'Intégration', 'Membre'),
+  'view_formations': allow(...STAFF, 'Responsable', 'Coach', 'Leader', 'Membre', 'ADN', 'Portier', 'GDC', 'Intégration', 'Nouveau'),
+  'view_permissions': allow('Super Admin', 'Admin', 'Pasteur Principal'),
+  'view_accounts': allow('Super Admin', 'Admin', 'Pasteur Principal'),
+  'view_settings': allow('Super Admin', 'Admin', 'Pasteur Principal'),
+  'view_formbuilder': allow('Super Admin', 'Admin', 'Pasteur Principal'),
+  'view_audit': allow('Super Admin', 'Admin', 'Pasteur Principal'),
+  // P4.20 — ReportsView/ProgrammesView existaient déjà (fonctionnels) mais n'étaient
+  // routés nulle part. Rapports agrège des données confidentielles inter-départements
+  // (rapport_suivi_coach, etc.) → même niveau que view_audit + Responsable.
+  'view_reports': allow(...STAFF, 'Responsable'),
+  'view_programs': allow(...STAFF, 'Responsable', 'ADN', 'Intégration'),
+};
+
 export const DEFAULT_PERMISSION_MATRIX: PermissionMatrix = {
+  ...VIEW_PERMISSIONS,
   'consulter_rapports_de_vie': {
+    'Super Admin': true,
     'Pasteur': true,
     'Admin': true,
     'Responsable': true,
@@ -513,6 +712,7 @@ export const DEFAULT_PERMISSION_MATRIX: PermissionMatrix = {
     'Membre': false
   },
   'consulter_situation_financiere': {
+    'Super Admin': true,
     'Pasteur': true,
     'Admin': true,
     'Responsable': false,
@@ -520,6 +720,7 @@ export const DEFAULT_PERMISSION_MATRIX: PermissionMatrix = {
     'Membre': false
   },
   'consulter_historique_presence': {
+    'Super Admin': true,
     'Pasteur': true,
     'Admin': true,
     'Responsable': true,
@@ -527,6 +728,7 @@ export const DEFAULT_PERMISSION_MATRIX: PermissionMatrix = {
     'Membre': true
   },
   'modifier_jalons_bapteme_integration': {
+    'Super Admin': true,
     'Pasteur': true,
     'Admin': true,
     'Responsable': true,
@@ -534,6 +736,7 @@ export const DEFAULT_PERMISSION_MATRIX: PermissionMatrix = {
     'Membre': false
   },
   'inscrire_formations_certifications': {
+    'Super Admin': true,
     'Pasteur': true,
     'Admin': true,
     'Responsable': true,

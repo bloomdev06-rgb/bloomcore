@@ -2,6 +2,11 @@ export type Branch = 'church' | 'light' | 'global';
 
 export type CommunityLevel = 'Nouveau' | 'Stagiaire' | 'Boss' | 'Leader' | 'Coach';
 
+// Fonction d'un membre au sein d'un département (hiérarchie interne).
+export type DeptFunction =
+  | 'Responsable' | 'Adjoint' | 'Trésorier' | 'Responsable de section' | 'Membre'
+  | 'Capitaine de Bus' | 'Responsable de Zone' | 'Responsable de Commune';
+
 export type IntegrationState = 'En attente' | 'Suivi' | 'Intégré';
 export type IntegrationFollowStatus = 'Non suivi' | 'En attente' | 'En cours' | 'À recontacter' | 'Intégré' | 'Non intégré';
 
@@ -35,6 +40,12 @@ export interface Department {
   ministryId: string;
   description: string;
   specialFunction?: SpecialFunction;
+  // SEED: chaque département existe en 2 instances (une par branche).
+  // ponytail: undefined = instance partagée entre branches; la duplication
+  // bi-branche des seeds (+ migration des refs membres) attend le backend.
+  branch?: Branch;
+  // Organisation interne — pôles/sections créés librement par le Responsable.
+  sections?: { id: string; name: string }[];
 }
 
 export interface Ministry {
@@ -42,6 +53,7 @@ export interface Ministry {
   name: string;
   description: string;
   tuteurId?: string; // Member ID of the "Ministre de tutelle"
+  branch?: Branch; // même convention que Department.branch
 }
 
 export interface Member {
@@ -56,6 +68,7 @@ export interface Member {
   maritalStatus: 'Célibataire' | 'Marié(e)' | 'Divorcé(e)' | 'Veuf(ve)';
   profession: string;
   avatarUrl?: string;
+  source?: string;
   gps?: {
     lat: number;
     lng: number;
@@ -69,11 +82,26 @@ export interface Member {
   pastoralCursus: PastoralCursus;
   
   // Department memberships: departmentId -> function
-  departments: { [deptId: string]: 'Responsable' | 'Adjoint' | 'Membre' | 'Capitaine de Bus' | 'Responsable de Zone' | 'Responsable de Commune' };
+  departments: { [deptId: string]: DeptFunction };
+
+  // Organisation interne — appartenance à une section/pôle du département: deptId -> sectionId
+  deptSections?: { [deptId: string]: string };
   
+  // Profil de test : rôle UI forcé pour ce compte (remplace le panneau « Simuler profil »
+  // retiré). Quand présent, App l'utilise tel quel comme simulatedRole au lieu de le dériver
+  // via resolveMemberRole — permet un compte de connexion réel par rôle testable, y compris
+  // les rôles non dérivables (Pasteur Principal, ADN, Portier, GDC, Intégration).
+  testRole?: string;
+
   // Special territorial coordinates
   bloomBusId?: string; // Attached bus ID
-  
+
+  // Enregistrement direct par un responsable hiérarchique Bloom Bus (hors procédure ADN
+  // "nouveau") — rattachement département en attente de validation par le responsable de
+  // département. undefined = pas concerné (membre créé normalement).
+  deptAttachmentStatus?: 'pending' | 'validated' | 'rejected';
+  deptAttachmentOrigin?: 'bloom_bus';
+
   // Integration tracking for Nouveaux
   integrationState?: IntegrationState;
   integrationFollowStatus?: IntegrationFollowStatus; // Integrator follow-up status (Espace Intégrateur). undefined = 'Non suivi'
@@ -81,6 +109,7 @@ export interface Member {
   receptionValidated?: boolean; // §6.2 — Responsable validated the reception (gate into "En attente"). undefined = treated as validated (legacy seeds)
   integrationAssignedTo?: string; // Member ID who follows up
   integrationDateRegistered?: string; // Date ADN registered them
+  lastContact?: string; // D5 — date du dernier contact/suivi (visite, rapport coach, MAJ intégration). Réinitialise l'horloge "au rouge".
   ojFlag?: boolean; // Oui à Jésus
   integrationNotes?: string;
   hasPassedToBossForm?: boolean; // Checks if the main full-member form has been completed
@@ -99,6 +128,24 @@ export interface Member {
   baptismDate?: string;
   baptismViaDepartment?: boolean; // §7 — baptism went through the Baptism department process (vs hors process)
   isDrachme?: boolean; // §2.5 — "Drachme (perdu)": strayed member, manually flagged, distinct from "au rouge"
+
+  // FORMULAIRES §2 — champs membre complémentaires
+  bloomEntry?: string; // "Entrée à Bloom" — mois + année, format YYYY-MM
+  academy?: string; // Académie — "Non inscrit" / "Vases d'Honneur" / …
+  currentStepId?: string; // WORKFLOWS §6 — étape courante du parcours à étapes (parcours_etapes)
+  mentorId?: string; // Onglet 8 — mentor du parcours pastoral (Member ID), undefined = pas de mentor assigné
+  notifChannels?: NotifChannels; // P1.2b — canaux choisis par le membre dans Mon Profil, undefined = défauts (app+email)
+}
+
+// P1.2 — canaux de notification (Réglages : déclencheurs globaux ; Mon Profil : préférences membre)
+export interface NotifChannels { app: boolean; email: boolean; sms: boolean; whatsapp: boolean }
+export interface NotifTrigger { id: string; label: string; delayDays: number; channels: NotifChannels }
+export interface AppSettings {
+  branches: { church: { enabled: boolean; accent: string }; light: { enabled: boolean; accent: string } };
+  triggers: NotifTrigger[];
+  timezone: string;
+  language: string;
+  periods: { activeMemberMonths: number; weekStart: string; fiscalStart: string };
 }
 
 export interface BloomBusEntity {
@@ -131,6 +178,9 @@ export interface AppNotification {
   type: 'info' | 'warning' | 'alert' | 'success';
   read: boolean;
   branch?: Branch;
+  // §6.2 — escalade à J+7 : ciblée sur le Ministre de tutelle plutôt qu'une alerte
+  // générique par branche. Absent = notification visible par tous (comportement historique).
+  targetMemberId?: string;
 }
 
 export interface Event {
@@ -143,6 +193,7 @@ export interface Event {
   scope?: 'church' | 'light' | 'both';
   organizer?: string;
   projectId?: string;
+  recurrence?: 'weekly'; // WORKFLOWS §10 — cultes récurrents auto-générés. undefined = ponctuel
 }
 
 export interface Report {
@@ -152,7 +203,8 @@ export interface Report {
   authorRole: string;
   targetBranch: Branch;
   date: string;
-  reportType: 
+  weekOf?: string; // Id de semaine calendaire visée (lundi 'YYYY-MM-DD') — cf. src/data/week.ts
+  reportType:
     | 'rapport_service' 
     | 'rapport_rsa' 
     | 'rapport_bloom_bus_member'
@@ -165,6 +217,7 @@ export interface Report {
     | 'rapport_suivi_coach'   // §8 — suivi d'un membre par son Coach
     | 'rapport_observation';  // §8 — observation typée (avec/sans suivi)
   eventId?: string; // Optional links to cultes/events
+  departmentId?: string; // P1.3 — rattache le rapport à un département (KPIs départementaux/ministère, via Department.ministryId)
   confidential: boolean;
   partagerAvecResponsableDept?: boolean; // §8.3 — lève le secret du rapport pastoral vers le Responsable
   content: any; // Dynamic JSON content depending on the reportType
@@ -198,3 +251,35 @@ export interface PermissionMatrix {
     [role: string]: boolean; // role e.g. "Pasteur", "Admin", "Responsable", "Coach", "Membre"
   };
 }
+
+// §11.3 — délégation d'une capacité (DELEGABLE_CAPS) par un Responsable à un membre
+// de son département. `toId` est l'id réel du délégataire : seul un enregistrement
+// avec `toId` renseigné peut accorder une capacité effective (cf. data/permissions.ts
+// hasCapability). Les entrées saisies en texte libre (console Gouvernance) n'ont pas
+// de `toId` et restent donc de la supervision passive, pas un octroi de droit.
+export interface Delegation {
+  id: string;
+  from: string;
+  to: string;
+  toId?: string;
+  scope: string;
+  right: string;
+}
+
+// Compte Admin/Super Admin (AccountsView + RBAC serveur). Convention d'id :
+// `adm_<memberId>` — le suffixe est l'id réel du membre, ce qui permet au
+// serveur de résoudre les rôles Admin/Super Admin depuis les données.
+export interface AdminAccount {
+  id: string;
+  name: string;
+  subtitle: string;
+  role: 'Admin' | 'Super Admin';
+  exception?: boolean;
+  reason?: string;
+}
+
+// P1.4 — FormBuilder's schema catalog. See mockData.ts's INITIAL_FORMS for the seed data.
+export type FieldType = 'text' | 'number' | 'choice' | 'scale' | 'checkbox' | 'date';
+export interface Field { id: string; label: string; type: FieldType; required: boolean; }
+export interface Step { id: string; label: string; validator: string; }
+export interface FormDef { id: string; name: string; scope: string; version: number; kind: 'form' | 'steps'; fields: Field[]; steps?: Step[]; }

@@ -1,7 +1,8 @@
 import React, { useMemo, useState } from 'react';
-import { History, Shield, Clock, ArrowRight, Database, Search, Download } from 'lucide-react';
+import { History, Shield, Clock, ArrowRight, Database, Search, Download, Wrench } from 'lucide-react';
 import { AuditLog, Branch } from '../types';
 import { periodRange, Period } from '../data/kpi';
+import { Badge } from './ui/Badge';
 
 interface AuditViewProps {
   audits: AuditLog[];
@@ -23,12 +24,13 @@ const entityOf = (a: AuditLog): string => {
 };
 const BRANCH_LABEL: Record<Branch, string> = { church: 'Bloom Church', light: 'Bloom Light', global: 'Global' };
 
-export default function AuditView({ audits }: AuditViewProps) {
+export default function AuditView({ audits, activeBranch }: AuditViewProps) {
   const [search, setSearch] = useState('');
   const [actionType, setActionType] = useState('all');
   const [operator, setOperator] = useState('all');
   const [entity, setEntity] = useState('all');
-  const [branch, setBranch] = useState<Branch | 'all'>('all');
+  // Défaut = la branche active du sélecteur global ; l'utilisateur reste libre de choisir "Global".
+  const [branch, setBranch] = useState<Branch | 'all'>(activeBranch === 'global' ? 'all' : activeBranch);
   const [period, setPeriod] = useState<Period>('custom');
 
   const actionTypes = useMemo(() => Array.from(new Set(audits.map(a => a.actionType))).sort(), [audits]);
@@ -66,7 +68,7 @@ export default function AuditView({ audits }: AuditViewProps) {
   return (
     <div className="space-y-6">
       {/* Overview Banner */}
-      <div className="bg-white p-5 rounded-[2rem] border border-bc-border shadow-sm flex flex-col md:flex-row gap-4 items-center justify-between">
+      <div className="print:hidden bg-white p-5 rounded-[2rem] border border-bc-border shadow-sm flex flex-col md:flex-row gap-4 items-center justify-between">
         <div>
           <h3 className="text-sm font-ui font-bold text-bc-text">
             Journal d'Audit Central & Immuabilité
@@ -82,7 +84,7 @@ export default function AuditView({ audits }: AuditViewProps) {
       </div>
 
       {/* Filters toolbar */}
-      <div className="bg-white p-4 rounded-[2rem] border border-bc-border shadow-sm flex flex-wrap gap-2 items-center">
+      <div className="print:hidden bg-white p-4 rounded-[2rem] border border-bc-border shadow-sm flex flex-wrap gap-2 items-center">
         <div className="relative flex-1 min-w-[180px]">
           <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-bc-text-secondary" />
           <input
@@ -115,65 +117,83 @@ export default function AuditView({ audits }: AuditViewProps) {
           <option value="month">30 derniers jours</option>
           <option value="year">12 derniers mois</option>
         </select>
-        <button onClick={exportCsv} className="flex items-center gap-1.5 bg-bc-green text-white rounded-full px-4 py-2 text-xs font-bold hover:opacity-90">
+        <button onClick={exportCsv} className="flex items-center gap-1.5 bg-bc-green text-white rounded-full px-4 py-2 text-xs font-bold hover:opacity-90 active-scale">
           <Download size={14} /> Export CSV
+        </button>
+        {/* P5.7 — impression navigateur ("Enregistrer en PDF"), pas de lib PDF ajoutée */}
+        <button onClick={() => window.print()} className="flex items-center gap-1.5 border border-bc-border text-bc-text rounded-full px-4 py-2 text-xs font-bold hover:bg-bc-canvas active-scale">
+          <Download size={14} /> Export PDF
         </button>
       </div>
 
-      {/* Audit List Timeline */}
-      <div className="bg-white border border-bc-border shadow-sm rounded-[2rem] p-6 space-y-6">
-        <h4 className="text-xs uppercase font-bold tracking-wider text-bc-text-secondary">
-          ⏱ Chronologie des opérations récentes · {filtered.length} entrée(s)
+      {/* P5.7 — table imprimable, masquée à l'écran (print:) ; le reste de la vue est print:hidden */}
+      <h3 className="hidden print:block text-sm font-bold mb-2">Journal d'Audit — {new Date().toISOString().split('T')[0]}</h3>
+      <table className="hidden print:table w-full text-xs">
+        <thead>
+          <tr className="text-left border-b border-bc-border">
+            <th className="py-1 pr-3">Date</th>
+            <th className="py-1 pr-3">Action</th>
+            <th className="py-1 pr-3">Opérateur</th>
+            <th className="py-1 pr-3">Détail</th>
+          </tr>
+        </thead>
+        <tbody>
+          {filtered.map(log => (
+            <tr key={log.id} className="border-b border-bc-border/40 align-top">
+              <td className="py-1 pr-3 whitespace-nowrap">{log.timestamp.replace('T', ' ').split('.')[0]}</td>
+              <td className="py-1 pr-3">{log.actionType.replace(/_/g, ' ')}</td>
+              <td className="py-1 pr-3">{log.operatorName}</td>
+              <td className="py-1 pr-3">{log.details}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+
+      {/* Audit List — dense rows: des dizaines d'entrées/jour, pas de place pour des cartes */}
+      <div className="print:hidden bg-white border border-bc-border shadow-sm rounded-[2rem] p-6">
+        <h4 className="text-xs uppercase font-bold tracking-wider text-bc-text-secondary flex items-center gap-2 mb-3">
+          <Clock size={13} /> Chronologie des opérations récentes · {filtered.length} entrée(s)
         </h4>
 
-        <div className="relative border-l border-bc-border pl-6 space-y-6">
-          {filtered.length === 0 && (
-            <p className="text-xs text-bc-text-secondary italic">Aucune entrée pour ces filtres.</p>
-          )}
+        {filtered.length === 0 && (
+          <p className="text-xs text-bc-text-secondary italic py-4">Aucune entrée pour ces filtres.</p>
+        )}
+
+        <div className="divide-y divide-bc-border/50 max-h-[70vh] overflow-y-auto">
           {filtered.map((log) => (
-            <div key={log.id} className="relative group">
-              {/* Timeline marker */}
-              <div className={`absolute -left-[31px] top-1.5 w-4 h-4 rounded-full border-2 border-white flex items-center justify-center shadow-sm ${
+            <div key={log.id} className="flex items-center gap-3 py-2 px-1 hover:bg-bc-canvas/40 transition-colors rounded-lg text-xs">
+              <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${
                 log.actionType === 'BAPTISM_COMPLETED' ? 'bg-bc-gold' :
                 log.actionType === 'ROLE_PERMISSION_UPDATED' ? 'bg-bc-purple' :
                 'bg-bc-green'
               }`} />
-
-              <div className="space-y-1 bg-bc-canvas/20 border border-bc-border hover:bg-bc-canvas/40 transition-colors p-4 rounded-full max-w-2xl">
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1">
-                  <span className="font-ui font-bold text-xs text-bc-text tracking-tight uppercase">
-                    🛠 {log.actionType.replace(/_/g, ' ')}
-                  </span>
-                  <span className="text-[10px] text-bc-text-secondary font-mono flex items-center gap-1">
-                    <Clock size={11} /> {log.timestamp.replace('T', ' ').split('.')[0]}
-                  </span>
-                </div>
-
-                <p className="text-xs text-bc-text-secondary leading-relaxed pt-1.5 font-serif">
-                  {log.details}
-                </p>
-
-                {/* Old / New Value indicators if present */}
+              <span className="font-mono text-[10px] text-bc-text-secondary shrink-0 w-14">
+                {log.timestamp.replace('T', ' ').split('.')[0].slice(5)}
+              </span>
+              <span className="font-ui font-bold text-bc-text shrink-0 w-44 truncate flex items-center gap-1.5">
+                <Wrench size={11} className="text-bc-text-secondary shrink-0" /> {log.actionType.replace(/_/g, ' ')}
+              </span>
+              <p className="flex-1 min-w-0 truncate text-bc-text-secondary" title={log.details}>
+                {log.details}
                 {(log.previousValue || log.newValue) && (
-                  <div className="mt-2.5 flex items-center space-x-2 text-[9px] font-mono font-bold bg-white border border-bc-border/60 rounded-full p-2 max-w-fit">
-                    <span className="text-bc-text-secondary uppercase">Ancien :</span>
+                  <span className="font-mono text-[10px] ml-1.5 inline-flex items-center gap-1">
                     <span className="text-bc-purple line-through">{log.previousValue || 'N/A'}</span>
-                    <ArrowRight size={10} className="text-bc-text-secondary" />
-                    <span className="text-bc-text-secondary uppercase">Nouveau :</span>
+                    <ArrowRight size={9} className="text-bc-text-secondary" />
                     <span className="text-bc-text">{log.newValue || 'N/A'}</span>
-                  </div>
+                  </span>
                 )}
-
-                <div className="flex flex-wrap gap-1.5 pt-1">
-                  <span className="text-[9px] font-bold px-2 py-0.5 rounded-full bg-slate-100 text-bc-text-secondary">{entityOf(log)}</span>
-                  {log.branch && <span className="text-[9px] font-bold px-2 py-0.5 rounded-full bg-bc-cerulean/10 text-bc-cerulean">{BRANCH_LABEL[log.branch]}</span>}
-                </div>
-
-                <div className="pt-2 border-t border-bc-border/40 mt-3 flex items-center justify-between text-[10px] text-bc-text-secondary font-medium">
-                  <span>Opérateur : <span className="font-bold text-bc-text">{log.operatorName}</span></span>
-                  <span className="font-mono text-[9px] uppercase">ID: {log.operatorId}</span>
-                </div>
-              </div>
+              </p>
+              <span className="hidden md:inline-block shrink-0 text-[9px] font-bold px-2 py-0.5 rounded-full bg-bc-canvas text-bc-text-secondary">
+                {entityOf(log)}
+              </span>
+              {log.branch && (
+                <Badge tone={log.branch === 'light' ? 'orange' : 'cerulean'} className="hidden lg:inline-flex shrink-0">
+                  {BRANCH_LABEL[log.branch]}
+                </Badge>
+              )}
+              <span className="hidden sm:block shrink-0 w-28 truncate text-right text-bc-text-secondary font-medium">
+                {log.operatorName}
+              </span>
             </div>
           ))}
         </div>

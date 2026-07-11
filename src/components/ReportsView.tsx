@@ -12,6 +12,8 @@ import {
   Clock
 } from 'lucide-react';
 import { Report, Branch } from '../types';
+import { motion } from 'motion/react';
+import { staggerParent, staggerItem } from './ui/motion';
 
 interface ReportsViewProps {
   reports: Report[];
@@ -26,6 +28,9 @@ export default function ReportsView({
 }: ReportsViewProps) {
   const [filterType, setFilterType] = useState<string>('all');
   const [selectedReport, setSelectedReport] = useState<Report | null>(null);
+  // E2 — un rapport serveur sans `content` ne doit pas faire crasher le détail : on défaut
+  // à {} plutôt que de déréférencer rc.X sur undefined.
+  const rc: any = selectedReport?.content ?? {};
 
   const isChurch = activeBranch === 'church';
 
@@ -37,11 +42,12 @@ export default function ReportsView({
     // Type filter
     if (filterType !== 'all' && rep.reportType !== filterType) return false;
 
-    // §8.3 — confidentialité du rapport pastoral :
-    // visible au corps pastoral (Pasteur/Pasteur Principal/Ministre/Admin/Super Admin) toujours ;
+    // §8.3 — confidentialité du rapport pastoral : la confidentialité du corps pastoral
+    // prime même sur Admin/Super Admin, qui NE voient PAS ce contenu (PROFILS-INTERFACES.md:73,78,107).
+    // Visible seulement au corps pastoral opérationnel (Pasteur/Pasteur Principal/Ministre) ;
     // à un Coach/Responsable uniquement si le secret est explicitement partagé (partagerAvecResponsableDept).
     if (rep.confidential) {
-      const pastoralCorps = ['Pasteur', 'Pasteur Principal', 'Ministre', 'Admin', 'Super Admin'].includes(simulatedRole);
+      const pastoralCorps = ['Pasteur', 'Pasteur Principal', 'Ministre'].includes(simulatedRole);
       const coachWithShare = ['Coach', 'Responsable'].includes(simulatedRole) && !!rep.partagerAvecResponsableDept;
       if (!pastoralCorps && !coachWithShare) return false;
     }
@@ -113,17 +119,18 @@ export default function ReportsView({
             <FileText size={16} className="text-bc-text" /> Registre des Rapports de la Paroisse
           </h3>
           
-          <div className="space-y-3 max-h-[60vh] overflow-y-auto pr-1">
+          <motion.div className="space-y-3 max-h-[60vh] overflow-y-auto pr-1" variants={staggerParent} initial="hidden" animate="show">
             {visibleReports.length === 0 ? (
               <p className="text-xs text-bc-text-secondary italic text-center py-12">Aucun rapport disponible pour cette section.</p>
             ) : (
               visibleReports.map((rep) => (
-                <div 
-                  key={rep.id} 
+                <motion.div
+                  key={rep.id}
+                  variants={staggerItem}
                   onClick={() => setSelectedReport(rep)}
-                  className={`p-4 rounded-full border transition-all cursor-pointer flex justify-between items-center ${
-                    selectedReport?.id === rep.id 
-                      ? 'border-bc-green bg-slate-100'
+                  className={`p-4 rounded-2xl border transition-all cursor-pointer flex justify-between items-center ${
+                    selectedReport?.id === rep.id
+                      ? 'border-bc-green bg-bc-canvas'
                       : 'border-bc-border bg-white hover:bg-bc-canvas/25'
                   }`}
                 >
@@ -145,10 +152,10 @@ export default function ReportsView({
                       <span className="text-[8px] bg-bc-purple/10 text-bc-purple px-1.5 py-0.2 rounded font-bold uppercase">SECRET</span>
                     )}
                   </div>
-                </div>
+                </motion.div>
               ))
             )}
-          </div>
+          </motion.div>
         </div>
 
         {/* Report Preview panel - 6 cols */}
@@ -174,7 +181,7 @@ export default function ReportsView({
                   <button
                     id="rpt-download-pdf-btn"
                     onClick={() => triggerPDFDownloadSimulation(selectedReport)}
-                    className="p-2 bg-bc-canvas hover:bg-bc-border border border-bc-border rounded-full text-bc-text transition-colors flex items-center space-x-1"
+                    className="p-2 bg-bc-canvas hover:bg-bc-border border border-bc-border rounded-full text-bc-text transition-colors active-scale flex items-center space-x-1"
                     title="Exporter en PDF"
                   >
                     <Download size={14} />
@@ -190,23 +197,53 @@ export default function ReportsView({
                 {selectedReport.reportType === 'rapport_culte' && (
                   <div className="space-y-3 text-xs">
                     <div className="grid grid-cols-2 gap-3">
-                      <div className="p-2.5 bg-white border border-bc-border rounded-full">
+                      <div className="p-2.5 bg-white border border-bc-border rounded-2xl">
                         <span className="text-[9px] text-bc-text-secondary block">Présences physiques (Portiers)</span>
-                        <span className="text-base font-ui font-black text-bc-text">{selectedReport.content.attendancePortiers}</span>
+                        <span className="text-base font-ui font-black text-bc-text">{rc.attendancePortiers}</span>
                       </div>
-                      <div className="p-2.5 bg-white border border-bc-border rounded-full">
+                      <div className="p-2.5 bg-white border border-bc-border rounded-2xl">
                         <span className="text-[9px] text-bc-text-secondary block">Nouveaux arrivants (ADN)</span>
-                        <span className="text-base font-ui font-black text-bc-cerulean">{selectedReport.content.attendanceADN}</span>
+                        <span className="text-base font-ui font-black text-[color:var(--accent-1)]">{rc.attendanceADN}</span>
                       </div>
                     </div>
-                    {selectedReport.content.offertory && (
-                      <div className="p-2.5 bg-white border border-bc-border rounded-full">
+                    {rc.offertory && (
+                      <div className="p-2.5 bg-white border border-bc-border rounded-2xl">
                         <span className="text-[9px] text-bc-text-secondary block">Offrandes collectées</span>
-                        <span className="text-sm font-mono font-bold text-bc-text">{selectedReport.content.offertory.toLocaleString()} FCFA</span>
+                        <span className="text-sm font-mono font-bold text-bc-text">{rc.offertory.toLocaleString()} FCFA</span>
+                      </div>
+                    )}
+                    {(rc.predicateur || rc.theme || rc.officiant) && (
+                      <div className="p-2.5 bg-white border border-bc-border rounded-2xl space-y-1">
+                        <span className="text-[9px] text-bc-text-secondary block">Infos générales</span>
+                        {rc.predicateur && <span className="block">Prédicateur : <b>{rc.predicateur}</b></span>}
+                        {rc.officiant && <span className="block">Officiant : <b>{rc.officiant}</b></span>}
+                        {rc.theme && <span className="block">Thème : <b>{rc.theme}</b></span>}
+                      </div>
+                    )}
+                    {typeof rc.ferveur === 'number' && (
+                      <div className="p-2.5 bg-white border border-bc-border rounded-2xl">
+                        <span className="text-[9px] text-bc-text-secondary block mb-1">Atmosphère spirituelle (/5)</span>
+                        <span className="block">Ferveur : <b>{rc.ferveur}</b> · Louange : <b>{rc.louange}</b> · Appel : <b>{rc.deroulementAppel}</b></span>
+                      </div>
+                    )}
+                    {Array.isArray(rc.incidents) && rc.incidents.length > 0 && (
+                      <div className="p-2.5 bg-white border border-bc-border rounded-2xl space-y-1">
+                        <span className="text-[9px] text-bc-text-secondary block">Journal des incidents</span>
+                        {rc.incidents.map((inc: any, idx: number) => (
+                          <span key={idx} className="block">
+                            <b>{inc.type}</b>{inc.departments ? ` (${inc.departments})` : ''} — {inc.details}
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                    {typeof rc.attendeesEnfants === 'number' && (
+                      <div className="p-2.5 bg-white border border-bc-border rounded-2xl">
+                        <span className="text-[9px] text-bc-text-secondary block">Enfants émargés</span>
+                        <span className="text-base font-ui font-black text-bc-text">{rc.attendeesEnfants}</span>
                       </div>
                     )}
                     <p className="font-serif italic text-bc-text-secondary leading-relaxed mt-2 pt-2 border-t border-bc-border/40">
-                      "{selectedReport.content.notes}"
+                      "{rc.notes}"
                     </p>
                   </div>
                 )}
@@ -214,28 +251,28 @@ export default function ReportsView({
                 {selectedReport.reportType === 'rapport_adn' && (
                   <div className="space-y-3 text-xs">
                     <div className="grid grid-cols-2 gap-3">
-                      <div className="p-2 bg-white border border-bc-border rounded-full">
+                      <div className="p-2 bg-white border border-bc-border rounded-2xl">
                         <span className="text-[9px] text-bc-text-secondary">Nouveaux (H)</span>
-                        <span className="block font-ui font-bold">{selectedReport.content.nouveauxHommes}</span>
+                        <span className="block font-ui font-bold">{rc.nouveauxHommes}</span>
                       </div>
-                      <div className="p-2 bg-white border border-bc-border rounded-full">
+                      <div className="p-2 bg-white border border-bc-border rounded-2xl">
                         <span className="text-[9px] text-bc-text-secondary">Nouveaux (F)</span>
-                        <span className="block font-ui font-bold">{selectedReport.content.nouveauxFemmes}</span>
+                        <span className="block font-ui font-bold">{rc.nouveauxFemmes}</span>
                       </div>
                     </div>
                     <div className="grid grid-cols-2 gap-3 pt-2">
-                      <div className="p-2 bg-white border border-bc-border rounded-full bg-bc-gold/10">
+                      <div className="p-2 bg-white border border-bc-border rounded-2xl bg-bc-gold/10">
                         <span className="text-[9px] text-bc-text-secondary">Oui à Jésus (H)</span>
-                        <span className="block font-ui font-bold text-bc-text">{selectedReport.content.ojHommes}</span>
+                        <span className="block font-ui font-bold text-bc-text">{rc.ojHommes}</span>
                       </div>
-                      <div className="p-2 bg-white border border-bc-border rounded-full bg-bc-gold/10">
+                      <div className="p-2 bg-white border border-bc-border rounded-2xl bg-bc-gold/10">
                         <span className="text-[9px] text-bc-text-secondary">Oui à Jésus (F)</span>
-                        <span className="block font-ui font-bold text-bc-text">{selectedReport.content.ojFemmes}</span>
+                        <span className="block font-ui font-bold text-bc-text">{rc.ojFemmes}</span>
                       </div>
                     </div>
-                    {selectedReport.content.notes && (
+                    {rc.notes && (
                       <p className="font-serif italic text-bc-text-secondary leading-relaxed mt-2">
-                        "{selectedReport.content.notes}"
+                        "{rc.notes}"
                       </p>
                     )}
                   </div>
@@ -244,18 +281,24 @@ export default function ReportsView({
                 {selectedReport.reportType === 'rapport_bloom_bus_life' && (
                   <div className="space-y-3 text-xs">
                     <div className="grid grid-cols-2 gap-3">
-                      <div className="p-2 bg-white border border-bc-border rounded-full">
+                      <div className="p-2 bg-white border border-bc-border rounded-2xl">
                         <span className="text-[9px] text-bc-text-secondary">Mobilisés au car</span>
-                        <span className="block font-ui font-bold text-bc-text">{selectedReport.content.mobilised || selectedReport.content.mobilises} personnes</span>
+                        <span className="block font-ui font-bold text-bc-text">{rc.mobilised} personnes</span>
                       </div>
-                      <div className="p-2 bg-white border border-bc-border rounded-full">
+                      <div className="p-2 bg-white border border-bc-border rounded-2xl">
                         <span className="text-[9px] text-bc-text-secondary">Présents au culte</span>
-                        <span className="block font-ui font-bold text-bc-cerulean">{selectedReport.content.presencesCulte} personnes</span>
+                        <span className="block font-ui font-bold text-[color:var(--accent-1)]">{rc.presencesCulte} personnes</span>
                       </div>
                     </div>
-                    {selectedReport.content.incidents && (
-                      <p className="text-[10px] bg-white border border-bc-border rounded-full p-2 font-mono text-bc-purple mt-2">
-                        🚨 Incident: {selectedReport.content.incidents}
+                    {Array.isArray(rc.visitesRealisees) && (
+                      <div className="p-2 bg-white border border-bc-border rounded-2xl">
+                        <span className="text-[9px] text-bc-text-secondary">Membres visités</span>
+                        <span className="block font-ui font-bold text-bc-text">{rc.visitesRealisees.length} membre(s)</span>
+                      </div>
+                    )}
+                    {rc.incidents && (
+                      <p className="text-[10px] bg-white border border-bc-border rounded-2xl p-2 font-mono text-bc-purple mt-2">
+                        🚨 Incident: {rc.incidents}
                       </p>
                     )}
                   </div>
@@ -264,26 +307,31 @@ export default function ReportsView({
                 {selectedReport.reportType === 'rapport_bloom_bus_member' && (
                   <div className="space-y-3 text-xs">
                     <p className="font-bold text-bc-text">
-                      Suivi holistique du membre : <span className="text-bc-text">{selectedReport.content.memberName}</span>
+                      Suivi holistique du membre : <span className="text-bc-text">{rc.memberName}</span>
                     </p>
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mt-2">
                       <div className="flex justify-between border-b border-bc-border/40 py-1">
                         <span className="text-bc-text-secondary">Spirituel</span>
-                        <span className="font-bold font-mono">{selectedReport.content.sprVal}/5</span>
+                        <span className="font-bold font-mono">{rc.sprVal}/5</span>
                       </div>
                       <div className="flex justify-between border-b border-bc-border/40 py-1">
                         <span className="text-bc-text-secondary">Social</span>
-                        <span className="font-bold font-mono">{selectedReport.content.socVal}/5</span>
+                        <span className="font-bold font-mono">{rc.socVal}/5</span>
                       </div>
                       <div className="flex justify-between border-b border-bc-border/40 py-1">
                         <span className="text-bc-text-secondary">Financier</span>
-                        <span className="font-bold font-mono">{selectedReport.content.finVal}/5</span>
+                        <span className="font-bold font-mono">{rc.finVal}/5</span>
                       </div>
                       <div className="flex justify-between border-b border-bc-border/40 py-1">
                         <span className="text-bc-text-secondary">Physique</span>
-                        <span className="font-bold font-mono">{selectedReport.content.phyVal}/5</span>
+                        <span className="font-bold font-mono">{rc.phyVal}/5</span>
                       </div>
                     </div>
+                    {Array.isArray(rc.culteIds) && (
+                      <p className="text-bc-text-secondary">
+                        Présence au culte : <span className="font-bold text-bc-text">{rc.culteIds.length} culte(s)</span>
+                      </p>
+                    )}
                   </div>
                 )}
 
@@ -296,34 +344,38 @@ export default function ReportsView({
                     <div className="space-y-1 mt-2">
                       <div className="flex justify-between py-1 border-b">
                         <span className="text-bc-text-secondary">Niveau Spirituel</span>
-                        <span className="font-bold text-bc-purple">{selectedReport.content.spiritualLevel}</span>
+                        <span className="font-bold text-bc-purple">{rc.spiritualLevel}</span>
                       </div>
                       <div className="flex justify-between py-1 border-b">
                         <span className="text-bc-text-secondary">Leadership & Capacité</span>
-                        <span className="font-bold text-bc-purple">{selectedReport.content.leadershipLevel}</span>
+                        <span className="font-bold text-bc-purple">{rc.leadershipLevel}</span>
                       </div>
                     </div>
-                    {selectedReport.content.notes && (
+                    {rc.notes && (
                       <p className="font-serif italic text-bc-text-secondary leading-relaxed mt-2 pt-2 border-t">
-                        "{selectedReport.content.notes}"
+                        "{rc.notes}"
                       </p>
                     )}
                   </div>
                 )}
 
                 {selectedReport.reportType === 'rapport_portiers' && (
-                  <div className="grid grid-cols-3 gap-3 text-xs">
-                    <div className="p-2 bg-white border border-bc-border rounded-full text-center">
+                  <div className="grid grid-cols-4 gap-3 text-xs">
+                    <div className="p-2 bg-white border border-bc-border rounded-2xl text-center">
                       <span className="text-[9px] text-bc-text-secondary block">Hommes</span>
-                      <span className="font-ui font-bold">{selectedReport.content.men}</span>
+                      <span className="font-ui font-bold">{rc.men}</span>
                     </div>
-                    <div className="p-2 bg-white border border-bc-border rounded-full text-center">
+                    <div className="p-2 bg-white border border-bc-border rounded-2xl text-center">
                       <span className="text-[9px] text-bc-text-secondary block">Femmes</span>
-                      <span className="font-ui font-bold">{selectedReport.content.women}</span>
+                      <span className="font-ui font-bold">{rc.women}</span>
                     </div>
-                    <div className="p-2 bg-bc-green/10 border border-bc-border rounded-full text-center">
+                    <div className="p-2 bg-white border border-bc-border rounded-2xl text-center">
+                      <span className="text-[9px] text-bc-text-secondary block">En ligne</span>
+                      <span className="font-ui font-bold">{rc.online ?? 0}</span>
+                    </div>
+                    <div className="p-2 bg-bc-green/10 border border-bc-border rounded-2xl text-center">
                       <span className="text-[9px] text-bc-text-secondary block">Total</span>
-                      <span className="font-ui font-bold">{selectedReport.content.total}</span>
+                      <span className="font-ui font-bold">{rc.total}</span>
                     </div>
                   </div>
                 )}
@@ -331,8 +383,8 @@ export default function ReportsView({
                 {/* Fallback — types sans bloc dédié (service, rsa…) : jamais de panneau vide */}
                 {!['rapport_culte', 'rapport_adn', 'rapport_bloom_bus_life', 'rapport_bloom_bus_member', 'rapport_pastoral', 'rapport_portiers'].includes(selectedReport.reportType) && (
                   <div className="text-xs text-bc-text-secondary">
-                    {selectedReport.content?.notes ? (
-                      <p className="font-serif italic leading-relaxed">"{selectedReport.content.notes}"</p>
+                    {rc?.notes ? (
+                      <p className="font-serif italic leading-relaxed">"{rc.notes}"</p>
                     ) : (
                       <p className="italic">Détails du rapport non structurés.</p>
                     )}

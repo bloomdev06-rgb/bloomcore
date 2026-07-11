@@ -1,16 +1,20 @@
 import React, { useState } from 'react';
 import { ChevronLeft, ChevronRight, X } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
+import { Event } from '../types';
 
-// Fake event data for the calendar
-const EVENTS = [
-  { date: '2026-06-24', title: 'Culte Dominical 1', time: '08:00', location: 'Bloom Church', type: 'church' },
-  { date: '2026-06-28', title: 'Réunion de prière', time: '18:30', location: 'Salle A', type: 'prayer' },
-  { date: '2026-07-02', title: 'Formation des Leaders', time: '19:00', location: 'En ligne', type: 'training' },
-];
+const BRANCH_LABEL: Record<string, string> = { church: 'Bloom Church', light: 'Bloom Light', global: '2 branches' };
 
-export default function MiniCalendar() {
-  const [currentDate, setCurrentDate] = useState(new Date(2026, 5, 1)); // June 2026 as base
+export default function MiniCalendar({ events = [] }: { events?: Event[] }) {
+  // Événements réels mappés à la forme du calendrier (plus de données factices).
+  const EVENTS = events.map((e) => ({
+    date: e.date,
+    title: e.title,
+    location: BRANCH_LABEL[e.branch] ?? e.branch,
+    type: e.type,
+    closed: e.closed,
+  }));
+  const [currentDate, setCurrentDate] = useState(new Date()); // mois courant
   const [selectedEvent, setSelectedEvent] = useState<any | null>(null);
 
   const nextMonth = () => setCurrentDate(new Date(currentDate.getFullYear(), currentDate.getMonth() + 1, 1));
@@ -42,7 +46,7 @@ export default function MiniCalendar() {
         className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-medium transition-colors active-scale ease-out-spring ${
           event 
             ? 'bg-bc-green text-white shadow-md hover:scale-110' 
-            : 'text-slate-600 hover:bg-slate-100'
+            : 'text-bc-text-secondary hover:bg-bc-canvas'
         }`}
       >
         {d}
@@ -55,10 +59,10 @@ export default function MiniCalendar() {
       <div className="flex justify-between items-center mb-4">
         <h3 className="font-ui font-bold text-bc-text tracking-tight capitalize">{monthName}</h3>
         <div className="flex gap-2">
-          <button onClick={prevMonth} className="p-1.5 rounded-full hover:bg-slate-100 text-bc-text-secondary transition-colors">
+          <button onClick={prevMonth} className="p-1.5 rounded-full hover:bg-bc-canvas text-bc-text-secondary transition-colors active-scale">
             <ChevronLeft size={16} />
           </button>
-          <button onClick={nextMonth} className="p-1.5 rounded-full hover:bg-slate-100 text-bc-text-secondary transition-colors">
+          <button onClick={nextMonth} className="p-1.5 rounded-full hover:bg-bc-canvas text-bc-text-secondary transition-colors active-scale">
             <ChevronRight size={16} />
           </button>
         </div>
@@ -66,7 +70,7 @@ export default function MiniCalendar() {
 
       <div className="grid grid-cols-7 gap-1 mb-2">
         {['Lu', 'Ma', 'Me', 'Je', 'Ve', 'Sa', 'Di'].map(day => (
-          <div key={day} className="w-8 h-8 flex items-center justify-center text-[10px] font-bold text-slate-400">
+          <div key={day} className="w-8 h-8 flex items-center justify-center text-[10px] font-bold text-bc-text-secondary">
             {day}
           </div>
         ))}
@@ -85,7 +89,7 @@ export default function MiniCalendar() {
           >
             <button 
               onClick={() => setSelectedEvent(null)}
-              className="absolute top-2 right-2 p-1 rounded-full text-slate-400 hover:text-bc-text hover:bg-slate-200 transition-colors"
+              className="absolute top-2 right-2 p-1 rounded-full text-bc-text-secondary hover:text-bc-text hover:bg-bc-canvas transition-colors active-scale"
             >
               <X size={14} />
             </button>
@@ -94,7 +98,7 @@ export default function MiniCalendar() {
                 {new Date(selectedEvent.date).toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long' })}
               </span>
               <h4 className="font-bold text-bc-text text-sm mb-1">{selectedEvent.title}</h4>
-              <p className="text-xs text-bc-text-secondary">{selectedEvent.time} • {selectedEvent.location}</p>
+              <p className="text-xs text-bc-text-secondary">{selectedEvent.location}{selectedEvent.closed ? ' • Clôturé' : ''}</p>
             </div>
           </motion.div>
         )}

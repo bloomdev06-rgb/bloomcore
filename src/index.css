@@ -4,14 +4,36 @@
 /* Tailwind v4: drive the dark: variant from the .dark class (not the OS preference). */
 @custom-variant dark (&:where(.dark, .dark *));
 
-/* ponytail: partial dark mode — flips the bc-* semantic tokens only. Cards using
-   bg-white literally stay light until refactored to bc-surface (full dark mode). */
+/* ponytail: flips the bc-* semantic tokens, plus overrides the literal `bg-white`
+   utility (270+ call sites across 23 files) so existing cards go dark without a
+   per-file rewrite to bg-bc-surface. This rule is unlayered, so it beats Tailwind's
+   @layer utilities bg-white regardless of specificity. Ceiling: a handful of small
+   decorative bg-white elements (toggle knobs, status dots, avatar chips) also darken
+   — cosmetic only, not a functional break. Upgrade path if it bothers someone: give
+   those specific elements a literal dark:bg-white escape hatch. */
 html.dark {
   --color-bc-canvas: #0F172A;
   --color-bc-surface: #1E293B;
   --color-bc-border: #334155;
   --color-bc-text: #F1F5F9;
   --color-bc-text-secondary: #94A3B8;
+}
+
+html.dark .bg-white {
+  background-color: var(--color-bc-surface);
+}
+
+/* P5.2 — Mode Plein Soleil : lisibilité en plein soleil (terrain). +15% racine
+   (les utilitaires Tailwind text-, p-, gap- etc. sont en rem, donc police ET
+   boutons grossissent ensemble avec une seule règle) + contraste renforcé sur
+   le texte secondaire et les bordures. */
+html.plein-soleil {
+  font-size: 115%;
+}
+
+html.plein-soleil {
+  --color-bc-text-secondary: #334155;
+  --color-bc-border: #94A3B8;
 }
 
 @theme {
@@ -24,8 +46,8 @@ html.dark {
   --color-bc-green: #006C67; 
   --color-bc-green-hover: #005852; 
   --color-bc-green-dark: #075E54; 
-  --color-bc-warmgrey: #D6D1CB; 
-  --color-bc-gold: #D2AF1F; 
+  --color-bc-warmgrey: #CDD2D9; /* dé-beige : gris neutre froid (ex-warm #D6D1CB), aligné sur le texte slate. Nom conservé pour ne pas casser les usages. */
+  --color-bc-gold: #D2AF1F;
   
   --color-bc-fushia: #D62766;
   --color-bc-cerulean: #009BDE;
@@ -34,11 +56,22 @@ html.dark {
   --color-bc-orange: #F38B36;
   --color-bc-purple: #B21E28; 
   
-  --color-bc-canvas: #FFFFFF;
+  --color-bc-canvas: #F4F5F7;   /* dé-beige : off-white froid (ex-warm #F7F6F3) */
   --color-bc-surface: #FFFFFF;
-  --color-bc-border: #E7E3DD;
+  --color-bc-border: #E4E7EC;   /* dé-beige : gris froid clair (ex-warm #E7E3DD) */
   --color-bc-text: #0F172A;
   --color-bc-text-secondary: #5B6470;
+
+  /* P5.6 — alias sémantiques ; les usages existants (red-500, emerald-, amber-
+     littéraux dans les vues KPI) ne sont pas migrés ici, ampleur disproportionnée
+     pour un écart MINEUR. Ces tokens couvrent les nouveaux usages. */
+  --color-bc-primary: var(--color-bc-green);
+  --color-bc-success: #10B981;
+  --color-bc-warning: #F59E0B;
+  --color-bc-danger: #EF4444;
+
+  /* Ombre diffuse teintée (inspirée Veltrix) — additive, ne remplace aucun shadow-sm/md/xl existant. */
+  --shadow-soft: 0 0 13px rgba(236,236,241,.44);
 }
 
 @utility ease-out-spring {
@@ -53,11 +86,24 @@ html.dark {
 
 :root {
   /* Design system tokens */
-  --radius-input: 6px;
-  --radius-card: 12px;
+  /* ponytail: documents the real convention (rounded-[2rem]/rounded-2xl literals, 97+65
+     call sites) — not wired via var() into Tailwind classes, so changing these values here
+     does not itself change anything; keep them truthful to what the classes actually do. */
+  --radius-input: 8px;
+  --radius-tile: 16px;
+  --radius-panel: 32px;
   --radius-pill: 999px;
   --ease-standard: cubic-bezier(0.4, 0, 0.2, 1);
-  --dur: 200ms;
+  --dur: 250ms;
+
+  /* CHARTE-GRAPHIQUE.md §10 — accents de branche, réaffectés via [data-branch] sur <html>. */
+  --accent-1: var(--color-bc-cerulean);
+  --accent-2: var(--color-bc-anis);
+}
+
+[data-branch="light"] {
+  --accent-1: var(--color-bc-orange);
+  --accent-2: var(--color-bc-fushia);
 }
 
 /* Custom styles */
@@ -78,7 +124,7 @@ body {
   background: transparent;
 }
 ::-webkit-scrollbar-thumb {
-  background: #D6D1CB;
+  background: #CDD2D9;
   border-radius: 4px;
 }
 ::-webkit-scrollbar-thumb:hover {
