@@ -480,7 +480,22 @@ export const INITIAL_MEMBERS: Member[] = [
   ...TEST_PROFILES,
 ];
 
+// Cultes récurrents du dimanche — cohérents avec le formulaire (type/heure/récurrence/portée).
+// Quelques occurrences hebdomadaires générées d'avance depuis un dimanche connu (2026-07-12).
+const addWeeksISO = (iso: string, weeks: number) => {
+  const [y, m, d] = iso.split('-').map(Number);
+  return new Date(Date.UTC(y, m - 1, d + weeks * 7)).toISOString().slice(0, 10);
+};
+const sundayCulte = (idBase: string, title: string, time: string, branch: 'church' | 'light', weeks = 6): Event[] =>
+  Array.from({ length: weeks }, (_, i) => ({
+    id: `${idBase}_${i}`, title, type: 'Culte', date: addWeeksISO('2026-07-12', i), time,
+    branch, scope: branch, recurrence: 'weekly' as const, closed: false,
+  }));
+
 export const INITIAL_EVENTS: Event[] = [
+  ...sundayCulte('evt_culte_bc1', '1er culte Bloom Church', '07:00', 'church'),
+  ...sundayCulte('evt_culte_bl', 'Culte Bloom Light', '10:00', 'light'),
+  ...sundayCulte('evt_culte_bc2', '2e culte Bloom Church', '13:00', 'church'),
   { id: 'evt_1', title: 'Dimanche - 1er Culte de Gloire', type: 'dimanche_1er', date: '2026-06-21', branch: 'church', closed: true },
   { id: 'evt_2', title: 'Dimanche - 2e Culte de Célébration', type: 'dimanche_2e', date: '2026-06-21', branch: 'church', closed: true },
   { id: 'evt_3', title: 'Dimanche - Culte Unique Light', type: 'dimanche_unique', date: '2026-06-21', branch: 'light', closed: true },

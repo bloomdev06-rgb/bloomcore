@@ -20,6 +20,13 @@ export function Modal({ open, onClose, title, icon, children, maxWidth = "max-w-
   const panelRef = useRef<HTMLDivElement>(null)
   const titleId = useRef(`modal-title-${Math.random().toString(36).slice(2)}`).current
 
+  // `onClose` est recréé à chaque render du parent. Le garder dans une ref permet à l'effet
+  // ci-dessous de ne dépendre que de `open` : sinon il se ré-exécute à CHAQUE frappe/re-render
+  // et rappelle `firstFocusable.focus()` (= le bouton X, 1er focusable) → le focus « saute »
+  // hors du champ en cours de saisie. Deps [open] = focus initial une seule fois à l'ouverture.
+  const onCloseRef = useRef(onClose)
+  useEffect(() => { onCloseRef.current = onClose })
+
   useEffect(() => {
     if (!open) return
     const previouslyFocused = document.activeElement as HTMLElement | null
@@ -29,7 +36,7 @@ export function Modal({ open, onClose, title, icon, children, maxWidth = "max-w-
 
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
-        onClose()
+        onCloseRef.current()
         return
       }
       if (e.key !== "Tab" || !panel) return
@@ -53,7 +60,7 @@ export function Modal({ open, onClose, title, icon, children, maxWidth = "max-w-
       document.body.style.overflow = ""
       previouslyFocused?.focus()
     }
-  }, [open, onClose])
+  }, [open])
 
   if (!open) return null
 

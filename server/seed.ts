@@ -74,28 +74,34 @@ export function ensureSeeded(): void {
     console.log('[seed] production sans SEED_DEMO_PASSWORD → aucun credential seedé, activation requise.');
   }
 
+  // Events : contenu seed NON sensible → réconcilié dans TOUS les environnements, pour que les
+  // cultes récurrents ajoutés après le premier seed apparaissent sur une base déjà peuplée.
+  const addedEvents = reconcileMissingById('events', INITIAL_EVENTS);
+  if (addedEvents) console.log(`[seed] ${addedEvents} événement(s) seed ajouté(s).`);
+
   reconcileSeedMembers();
+}
+
+// Ajoute les items seed absents (par id) d'une collection SANS écraser l'existant ni
+// ressusciter un tombstone (un id présent, même supprimé, est ignoré). Idempotent.
+function reconcileMissingById(name: string, seed: any[]): number {
+  const current = getCollection(name);
+  const ids = new Set(current.map((x: any) => x.id));
+  const missing = seed.filter((x) => !ids.has(x.id));
+  if (missing.length) setCollection(name, [...current, ...missing]);
+  return missing.length;
 }
 
 // Réconcilie les membres/admins seed manquants dans une base déjà peuplée (ex. nouveaux
 // profils de test ajoutés après le premier seed) SANS écraser les données existantes :
 // ajoute uniquement ceux dont l'id est absent, et garantit un credential démo pour chacun.
-// Idempotent — exécuté à chaque démarrage.
+// Idempotent — exécuté à chaque démarrage. Gardé par DEMO_PASSWORD (données/credentials de test).
 function reconcileSeedMembers(): void {
   if (!DEMO_PASSWORD) return;
 
-  const members = getCollection('members');
-  const memberIds = new Set(members.map((m: any) => m.id));
-  const missingMembers = INITIAL_MEMBERS.filter((m) => !memberIds.has(m.id));
-  if (missingMembers.length) {
-    setCollection('members', [...members, ...missingMembers]);
-    console.log(`[seed] ${missingMembers.length} membre(s) seed ajouté(s) : ${missingMembers.map((m) => m.id).join(', ')}`);
-  }
-
-  const admins = getCollection('admins');
-  const adminIds = new Set(admins.map((a: any) => a.id));
-  const missingAdmins = INITIAL_ADMINS.filter((a) => !adminIds.has(a.id));
-  if (missingAdmins.length) setCollection('admins', [...admins, ...missingAdmins]);
+  const addedMembers = reconcileMissingById('members', INITIAL_MEMBERS);
+  if (addedMembers) console.log(`[seed] ${addedMembers} membre(s) seed ajouté(s).`);
+  reconcileMissingById('admins', INITIAL_ADMINS);
 
   const hasCred = db.prepare('SELECT 1 FROM credentials WHERE member_id = ?');
   const insertCred = db.prepare('INSERT OR IGNORE INTO credentials (member_id, password_hash) VALUES (?, ?)');

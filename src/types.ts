@@ -183,17 +183,20 @@ export interface AppNotification {
   targetMemberId?: string;
 }
 
+export type EventRecurrence = 'none' | 'daily' | 'weekly' | 'biweekly' | 'monthly';
+
 export interface Event {
   id: string;
   title: string;
-  type: 'dimanche_1er' | 'dimanche_2e' | 'dimanche_unique' | 'special_inside' | 'special_altar' | 'special_nss';
+  type: string; // Catégorie libre (Culte, Séminaire, Retraite…) — liste gérable + ajout de type
   date: string;
+  time?: string; // Heure de début 'HH:MM'
   branch: Branch;
   closed: boolean;
   scope?: 'church' | 'light' | 'both';
-  organizer?: string;
-  projectId?: string;
-  recurrence?: 'weekly'; // WORKFLOWS §10 — cultes récurrents auto-générés. undefined = ponctuel
+  organizer?: string; // Département organisateur : id de département OU 'church'/'light'/'both'
+  projectId?: string; // Projet lié (optionnel)
+  recurrence?: EventRecurrence; // undefined | 'none' = ponctuel ; sinon fréquence de répétition
 }
 
 export interface Report {

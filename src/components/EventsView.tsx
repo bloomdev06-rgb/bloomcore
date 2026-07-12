@@ -13,16 +13,13 @@ import {
   ArrowLeft,
   FileText,
   Activity,
-  List,
-  LayoutGrid,
+  Clock,
   Building2
 } from 'lucide-react';
 import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts';
-import { motion } from 'motion/react';
-import { staggerParent, staggerItem } from './ui/motion';
 import { Modal } from './ui/Modal';
-import { Event, Branch, Report, Member, FormDef } from '../types';
-import { useProjects } from '../data';
+import { Event, EventRecurrence, Branch, Report, Member, FormDef } from '../types';
+import { useProjects, useDepartments, load, save } from '../data';
 
 const RATINGS = [
   { v: 1, label: 'Très mal' },
@@ -65,14 +62,31 @@ interface EventsViewProps {
   forms?: FormDef[];
 }
 
-const TYPE_LABEL: Record<Event['type'], string> = {
-  dimanche_1er: '1er Culte',
-  dimanche_2e: '2e Culte',
-  dimanche_unique: 'Culte Unique',
-  special_inside: 'INside',
-  special_altar: 'Altar',
-  special_nss: 'NSS',
+// Anciens types internes (données seed/serveur existantes) → libellé lisible. Les nouveaux
+// types sont des chaînes libres (Culte, Séminaire…) affichées telles quelles.
+const LEGACY_TYPE_LABEL: Record<string, string> = {
+  dimanche_1er: '1er Culte', dimanche_2e: '2e Culte', dimanche_unique: 'Culte Unique',
+  special_inside: 'INside', special_altar: 'Altar', special_nss: 'NSS',
 };
+const typeLabel = (t: string) => LEGACY_TYPE_LABEL[t] ?? t;
+
+// Types d'événement par défaut (extensibles par l'utilisateur, persistés dans bc_event_types).
+const DEFAULT_EVENT_TYPES = ['Culte', 'Culte spécial', 'Séminaire', 'Retraite', 'Programme spécial'];
+
+const RECURRENCE_OPTIONS: { value: EventRecurrence; label: string }[] = [
+  { value: 'none', label: 'Aucune (événement unique)' },
+  { value: 'weekly', label: 'Chaque semaine' },
+  { value: 'biweekly', label: 'Toutes les 2 semaines' },
+  { value: 'monthly', label: 'Chaque mois' },
+  { value: 'daily', label: 'Chaque jour' },
+];
+
+// Portée / organisateur au niveau église (en plus des départements).
+const CHURCH_ORGANIZERS: { value: string; label: string }[] = [
+  { value: 'church', label: 'Bloom Church' },
+  { value: 'light', label: 'Bloom Light' },
+  { value: 'both', label: 'Les 2 églises' },
+];
 
 export default function EventsView({
   events,
@@ -92,20 +106,23 @@ export default function EventsView({
   const [showAddEventModal, setShowAddEventModal] = useState(false);
   const [showCounterModal, setShowCounterModal] = useState(false);
   const [presentServiteurs, setPresentServiteurs] = useState<string[]>([]);
-  const [filterType, setFilterType] = useState<'all' | Event['type']>('all');
+  const [filterType, setFilterType] = useState<string>('all');
   const [filterProject, setFilterProject] = useState('all');
   const toggleServiteur = (id: string) => setPresentServiteurs(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]);
   const [selectedEventId, setSelectedEventId] = useState<string | null>(null);
-  const [viewMode, setViewMode] = useState<'list' | 'calendar'>('list');
+
+  // Types d'événement gérables (Culte, Séminaire… + ajout par l'utilisateur), persistés.
+  const [eventTypes, setEventTypes] = useState<string[]>(() => load('bc_event_types', DEFAULT_EVENT_TYPES));
 
   // Event Form State
   const [eventTitle, setEventTitle] = useState('');
-  const [eventType, setEventType] = useState<'dimanche_1er' | 'dimanche_2e' | 'dimanche_unique' | 'special_inside' | 'special_altar' | 'special_nss'>('dimanche_unique');
+  const [eventType, setEventType] = useState<string>(() => (load('bc_event_types', DEFAULT_EVENT_TYPES)[0] ?? 'Culte'));
   const [eventDate, setEventDate] = useState('2026-06-28');
+  const [eventTime, setEventTime] = useState('');
   const [eventScope, setEventScope] = useState<'church' | 'light' | 'both'>('church');
   const [eventOrganizer, setEventOrganizer] = useState('');
   const [eventProject, setEventProject] = useState('');
-  const [eventRecurring, setEventRecurring] = useState(false); // D3 — culte hebdomadaire
+  const [eventRecurrence, setEventRecurrence] = useState<EventRecurrence>('none');
 
   // Counters State
   const [menPortiers, setMenPortiers] = useState(620);
@@ -143,6 +160,14 @@ export default function EventsView({
 
   // Filter events by branch — a 2-branches event (branch 'global') is visible from either branch.
   const projects = useProjects();
+  const departments = useDepartments();
+  // Résout l'organisateur (id de département ou mot-clé église) en libellé lisible.
+  const organizerLabel = (val?: string) => {
+    if (!val) return null;
+    const church = CHURCH_ORGANIZERS.find(c => c.value === val);
+    if (church) return church.label;
+    return departments.find(d => d.id === val)?.name ?? val;
+  };
   const branchEvents = events.filter(e => activeBranch === 'global' || e.branch === activeBranch || e.branch === 'global');
   const projectIds = Array.from(new Set(branchEvents.map(e => e.projectId).filter((id): id is string => !!id)));
   const filteredEvents = branchEvents
@@ -159,13 +184,34 @@ export default function EventsView({
       return { name: e.date.slice(5), affluence: p ? (p.content.total ?? 0) : 0 };
     });
 
-  // D3 (WORKFLOWS §10) — cultes récurrents. Décalage de jours sans dérive de fuseau
-  // (arithmétique en UTC pur, la date reste un 'YYYY-MM-DD').
+  // Décalage de date sans dérive de fuseau (arithmétique UTC pure, la date reste 'YYYY-MM-DD').
   const addDays = (iso: string, days: number) => {
     const [y, m, d] = iso.split('-').map(Number);
     return new Date(Date.UTC(y, m - 1, d + days)).toISOString().slice(0, 10);
   };
-  const RECUR_OCCURRENCES = 8; // ~2 mois d'avance. ponytail: horizon fixe, à rendre configurable si besoin.
+  const addMonths = (iso: string, months: number) => {
+    const [y, m, d] = iso.split('-').map(Number);
+    return new Date(Date.UTC(y, m - 1 + months, d)).toISOString().slice(0, 10);
+  };
+  // Génération anticipée d'occurrences selon la récurrence (une seule action de création, pas
+  // de régénération continue → pas de doublons). Horizon volontairement borné.
+  const occurrenceDate = (start: string, i: number, rec: EventRecurrence): string =>
+    rec === 'daily' ? addDays(start, i)
+    : rec === 'weekly' ? addDays(start, i * 7)
+    : rec === 'biweekly' ? addDays(start, i * 14)
+    : rec === 'monthly' ? addMonths(start, i)
+    : start;
+  const RECUR_COUNT: Record<EventRecurrence, number> = { none: 1, daily: 14, weekly: 8, biweekly: 6, monthly: 6 };
+
+  // Ajout d'un nouveau type d'événement (persisté dans bc_event_types), puis sélection.
+  const handleAddEventType = () => {
+    const name = window.prompt("Nom du nouveau type d'événement :")?.trim();
+    if (!name || eventTypes.includes(name)) { if (name) setEventType(name); return; }
+    const next = [...eventTypes, name];
+    setEventTypes(next);
+    save('bc_event_types', next);
+    setEventType(name);
+  };
 
   const handleCreateEvent = (e: React.FormEvent) => {
     e.preventDefault();
@@ -174,6 +220,7 @@ export default function EventsView({
     const base = {
       title: eventTitle,
       type: eventType,
+      time: eventTime || undefined,
       branch: eventScope === 'both' ? ('global' as const) : eventScope, // 2 branches → 'global'
       closed: false,
       scope: eventScope,
@@ -181,23 +228,22 @@ export default function EventsView({
       projectId: eventProject || undefined,
     };
 
-    // Hebdomadaire : on génère RECUR_OCCURRENCES occurrences d'avance en une fois (idempotent :
-    // une seule action de création, pas de régénération continue → pas de doublons).
-    const count = eventRecurring ? RECUR_OCCURRENCES : 1;
+    const count = RECUR_COUNT[eventRecurrence];
     for (let i = 0; i < count; i++) {
       onAddEvent({
         ...base,
         id: `evt_custom_${Date.now()}_${i}`,
-        date: addDays(eventDate, i * 7),
-        ...(eventRecurring ? { recurrence: 'weekly' as const } : {}),
+        date: occurrenceDate(eventDate, i, eventRecurrence),
+        ...(eventRecurrence !== 'none' ? { recurrence: eventRecurrence } : {}),
       });
     }
 
     setShowAddEventModal(false);
     setEventTitle('');
+    setEventTime('');
     setEventOrganizer('');
     setEventProject('');
-    setEventRecurring(false);
+    setEventRecurrence('none');
   };
 
   const handleSaveCounters = (e: React.FormEvent) => {
@@ -328,9 +374,9 @@ export default function EventsView({
               <div>
                 <h2 className="text-2xl font-ui font-extrabold text-bc-text">{selectedEvent.title}</h2>
                 <div className="flex items-center gap-3 mt-1 text-sm text-bc-text-secondary">
-                  <span className="font-mono text-xs">{selectedEvent.date}</span>
+                  <span className="font-mono text-xs">{selectedEvent.date}{selectedEvent.time ? ` · ${selectedEvent.time}` : ''}</span>
                   <span className="w-1 h-1 bg-bc-border rounded-full"></span>
-                  <span className="uppercase text-[10px] tracking-wider font-bold">{selectedEvent.type.replace('_', ' ')}</span>
+                  <span className="uppercase text-[10px] tracking-wider font-bold">{typeLabel(selectedEvent.type)}</span>
                   <span className="w-1 h-1 bg-bc-border rounded-full"></span>
                   <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${selectedEvent.closed ? 'bg-bc-canvas text-bc-text-secondary' : 'bg-bc-success/10 text-bc-success'}`}>
                     {selectedEvent.closed ? 'Clôturé' : 'En cours'}
@@ -357,7 +403,7 @@ export default function EventsView({
               <Building2 size={16} className="text-bc-text-secondary" />
               <span className="text-bc-text-secondary">Organisateur :</span>
               <span className="font-bold text-bc-text">
-                {selectedEvent.organizer || (selectedEvent.scope === 'both' ? 'Événement 2 branches' : 'Événement de branche')}
+                {organizerLabel(selectedEvent.organizer) || (selectedEvent.scope === 'both' ? 'Événement 2 branches' : 'Événement de branche')}
               </span>
             </div>
 
@@ -689,24 +735,16 @@ export default function EventsView({
         )}
       </div>
 
-      {/* Toolbar: view toggle + Sunday Stats */}
+      {/* Toolbar: filtres + Sunday Stats (vue = calendrier uniquement) */}
       <div className="flex flex-col lg:flex-row gap-4">
-        <div className="inline-flex bg-white border border-bc-border rounded-full p-1 self-start">
-          <button onClick={() => setViewMode('list')} className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold active:scale-95 ${viewMode === 'list' ? 'bg-bc-green text-white' : 'text-bc-text-secondary'}`}>
-            <List size={14} /> Liste
-          </button>
-          <button onClick={() => setViewMode('calendar')} className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold active:scale-95 ${viewMode === 'calendar' ? 'bg-bc-green text-white' : 'text-bc-text-secondary'}`}>
-            <LayoutGrid size={14} /> Calendrier
-          </button>
-        </div>
         <select
           value={filterType}
-          onChange={(e) => setFilterType(e.target.value as 'all' | Event['type'])}
+          onChange={(e) => setFilterType(e.target.value)}
           className="bg-white border border-bc-border rounded-full px-3 py-1.5 text-xs font-bold text-bc-text-secondary self-start"
         >
           <option value="all">Tous les types</option>
-          {Object.entries(TYPE_LABEL).map(([type, label]) => (
-            <option key={type} value={type}>{label}</option>
+          {eventTypes.map((t) => (
+            <option key={t} value={t}>{t}</option>
           ))}
         </select>
         {projectIds.length > 0 && (
@@ -744,42 +782,8 @@ export default function EventsView({
         )}
       </div>
 
-      {viewMode === 'calendar' && <MonthCalendar events={filteredEvents} onSelect={setSelectedEventId} />}
-
-      {/* Grid of Planned Events */}
-      <motion.div variants={staggerParent} initial="hidden" animate="show" className={`grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 ${viewMode === 'calendar' ? 'hidden' : ''}`}>
-        {filteredEvents.map((evt) => (
-          <motion.div
-            variants={staggerItem}
-            key={evt.id}
-            onClick={() => setSelectedEventId(evt.id)}
-            className="bg-white border border-bc-border shadow-sm rounded-[2rem] p-5 hover:shadow-md hover:border-bc-border cursor-pointer transition-all flex flex-col justify-between group"
-          >
-            <div>
-              <div className="flex justify-between items-start">
-                <div className={`p-2.5 rounded-2xl transition-colors ${evt.closed ? 'bg-bc-canvas text-bc-text-secondary group-hover:bg-bc-border/40' : 'bg-bc-green text-white'}`}>
-                  <Calendar size={20} />
-                </div>
-                <span className={`text-[9px] font-bold px-2 py-0.5 rounded-full border ${
-                  evt.closed ? 'bg-bc-canvas text-bc-text-secondary border-bc-border' : 'bg-bc-success/10 text-bc-success border-bc-success/20'
-                }`}>
-                  {evt.closed ? 'Clôturé' : 'En cours'}
-                </span>
-              </div>
-
-              <h4 className="font-ui font-bold text-bc-text text-[14px] mt-4 leading-tight group-hover:underline">{evt.title}</h4>
-              <p className="text-[10px] text-bc-text-secondary font-mono mt-1 uppercase tracking-wide">
-                Type : {evt.type.replace('_', ' ')}
-              </p>
-            </div>
-
-            <div className="border-t border-bc-border pt-3 mt-4 flex items-center justify-between text-[11px] text-bc-text-secondary">
-              <span className="font-mono">{evt.date}</span>
-              <span className="font-bold uppercase tracking-wider">{evt.branch}</span>
-            </div>
-          </motion.div>
-        ))}
-      </motion.div>
+      {/* Vue unique : calendrier */}
+      <MonthCalendar events={filteredEvents} onSelect={setSelectedEventId} />
 
       {/* Plan Event Modal */}
       {showAddEventModal && (
@@ -805,25 +809,24 @@ export default function EventsView({
                 />
               </div>
 
+              <div>
+                <label className="block text-xs font-bold text-bc-text mb-1">Type d'événement</label>
+                <select
+                  id="event-type-select"
+                  value={eventType}
+                  onChange={(e) => { if (e.target.value === '__add__') handleAddEventType(); else setEventType(e.target.value); }}
+                  className="w-full border border-bc-border rounded-full px-3 py-2 text-xs bg-white focus:outline-none"
+                >
+                  {eventTypes.map((t) => (
+                    <option key={t} value={t}>{t}</option>
+                  ))}
+                  <option value="__add__">➕ Ajouter un type…</option>
+                </select>
+              </div>
+
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-xs font-bold text-bc-text mb-1">Type d'événement</label>
-                  <select
-                    id="event-type-select"
-                    value={eventType}
-                    onChange={(e) => setEventType(e.target.value as any)}
-                    className="w-full border border-bc-border rounded-full px-3 py-2 text-xs bg-white focus:outline-none"
-                  >
-                    <option value="dimanche_1er">1er Culte Dimanche</option>
-                    <option value="dimanche_2e">2e Culte Dimanche</option>
-                    <option value="dimanche_unique">Culte Unique</option>
-                    <option value="special_inside">INside Spécial</option>
-                    <option value="special_altar">Altar Spécial</option>
-                    <option value="special_nss">Night of Supernatural</option>
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-xs font-bold text-bc-text mb-1">Date *</label>
+                  <label className="block text-xs font-bold text-bc-text mb-1">Date de début *</label>
                   <input
                     id="event-date-input"
                     type="date"
@@ -832,48 +835,81 @@ export default function EventsView({
                     onChange={(e) => setEventDate(e.target.value)}
                     className="w-full border border-bc-border rounded-full px-3 py-2 text-xs focus:outline-none focus:border-bc-green"
                   />
-                  {/* D3 — cultes récurrents (§10) */}
-                  <label className="flex items-center gap-2 mt-2 cursor-pointer">
-                    <input type="checkbox" checked={eventRecurring} onChange={(e) => setEventRecurring(e.target.checked)} className="accent-bc-green" />
-                    <span className="text-[11px] text-bc-text-secondary">Répéter chaque semaine ({RECUR_OCCURRENCES} occurrences)</span>
-                  </label>
-                </div>
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-xs font-bold text-bc-text mb-1">Portée</label>
-                  <select
-                    value={eventScope}
-                    onChange={(e) => setEventScope(e.target.value as 'church' | 'light' | 'both')}
-                    className="w-full border border-bc-border rounded-full px-3 py-2 text-xs bg-white focus:outline-none"
-                  >
-                    <option value="church">Bloom Church</option>
-                    <option value="light">Bloom Light</option>
-                    <option value="both">Les 2 branches</option>
-                  </select>
                 </div>
                 <div>
-                  <label className="block text-xs font-bold text-bc-text mb-1">Organisateur</label>
+                  <label className="block text-xs font-bold text-bc-text mb-1">Heure de début</label>
                   <input
-                    type="text"
-                    placeholder="Département / branche"
-                    value={eventOrganizer}
-                    onChange={(e) => setEventOrganizer(e.target.value)}
+                    id="event-time-input"
+                    type="time"
+                    value={eventTime}
+                    onChange={(e) => setEventTime(e.target.value)}
                     className="w-full border border-bc-border rounded-full px-3 py-2 text-xs focus:outline-none focus:border-bc-green"
                   />
                 </div>
               </div>
 
               <div>
-                <label className="block text-xs font-bold text-bc-text mb-1">Projet rattaché (optionnel)</label>
-                <input
-                  type="text"
-                  placeholder="ex: NSS 2026"
+                <label className="block text-xs font-bold text-bc-text mb-1">Récurrence</label>
+                <select
+                  id="event-recurrence-select"
+                  value={eventRecurrence}
+                  onChange={(e) => setEventRecurrence(e.target.value as EventRecurrence)}
+                  className="w-full border border-bc-border rounded-full px-3 py-2 text-xs bg-white focus:outline-none"
+                >
+                  {RECURRENCE_OPTIONS.map((o) => (
+                    <option key={o.value} value={o.value}>{o.label}</option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-bc-text mb-1">Portée</label>
+                <select
+                  value={eventScope}
+                  onChange={(e) => setEventScope(e.target.value as 'church' | 'light' | 'both')}
+                  className="w-full border border-bc-border rounded-full px-3 py-2 text-xs bg-white focus:outline-none"
+                >
+                  <option value="church">Bloom Church</option>
+                  <option value="light">Bloom Light</option>
+                  <option value="both">Les 2 branches</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-bc-text mb-1">Département organisateur</label>
+                <select
+                  id="event-organizer-select"
+                  value={eventOrganizer}
+                  onChange={(e) => setEventOrganizer(e.target.value)}
+                  className="w-full border border-bc-border rounded-full px-3 py-2 text-xs bg-white focus:outline-none"
+                >
+                  <option value="">— Aucun —</option>
+                  <optgroup label="Églises">
+                    {CHURCH_ORGANIZERS.map((c) => (
+                      <option key={c.value} value={c.value}>{c.label}</option>
+                    ))}
+                  </optgroup>
+                  <optgroup label="Départements">
+                    {departments.map((d) => (
+                      <option key={d.id} value={d.id}>{d.name}</option>
+                    ))}
+                  </optgroup>
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-bc-text mb-1">Projet lié (optionnel)</label>
+                <select
+                  id="event-project-select"
                   value={eventProject}
                   onChange={(e) => setEventProject(e.target.value)}
-                  className="w-full border border-bc-border rounded-full px-3 py-2 text-xs focus:outline-none focus:border-bc-green"
-                />
+                  className="w-full border border-bc-border rounded-full px-3 py-2 text-xs bg-white focus:outline-none"
+                >
+                  <option value="">— Aucun —</option>
+                  {projects.map((p) => (
+                    <option key={p.id} value={p.id}>{p.name}</option>
+                  ))}
+                </select>
               </div>
 
               <div className="flex gap-3 justify-end pt-3 border-t border-bc-border">
@@ -935,8 +971,8 @@ function MonthCalendar({ events, onSelect }: { events: Event[]; onSelect: (id: s
           <div key={i} className={`min-h-[64px] rounded-xl p-1 text-left ${d ? 'bg-bc-canvas/40 border border-bc-border' : ''}`}>
             {d && <div className="text-[10px] font-bold text-bc-text-secondary">{d}</div>}
             {d && byDay(d).map(e => (
-              <button key={e.id} onClick={() => onSelect(e.id)} className={`w-full mt-0.5 text-[9px] font-bold rounded px-1 py-0.5 truncate text-left active:scale-95 ${e.closed ? 'bg-bc-border text-bc-text-secondary' : 'bg-bc-green text-white'}`} title={e.title}>
-                {TYPE_LABEL[e.type]}
+              <button key={e.id} onClick={() => onSelect(e.id)} className={`w-full mt-0.5 text-[9px] font-bold rounded px-1 py-0.5 truncate text-left active:scale-95 ${e.closed ? 'bg-bc-border text-bc-text-secondary' : 'bg-bc-green text-white'}`} title={`${e.time ? e.time + ' · ' : ''}${e.title}`}>
+                {e.time ? `${e.time} ` : ''}{e.title}
               </button>
             ))}
           </div>
