@@ -1,6 +1,6 @@
 // Run: npx tsx src/data/completude.check.ts
 import assert from 'node:assert';
-import { memberReportStatus, weekFillWidget, subordinateFillRate } from './completude';
+import { memberReportStatus, memberWeekStatus, weekFillWidget, subordinateFillRate } from './completude';
 import type { Member, Report, BloomBusEntity, Department } from '../types';
 
 const now = new Date(2026, 6, 8); // mercredi 8/7/2026 — S-1 = 2026-06-29, S-2 = 2026-06-22
@@ -31,6 +31,17 @@ assert.equal(memberReportStatus('m1', [mkReport('m1', '2026-06-01')], now), 'red
 // weekOf absent -> dérivé de `date`.
 const legacy: Report = { ...mkReport('m1', S1), weekOf: undefined, date: '2026-06-30' };
 assert.equal(memberReportStatus('m1', [legacy], now), 'orange');
+
+// Validation capitaine — memberWeekStatus à 3 états + « en attente » non compté comme validé.
+const pending: Report = { ...mkReport('m1', S1), validated: false };
+const validS2: Report = { ...mkReport('m1', S2), validated: true };
+assert.equal(memberWeekStatus('m1', S1, []), 'empty');
+assert.equal(memberWeekStatus('m1', S1, [pending]), 'pending');
+assert.equal(memberWeekStatus('m1', S2, [validS2]), 'validated');
+assert.equal(memberWeekStatus('m1', S1, [mkReport('m1', S1)]), 'validated'); // undefined = validé (rétrocompat)
+// Un rapport en attente n'est PAS compté par la complétude : reste rouge ; seul le validé compte.
+assert.equal(memberReportStatus('m1', [pending], now), 'red');
+assert.equal(memberReportStatus('m1', [pending, validS2], now), 'orange');
 
 // weekFillWidget — 4/5 rouge (ok=false), 5/5 vert (ok=true).
 const roster5 = ['a', 'b', 'c', 'd', 'e'];

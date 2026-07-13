@@ -4,7 +4,7 @@
 // pas diverger sur la sémantique des capacités et du scope.
 import { Member, Ministry, PermissionMatrix, Delegation, AdminAccount, Department, BloomBusEntity } from '../src/types.ts';
 import { hasCapability } from '../src/data/permissions.ts';
-import { inMemberScope, canFillReportFor } from '../src/data/scope.ts';
+import { inMemberScope, canFillReportFor, bloomBusRoleOf } from '../src/data/scope.ts';
 import { getKv } from './db.ts';
 import { GuardError, readCollection, canonical } from './guards.ts';
 
@@ -194,6 +194,15 @@ export function assertCanWrite(name: string, ctx: RbacContext, incoming: any[]):
             const target = allMembers.find((m) => m.id === r.content.memberId);
             if (target && !canFillReportFor(member, target, scopeRole, allMembers, busLines, departments)) {
               throw new GuardError(403, `reports: ${r.id} hors de votre hiérarchie Bloom Bus`);
+            }
+            // Auto-validation interdite : un membre qui remplit SON propre rapport ne peut pas le
+            // marquer validé — la validation est réservée au capitaine (ou au-dessus).
+            if (r.content.memberId === member.id && r.validated === true) {
+              const captainOrAbove = ['Capitaine de Bus', 'Responsable de Zone', 'Responsable de Commune', 'Responsable']
+                .includes(bloomBusRoleOf(member, departments) ?? '');
+              if (!captainOrAbove) {
+                throw new GuardError(403, `reports: auto-validation interdite (réservée au capitaine)`);
+              }
             }
           }
         }

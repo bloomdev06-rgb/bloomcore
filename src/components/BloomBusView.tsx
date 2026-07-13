@@ -18,7 +18,8 @@ import { useBusLines, useDepartments, save } from "../data";
 import { busInScope, bloomBusRoleOf, fullBloomBusAccess, canFillReportFor, directReportsOf, canRegisterMemberViaBloomBus, FULL_SCOPE_ROLES } from "../data/scope";
 import { moissonTotal, busVisitesTotal, busPresenceCulteTotal, busActivitesTotal, dominantHealthLevel, Period, PeriodInput } from "../data/kpi";
 import { reportingWindow, weekId, weekLabel } from "../data/week";
-import { memberReportStatus, subordinateFillRate, rosterFillDetail } from "../data/completude";
+import { memberWeekStatus, subordinateFillRate, rosterFillDetail } from "../data/completude";
+import ReportStatusBoxes from "./ReportStatusBoxes";
 import { ResponsiveChart } from "./ui/ResponsiveChart";
 import { HEALTH_AXES, Ring } from "./DashboardView";
 import { HealthSmiley } from "./ui/HealthSmiley";
@@ -147,6 +148,10 @@ export default function BloomBusView({
   const departments = useDepartments();
   const bloomBusRole = operator ? bloomBusRoleOf(operator, departments) : undefined;
   const hasFullBloomBusAccess = operator ? fullBloomBusAccess(operator, simulatedRole, departments) : false;
+  // Un rapport saisi par un Capitaine (ou au-dessus) est validé d'office ; saisi par un membre
+  // pour lui-même → « en attente » de validation du capitaine.
+  const operatorAutoValidates = FULL_SCOPE_ROLES.includes(simulatedRole)
+    || ["Capitaine de Bus", "Responsable de Zone", "Responsable de Commune", "Responsable"].includes(bloomBusRole ?? "");
   const visibleBusLines = operator
     ? busLines.filter((b) => busInScope(operator, b, simulatedRole, busLines, departments))
     : busLines;
@@ -329,6 +334,12 @@ export default function BloomBusView({
   const fillableRosterIds = operator && !isHierarchicalOperator
     ? directReportsOf(operator, simulatedRole, members, busLines, departments).map((m) => m.id)
     : rosterMembers.map((m) => m.id);
+  // Rapports en attente de validation dans le roster (S-1 + S-2) — visible par le capitaine+.
+  const rosterPendingCount = operatorAutoValidates
+    ? rosterMembers.reduce((n, m) =>
+        n + (memberWeekStatus(m.id, s1, branchReports) === "pending" ? 1 : 0)
+          + (memberWeekStatus(m.id, s2, branchReports) === "pending" ? 1 : 0), 0)
+    : 0;
 
   const canEdit = [
     "Pasteur",
@@ -403,6 +414,7 @@ export default function BloomBusView({
       weekOf: selectedWeek,
       reportType: "rapport_bloom_bus_member",
       confidential: false,
+      validated: operatorAutoValidates, // capitaine+ = validé ; membre = en attente
       content: {
         memberId: targetMemberId,
         memberName: `${targetMember.firstName} ${targetMember.lastName}`,
@@ -415,6 +427,14 @@ export default function BloomBusView({
       },
     });
     setShowMemberReportModal(false);
+  };
+
+  // Validation par le capitaine : passe le rapport (membre, semaine) à validated:true (upsert par id).
+  const handleValidateReport = (memberId: string, week: string) => {
+    const r = branchReports.find(
+      (x) => x.reportType === "rapport_bloom_bus_member" && x.content?.memberId === memberId && (x.weekOf ?? weekId(x.date)) === week,
+    );
+    if (r) onAddReport({ ...r, validated: true });
   };
 
   const handleSaveLifeReport = (e: React.FormEvent) => {
@@ -816,7 +836,14 @@ export default function BloomBusView({
           {(selectedLevel.type === "bus" || isHierarchicalOperator) && !isMembre && (
             <div className="bg-white p-5 rounded-[2rem] border border-bc-border shadow-sm flex flex-col">
               <div className="flex items-center justify-between mb-4">
-                <h3 className="text-sm font-ui font-bold text-bc-text">{rosterTitle}</h3>
+                <div className="flex items-center gap-2">
+                  <h3 className="text-sm font-ui font-bold text-bc-text">{rosterTitle}</h3>
+                  {rosterPendingCount > 0 && (
+                    <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-bc-warning/15 text-bc-warning" title="Rapports en attente de votre validation">
+                      {rosterPendingCount} à valider
+                    </span>
+                  )}
+                </div>
                 {canRegisterMember && (
                   <button
                     id="bloombus-add-member-btn"
@@ -884,32 +911,38 @@ export default function BloomBusView({
                 ) : (
                   rosterMembers.map((m) => {
                     const editable = !!operator && canFillReportFor(operator, m, simulatedRole, members, busLines, departments);
-                    const status = memberReportStatus(m.id, branchReports, now);
-                    const statusDot = status === "green" ? "bg-bc-success" : status === "orange" ? "bg-bc-warning" : "bg-bc-danger";
                     return (
-                      <button
+                      <div
                         key={m.id}
-                        onClick={() => { if (editable) openMemberReport(m.id); }}
-                        disabled={!editable}
-                        className="w-full text-left p-3 bg-bc-canvas border border-bc-border rounded-xl flex items-center gap-3 hover:bg-bc-border/40 transition-colors disabled:cursor-default active-scale"
+                        className="w-full p-3 bg-bc-canvas border border-bc-border rounded-xl flex items-center gap-3"
                       >
-                        <div className="relative shrink-0">
+                        <button
+                          type="button"
+                          onClick={() => { if (editable) openMemberReport(m.id); }}
+                          disabled={!editable}
+                          className="flex items-center gap-3 min-w-0 flex-1 text-left hover:opacity-80 transition-opacity disabled:cursor-default active-scale"
+                        >
                           <Avatar
                             src={m.avatarUrl}
                             initials={`${m.firstName[0]}${m.lastName[0]}`}
                             size="sm"
-                            className="w-10 h-10 bg-white border border-bc-border text-bc-text text-xs shadow-sm"
+                            className="w-10 h-10 bg-white border border-bc-border text-bc-text text-xs shadow-sm shrink-0"
                           />
-                          <span className={`absolute -bottom-0.5 -right-0.5 w-3 h-3 rounded-full border-2 border-white ${statusDot}`} title={`Rapports S-1/S-2 : ${status}`} />
-                        </div>
-                        <div className="min-w-0 flex-1">
-                          <p className="text-sm font-bold text-bc-text truncate">
-                            {m.firstName} {m.lastName}
-                          </p>
-                          <p className="text-[10px] text-bc-text-secondary">{m.phone}</p>
-                        </div>
-                        {editable && <Heart size={14} className="text-bc-green shrink-0" />}
-                      </button>
+                          <div className="min-w-0 flex-1">
+                            <p className="text-sm font-bold text-bc-text truncate">
+                              {m.firstName} {m.lastName}
+                            </p>
+                            <p className="text-[10px] text-bc-text-secondary">{m.phone}</p>
+                          </div>
+                          {editable && <Heart size={14} className="text-bc-green shrink-0" />}
+                        </button>
+                        <ReportStatusBoxes
+                          memberId={m.id}
+                          reports={branchReports}
+                          now={now}
+                          onValidate={operatorAutoValidates ? (week) => handleValidateReport(m.id, week) : undefined}
+                        />
+                      </div>
                     );
                   })
                 )}

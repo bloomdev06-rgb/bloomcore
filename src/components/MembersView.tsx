@@ -23,7 +23,7 @@ import { Member, Branch, CommunityLevel, PastoralCursus, Report, AuditLog, Permi
 import { useDepartments, useBusLines, useMinistries } from "../data";
 import { isRed } from "../data/kpi";
 import { inMemberScope, FULL_SCOPE_ROLES } from "../data/scope";
-import { memberReportStatus } from "../data/completude";
+import ReportStatusBoxes from "./ReportStatusBoxes";
 import Member360View from "./Member360View";
 import MemberFormModal from "./MemberFormModal";
 import { Avatar } from "./ui/Avatar";
@@ -395,16 +395,6 @@ export default function MembersView({
                               : "bg-bc-green/10 text-bc-text border-bc-orange/30"
                           }`}
                         />
-                        {member.bloomBusId && (
-                          <span
-                            className={`absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full border-2 border-white ${
-                              { red: "bg-bc-danger", orange: "bg-bc-warning", green: "bg-bc-success" }[
-                                memberReportStatus(member.id, reports, new Date())
-                              ]
-                            }`}
-                            title="Complétude rapport Bloom Bus (S-1/S-2)"
-                          />
-                        )}
                       </div>
                       <div className="min-w-0">
                         <h3 className="font-ui font-bold text-bc-text text-sm truncate pr-2 leading-tight">
@@ -413,6 +403,11 @@ export default function MembersView({
                         <p className="text-[9px] text-bc-text-secondary font-bold uppercase tracking-wider truncate mt-0.5">
                           {member.profession || "Non renseignée"}
                         </p>
+                        {member.bloomBusId && (
+                          <div className="mt-1.5">
+                            <ReportStatusBoxes memberId={member.id} reports={reports} size={16} />
+                          </div>
+                        )}
                       </div>
                     </div>
 
@@ -563,16 +558,6 @@ export default function MembersView({
                                   : "bg-bc-green/10 text-bc-text border-bc-orange/30"
                               }`}
                             />
-                            {member.bloomBusId && (
-                              <span
-                                className={`absolute -bottom-0.5 -right-0.5 w-2 h-2 rounded-full border-2 border-white ${
-                                  { red: "bg-bc-danger", orange: "bg-bc-warning", green: "bg-bc-success" }[
-                                    memberReportStatus(member.id, reports, new Date())
-                                  ]
-                                }`}
-                                title="Complétude rapport Bloom Bus (S-1/S-2)"
-                              />
-                            )}
                           </div>
                           <div>
                             <div className="font-bold text-bc-text">
@@ -581,6 +566,11 @@ export default function MembersView({
                             <div className="text-[9px] text-bc-text-secondary uppercase font-bold tracking-wider">
                               {member.profession || "Non renseignée"}
                             </div>
+                            {member.bloomBusId && (
+                              <div className="mt-1">
+                                <ReportStatusBoxes memberId={member.id} reports={reports} size={16} />
+                              </div>
+                            )}
                           </div>
                         </div>
                       </td>

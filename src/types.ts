@@ -223,6 +223,10 @@ export interface Report {
   departmentId?: string; // P1.3 — rattache le rapport à un département (KPIs départementaux/ministère, via Department.ministryId)
   confidential: boolean;
   partagerAvecResponsableDept?: boolean; // §8.3 — lève le secret du rapport pastoral vers le Responsable
+  // Validation par le capitaine Bloom Bus (rapport_bloom_bus_member) : false = rempli par le
+  // membre, en attente de validation ; true = validé (rempli par le capitaine+ OU validé après
+  // coup). undefined = validé (rétrocompat des rapports d'avant ce workflow).
+  validated?: boolean;
   content: any; // Dynamic JSON content depending on the reportType
 }
 

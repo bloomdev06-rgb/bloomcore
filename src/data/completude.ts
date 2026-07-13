@@ -4,13 +4,28 @@ import { Member, Report, BloomBusEntity, Department } from '../types';
 import { reportingWindow, weekId } from './week';
 import { directReportsOf, bloomBusRoleOf } from './scope';
 
-function hasReportForWeek(targetId: string, weekOf: string, reports: Report[]): boolean {
-  return reports.some(
+// Rapport d'un membre pour une semaine (ou undefined si aucun).
+function reportForWeek(targetId: string, weekOf: string, reports: Report[]): Report | undefined {
+  return reports.find(
     (r) => r.reportType === 'rapport_bloom_bus_member' && r.content?.memberId === targetId && (r.weekOf ?? weekId(r.date)) === weekOf,
   );
 }
 
-// Pastille roster : vert si S-1 et S-2 remplis, orange si un seul, rouge si aucun.
+// Complétude = uniquement les rapports VALIDÉS. Un rapport « en attente » (validated === false)
+// n'est PAS compté comme rempli (validated undefined = rétrocompat → validé).
+function hasReportForWeek(targetId: string, weekOf: string, reports: Report[]): boolean {
+  const r = reportForWeek(targetId, weekOf, reports);
+  return !!r && r.validated !== false;
+}
+
+// Statut à trois états d'un rapport (membre, semaine), pour l'affichage à 2 cases devant le membre.
+export function memberWeekStatus(targetId: string, weekOf: string, reports: Report[]): 'empty' | 'pending' | 'validated' {
+  const r = reportForWeek(targetId, weekOf, reports);
+  if (!r) return 'empty';
+  return r.validated === false ? 'pending' : 'validated';
+}
+
+// Pastille roster : vert si S-1 et S-2 VALIDÉS, orange si un seul, rouge si aucun.
 export function memberReportStatus(targetId: string, reports: Report[], now: Date = new Date()): 'red' | 'orange' | 'green' {
   const { s1, s2 } = reportingWindow(now);
   const count = (hasReportForWeek(targetId, s1, reports) ? 1 : 0) + (hasReportForWeek(targetId, s2, reports) ? 1 : 0);
