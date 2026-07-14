@@ -1,28 +1,29 @@
 // =============================================================================
 // Jeu de données de TEST Bloom Bus — exécution MANUELLE sur une base live.
-// (La génération est aussi bakée dans server/seed.ts → apparaît sur une base fraîche.)
+// (La génération est aussi bakée dans server/seed.ts → apparaît sur une base fraîche
+//  ou au redémarrage via reconcile.)
 //
 //   Seed    : npx tsx server/seed-test-dataset.ts
 //   Nettoyer: npx tsx server/seed-test-dataset.ts --clean
 //
-// Toutes les entités portent l'id préfixe `stds_` + le marqueur nom "(TEST)" → supprimables
-// en une commande. IDEMPOTENT (le seed nettoie d'abord). Les mises à jour de comptes test
-// (mem_test_6/mem_test_10) + ministère (min_expansion) sont sauvegardées dans le KV
-// `stds_backup` et restaurées au --clean.
+// Entités préfixées `stds_` + marqueur nom "(TEST)". IDEMPOTENT. Les mises à jour de comptes
+// test / ministères sont sauvegardées dans le KV `stds_backup` et restaurées au --clean.
 // =============================================================================
 import { getCollection, setCollection, getKv, setKv, db } from './db.ts';
+import { hashPassword } from './auth.ts';
 import { buildTestDataset, patchTestProfiles, STDS_PREFIX } from './testDataset.ts';
 import type { Member, Ministry } from '../src/types.ts';
 
-// Attendre si le serveur écrit au même moment (SQLite, base partagée en conteneur).
-db.exec('PRAGMA busy_timeout = 8000');
+db.exec('PRAGMA busy_timeout = 8000'); // attendre si le serveur écrit en même temps
 
 const BACKUP_KEY = 'stds_backup';
+const DEMO_PASSWORD = process.env.SEED_DEMO_PASSWORD || (process.env.NODE_ENV === 'production' ? null : 'bloom2026');
 const CLEAN = process.argv.includes('--clean');
 
 const dropStds = (arr: any[]) => arr.filter((x) => !String(x.id).startsWith(STDS_PREFIX));
 function stripStds() {
   setCollection('members', dropStds(getCollection('members')));
+  setCollection('bus_lines', dropStds(getCollection('bus_lines')));
   setCollection('reports', getCollection('reports').filter((r: any) =>
     !String(r.id).startsWith(STDS_PREFIX)
     && !String(r.content?.memberId ?? '').startsWith(STDS_PREFIX)
@@ -46,12 +47,11 @@ function restoreBackup() {
 if (CLEAN) {
   restoreBackup();
   stripStds();
-  console.log('✓ Jeu de test Bloom Bus supprimé (entités `stds_` retirées, comptes test restaurés).');
+  console.log('✓ Jeu de test Bloom Bus supprimé (entités `stds_` retirées, comptes test/ministères restaurés).');
   process.exit(0);
 }
 
 // ---- SEED ----
-// 0) idempotence : repartir propre
 restoreBackup();
 stripStds();
 
@@ -60,24 +60,39 @@ const ministries = getCollection('ministries') as Ministry[];
 const departments = getCollection('departments') as any[];
 const busLines = getCollection('bus_lines') as any[];
 
-// 1) Sauvegarde AVANT modification des comptes test / ministère
+// Génération pure (aucune mutation ici).
+const ds = buildTestDataset(departments, busLines, members);
+
+// Sauvegarde AVANT patch (comptes test + tous les ministères touchés).
+const touchedMinistryIds = new Set(['min_expansion', ...ds.ministryTuteurs.map((t) => t.ministryId)]);
 const backup: Record<string, any[]> = { members: [], ministries: [] };
 for (const id of ['mem_test_6', 'mem_test_10']) { const m = members.find((x) => x.id === id); if (m) backup.members.push(structuredClone(m)); }
-const minExp = ministries.find((m) => m.id === 'min_expansion'); if (minExp) backup.ministries.push(structuredClone(minExp));
+for (const mi of ministries) if (touchedMinistryIds.has(mi.id)) backup.ministries.push(structuredClone(mi));
 setKv(BACKUP_KEY, backup);
 
-// 2) Patch comptes test + ministère, puis génération (module partagé avec seed.ts)
+// Patchs de cohérence.
 patchTestProfiles(members, ministries);
-const { members: gen, reports } = buildTestDataset(departments, busLines, members);
+for (const { ministryId, memberId } of ds.ministryTuteurs) {
+  const mi = ministries.find((m) => m.id === ministryId);
+  if (mi) mi.tuteurId = memberId;
+}
 
-// 3) Écriture
-setCollection('members', [...members, ...gen]);
-setCollection('reports', [...getCollection('reports'), ...reports]);
+// Écriture.
+setCollection('members', [...members, ...ds.members]);
+setCollection('reports', [...getCollection('reports'), ...ds.reports]);
 setCollection('ministries', ministries);
+setCollection('bus_lines', [...busLines, ...ds.newBuses]);
 
-const pending = gen.filter((m) => m.deptAttachmentStatus === 'pending').length;
+// Comptes de connexion des ministres.
+if (DEMO_PASSWORD) {
+  const insert = db.prepare('INSERT OR IGNORE INTO credentials (member_id, password_hash) VALUES (?, ?)');
+  for (const id of ds.credentialMemberIds) insert.run(id, hashPassword(DEMO_PASSWORD));
+}
+
+const pending = ds.members.filter((m) => m.deptAttachmentStatus === 'pending').length;
 console.log('✓ Jeu de données de test Bloom Bus généré.');
-console.log(`  Membres générés (stds_) : ${gen.length}  (dont ${pending} en attente « Origine Bloom Bus »)`);
-console.log(`  Rapports générés        : ${reports.length}`);
-console.log(`  Comptes test mis à jour : mem_test_6 (Responsable dept Bloom Bus), mem_test_10 (GPS), min_expansion.tuteurId=mem_test_5`);
+console.log(`  Membres générés (stds_) : ${ds.members.length}  (dont ${pending} en attente « Origine Bloom Bus »)`);
+console.log(`  Bloom Bus ajoutés        : ${ds.newBuses.length}`);
+console.log(`  Rapports générés         : ${ds.reports.length}`);
+console.log(`  Ministres avec login     : ${ds.credentialMemberIds.length}  (tél. +22505 98 00 00 0X / bloom2026)`);
 console.log('  Nettoyage : npx tsx server/seed-test-dataset.ts --clean');

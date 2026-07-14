@@ -32,10 +32,16 @@ const seedAdmins = SEED_TEST_PROFILES ? INITIAL_ADMINS : INITIAL_ADMINS.filter((
 // Jeu de données de test Bloom Bus (dev/staging uniquement, même gate que les profils de test) :
 // baké dans le seed pour apparaître sur une base FRAÎCHE. Patch aussi mem_test_6 (Responsable
 // dept Bloom Bus), mem_test_10 (GPS) et min_expansion.tuteurId (= mem_test_5). Exclu en prod.
-let testData: { members: any[]; reports: any[] } = { members: [], reports: [] };
+let testData: { members: any[]; reports: any[]; newBuses: any[]; ministryTuteurs: { ministryId: string; memberId: string }[]; credentialMemberIds: string[] } =
+  { members: [], reports: [], newBuses: [], ministryTuteurs: [], credentialMemberIds: [] };
 if (SEED_TEST_PROFILES) {
   patchTestProfiles(seedMembers, INITIAL_MINISTRIES);
   testData = buildTestDataset(INITIAL_DEPARTMENTS, INITIAL_BUS_LINES, seedMembers);
+  // Ministres de test = tuteurs de ministères (rôle Ministre dérivé de ministry.tuteurId).
+  for (const { ministryId, memberId } of testData.ministryTuteurs) {
+    const mi = INITIAL_MINISTRIES.find((m) => m.id === ministryId);
+    if (mi) mi.tuteurId = memberId;
+  }
 }
 
 const ARRAY_SEEDS: Record<string, any[]> = {
@@ -53,7 +59,7 @@ const ARRAY_SEEDS: Record<string, any[]> = {
   certifications: [],
   integration_reports: [],
   projects: INITIAL_PROJECTS,
-  bus_lines: INITIAL_BUS_LINES,
+  bus_lines: [...INITIAL_BUS_LINES, ...testData.newBuses],
 };
 
 const KV_SEEDS: Record<string, unknown> = {
@@ -76,10 +82,9 @@ export function ensureSeeded(): void {
   }
   const row = db.prepare('SELECT COUNT(*) as n FROM credentials').get() as { n: number };
   if (row.n === 0 && DEMO_PASSWORD) {
-    const insert = db.prepare('INSERT INTO credentials (member_id, password_hash) VALUES (?, ?)');
-    for (const m of INITIAL_MEMBERS) {
-      insert.run(m.id, hashPassword(DEMO_PASSWORD));
-    }
+    const insert = db.prepare('INSERT OR IGNORE INTO credentials (member_id, password_hash) VALUES (?, ?)');
+    for (const m of INITIAL_MEMBERS) insert.run(m.id, hashPassword(DEMO_PASSWORD));
+    for (const id of testData.credentialMemberIds) insert.run(id, hashPassword(DEMO_PASSWORD)); // ministres de test
   } else if (row.n === 0) {
     console.log('[seed] production sans SEED_DEMO_PASSWORD → aucun credential seedé, activation requise.');
   }
@@ -92,15 +97,26 @@ export function ensureSeeded(): void {
   // Jeu de test Bloom Bus (dev/staging) : réconcilié aussi sur une base DÉJÀ peuplée, pour
   // qu'un simple redémarrage suffise à faire apparaître les membres/rapports de test (sans wipe).
   if (SEED_TEST_PROFILES) {
+    reconcileMissingById('bus_lines', testData.newBuses);
     const tm = reconcileMissingById('members', testData.members);
     const tr = reconcileMissingById('reports', testData.reports);
     // Réapplique les patchs de cohérence même sur une base existante (mem_test_6 = Responsable
-    // dept Bloom Bus, mem_test_10 GPS, min_expansion.tuteurId) → redéploiement sans wipe suffit.
+    // dept Bloom Bus, mem_test_10 GPS, tuteurs de ministères) → redéploiement sans wipe suffit.
     const curMembers = getCollection('members');
     const curMinistries = getCollection('ministries');
     patchTestProfiles(curMembers, curMinistries);
+    for (const { ministryId, memberId } of testData.ministryTuteurs) {
+      const mi = curMinistries.find((m: any) => m.id === ministryId);
+      if (mi) mi.tuteurId = memberId;
+    }
     setCollection('members', curMembers);
     setCollection('ministries', curMinistries);
+    // Comptes de connexion des ministres de test (INSERT OR IGNORE).
+    if (DEMO_PASSWORD) {
+      const hasCred = db.prepare('SELECT 1 FROM credentials WHERE member_id = ?');
+      const insertCred = db.prepare('INSERT OR IGNORE INTO credentials (member_id, password_hash) VALUES (?, ?)');
+      for (const id of testData.credentialMemberIds) if (!hasCred.get(id)) insertCred.run(id, hashPassword(DEMO_PASSWORD));
+    }
     if (tm || tr) console.log(`[seed] jeu de test Bloom Bus réconcilié : +${tm} membre(s), +${tr} rapport(s).`);
   }
 

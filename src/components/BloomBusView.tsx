@@ -320,14 +320,22 @@ export default function BloomBusView({
   // §6-7 — au-delà de Capitaine de Bus, le roster de saisie n'est plus "les membres du
   // bus" mais les subordonnés directs (directReportsOf gère déjà chaque palier).
   const isHierarchicalOperator = !!operator && (hasFullBloomBusAccess || bloomBusRole === "Responsable de Zone" || bloomBusRole === "Responsable de Commune");
-  const rosterMembers = isHierarchicalOperator && operator
-    ? directReportsOf(operator, simulatedRole, members, busLines, departments)
-    : busMembers;
-  const rosterTitle = !isHierarchicalOperator
+  // Quand un BUS précis est sélectionné, le roster montre LES MEMBRES DE CE BUS (busMembers,
+  // filtré par selectedLevel.id) — sinon un opérateur hiérarchique verrait la même liste fixe
+  // (ses subordonnés directs) dans chaque bus. Aux niveaux root/commune/zone, on garde la vue
+  // hiérarchique (directReportsOf) : « Mes Responsables de Commune / Zone / Capitaines ».
+  const rosterMembers = selectedLevel.type === "bus"
+    ? busMembers
+    : isHierarchicalOperator && operator
+      ? directReportsOf(operator, simulatedRole, members, busLines, departments)
+      : busMembers;
+  const rosterTitle = selectedLevel.type === "bus"
     ? "Membres du Bus"
-    : bloomBusRole === "Responsable de Zone" ? "Mes Capitaines de Bus"
-    : bloomBusRole === "Responsable de Commune" ? "Mes Responsables de Zone"
-    : "Mes Responsables de Commune"; // Responsable (dept-lead) ou accès complet (Pasteur/Admin)
+    : !isHierarchicalOperator
+      ? "Membres du Bus"
+      : bloomBusRole === "Responsable de Zone" ? "Mes Capitaines de Bus"
+      : bloomBusRole === "Responsable de Commune" ? "Mes Responsables de Zone"
+      : "Mes Responsables de Commune"; // Responsable (dept-lead) ou accès complet (Pasteur/Admin)
   // La complétude (anneau) d'un Capitaine ne doit compter que les membres pour qui il PEUT
   // remplir un rapport (directReportsOf) : sinon un autre capitaine/lead rattaché au même bus,
   // non remplissable, reste éternellement "incomplet" et l'anneau n'atteint jamais 100 %.
