@@ -317,25 +317,29 @@ export default function BloomBusView({
   const visitesPct = busMembers.length > 0 ? Math.min(100, Math.round((visites / busMembers.length) * 100)) : null;
   const presenceCultePct = busMembers.length > 0 ? Math.min(100, Math.round((presenceCulte / busMembers.length) * 100)) : null;
 
-  // §6-7 — au-delà de Capitaine de Bus, le roster de saisie n'est plus "les membres du
-  // bus" mais les subordonnés directs (directReportsOf gère déjà chaque palier).
   const isHierarchicalOperator = !!operator && (hasFullBloomBusAccess || bloomBusRole === "Responsable de Zone" || bloomBusRole === "Responsable de Commune");
-  // Quand un BUS précis est sélectionné, le roster montre LES MEMBRES DE CE BUS (busMembers,
-  // filtré par selectedLevel.id) — sinon un opérateur hiérarchique verrait la même liste fixe
-  // (ses subordonnés directs) dans chaque bus. Aux niveaux root/commune/zone, on garde la vue
-  // hiérarchique (directReportsOf) : « Mes Responsables de Commune / Zone / Capitaines ».
-  const rosterMembers = selectedLevel.type === "bus"
-    ? busMembers
-    : isHierarchicalOperator && operator
-      ? directReportsOf(operator, simulatedRole, members, busLines, departments)
-      : busMembers;
-  const rosterTitle = selectedLevel.type === "bus"
-    ? "Membres du Bus"
-    : !isHierarchicalOperator
-      ? "Membres du Bus"
-      : bloomBusRole === "Responsable de Zone" ? "Mes Capitaines de Bus"
-      : bloomBusRole === "Responsable de Commune" ? "Mes Responsables de Zone"
-      : "Mes Responsables de Commune"; // Responsable (dept-lead) ou accès complet (Pasteur/Admin)
+  // Le roster reflète le NIVEAU sélectionné (comme la carte, cf. leaderPins) et requête les
+  // entités PROPRES à ce niveau — pas les subordonnés fixes de l'opérateur relabellisés :
+  //   root    → Responsables de Commune (sur les bus visibles)
+  //   commune → Responsables de Zone (des bus de cette commune)
+  //   zone    → Capitaines de Bus (des bus de cette zone)
+  //   bus     → membres du bus
+  // Le scope est préservé : visibleBusLines/activeBuses sont déjà filtrés au périmètre de l'opérateur.
+  const rosterMembers = (() => {
+    if (selectedLevel.type === "bus") return busMembers;
+    const wantRole = selectedLevel.type === "root" ? "Responsable de Commune"
+      : selectedLevel.type === "commune" ? "Responsable de Zone"
+      : "Capitaine de Bus"; // zone
+    const scopeBusIds = new Set((selectedLevel.type === "root" ? visibleBusLines : activeBuses).map((b) => b.id));
+    return members.filter((m) =>
+      bloomBusRoleOf(m, departments) === wantRole
+      && !!m.bloomBusId && scopeBusIds.has(m.bloomBusId)
+      && (activeBranch === "global" || m.branch === activeBranch));
+  })();
+  const rosterTitle = selectedLevel.type === "bus" ? "Membres du Bus"
+    : selectedLevel.type === "root" ? "Responsables de Commune"
+    : selectedLevel.type === "commune" ? "Responsables de Zone"
+    : "Capitaines de Bus"; // zone
   // La complétude (anneau) d'un Capitaine ne doit compter que les membres pour qui il PEUT
   // remplir un rapport (directReportsOf) : sinon un autre capitaine/lead rattaché au même bus,
   // non remplissable, reste éternellement "incomplet" et l'anneau n'atteint jamais 100 %.
@@ -437,13 +441,42 @@ export default function BloomBusView({
     setShowMemberReportModal(false);
   };
 
-  // Validation par le capitaine : passe le rapport (membre, semaine) à validated:true (upsert par id).
-  const handleValidateReport = (memberId: string, week: string) => {
-    const r = branchReports.find(
-      (x) => x.reportType === "rapport_bloom_bus_member" && x.content?.memberId === memberId && (x.weekOf ?? weekId(x.date)) === week,
-    );
-    if (r) onAddReport({ ...r, validated: true });
+  // Rapport existant d'un (membre, semaine) — sert à l'afficher (lecture/validation).
+  const reportFor = (memberId: string, week: string) =>
+    branchReports.find((r) => r.reportType === "rapport_bloom_bus_member" && r.content?.memberId === memberId && (r.weekOf ?? weekId(r.date)) === week);
+
+  // Le supérieur OUVRE le rapport déjà rempli par le membre (pour le lire), au lieu de valider à l'aveugle.
+  const openValidateReport = (memberId: string, week: string) => {
+    setTargetMemberId(memberId);
+    setSelectedWeek(week); // → l'effet ci-dessous charge le contenu du rapport dans le formulaire
+    setShowMemberReportModal(true);
   };
+
+  // Validation effective : passe le rapport (membre, semaine) à validated:true, puis ferme.
+  const handleValidateReport = (memberId: string, week: string) => {
+    const r = reportFor(memberId, week);
+    if (r) onAddReport({ ...r, validated: true });
+    setShowMemberReportModal(false);
+  };
+
+  // Affiche le rapport RÉELLEMENT rempli par le membre : pré-remplit le formulaire avec le
+  // contenu du (membre, semaine) sélectionné ; vierge s'il n'existe pas encore (saisie).
+  useEffect(() => {
+    if (!showMemberReportModal || !selectedWeek) return;
+    const r = reportFor(targetMemberId, selectedWeek);
+    setSprVal(r?.content?.sprVal ?? null);
+    setSocVal(r?.content?.socVal ?? null);
+    setFinVal(r?.content?.finVal ?? null);
+    setPhyVal(r?.content?.phyVal ?? null);
+    setCulte(r?.content?.culte ?? null);
+    setObservation(r?.content?.observation ?? "");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [showMemberReportModal, selectedWeek, targetMemberId]);
+
+  // Rapport de la semaine affichée en attente de validation ET l'opérateur peut valider (supérieur).
+  const currentReport = selectedWeek ? reportFor(targetMemberId, selectedWeek) : undefined;
+  const canValidateCurrent = !!currentReport && currentReport.validated === false
+    && operatorAutoValidates && !!operator && targetMemberId !== operator.id;
 
   const handleSaveLifeReport = (e: React.FormEvent) => {
     e.preventDefault();
@@ -842,7 +875,9 @@ export default function BloomBusView({
             </div>
           )}
           {(selectedLevel.type === "bus" || isHierarchicalOperator) && !isMembre && (
-            <div className="bg-white p-5 rounded-[2rem] border border-bc-border shadow-sm flex flex-col">
+            // max-h borne le panneau → la liste interne (flex-1 overflow-y-auto) défile
+            // au lieu d'allonger la page quand les membres sont nombreux.
+            <div className="bg-white p-5 rounded-[2rem] border border-bc-border shadow-sm flex flex-col max-h-[80vh]">
               <div className="flex items-center justify-between mb-4">
                 <div className="flex items-center gap-2">
                   <h3 className="text-sm font-ui font-bold text-bc-text">{rosterTitle}</h3>
@@ -948,7 +983,7 @@ export default function BloomBusView({
                           memberId={m.id}
                           reports={branchReports}
                           now={now}
-                          onValidate={operatorAutoValidates ? (week) => handleValidateReport(m.id, week) : undefined}
+                          onValidate={operatorAutoValidates ? (week) => openValidateReport(m.id, week) : undefined}
                         />
                       </div>
                     );
@@ -963,9 +998,9 @@ export default function BloomBusView({
 
       {/* Modals */}
       {showMemberReportModal && (
-        <Modal open={showMemberReportModal} onClose={() => setShowMemberReportModal(false)} title="Suivi Spirituel Membre" maxWidth="max-w-md">
+        <Modal open={showMemberReportModal} onClose={() => setShowMemberReportModal(false)} title={canValidateCurrent ? "Valider le rapport du membre" : "Suivi Spirituel Membre"} maxWidth="max-w-md">
             <p className="text-xs text-bc-text-secondary mb-6">
-              Évaluez la santé spirituelle (Rapport hebdomadaire).
+              {canValidateCurrent ? "Rapport rempli par le membre — relisez-le puis validez." : "Évaluez la santé spirituelle (Rapport hebdomadaire)."}
             </p>
             <form onSubmit={handleSaveMemberHealth} className="space-y-5">
               <div className="p-3 rounded-xl bg-bc-canvas border border-bc-border">
@@ -974,6 +1009,12 @@ export default function BloomBusView({
                   {(() => { const t = members.find((m) => m.id === targetMemberId); return t ? `${t.firstName} ${t.lastName}` : "—"; })()}
                 </span>
               </div>
+
+              {canValidateCurrent && (
+                <div className="p-3 rounded-xl bg-bc-warning/10 border border-bc-warning/30 text-[11px] text-bc-text">
+                  Rapport <strong>rempli par le membre</strong>, en attente de votre validation. Relisez les valeurs ci-dessous puis cliquez <strong>Valider</strong>.
+                </div>
+              )}
 
               {memberEvolutionData.length > 0 && (
                 <div className="p-3 rounded-xl border border-bc-border">
@@ -1059,10 +1100,19 @@ export default function BloomBusView({
                 <button
                   type="submit"
                   disabled={!selectedWeek || sprVal == null || socVal == null || finVal == null || phyVal == null || !culte}
-                  className="px-5 py-2.5 bg-bc-green text-white rounded-full text-xs font-bold hover:opacity-90 transition-colors active-scale disabled:opacity-40 disabled:cursor-not-allowed"
+                  className={`px-5 py-2.5 rounded-full text-xs font-bold transition-colors active-scale disabled:opacity-40 disabled:cursor-not-allowed ${canValidateCurrent ? "bg-bc-canvas text-bc-text-secondary hover:bg-bc-border/40" : "bg-bc-green text-white hover:opacity-90"}`}
                 >
-                  Enregistrer
+                  {canValidateCurrent ? "Corriger" : "Enregistrer"}
                 </button>
+                {canValidateCurrent && (
+                  <button
+                    type="button"
+                    onClick={() => handleValidateReport(targetMemberId, selectedWeek)}
+                    className="px-5 py-2.5 bg-bc-green text-white rounded-full text-xs font-bold hover:opacity-90 transition-colors active-scale"
+                  >
+                    Valider
+                  </button>
+                )}
               </div>
             </form>
         </Modal>

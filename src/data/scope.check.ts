@@ -134,7 +134,12 @@ assert.equal(canFillReportFor(zoneLead1, capC, 'Responsable de Zone', hierMember
 const communeReports = directReportsOf(communeLead, 'Responsable de Commune', hierMembers, hierBusLines, hierDepts).map((m) => m.id).sort();
 assert.deepEqual(communeReports, ['zoneLead1', 'zoneLead2']);
 assert.equal(canFillReportFor(communeLead, zoneLead2, 'Responsable de Commune', hierMembers, hierBusLines, hierDepts), true);
-assert.equal(canFillReportFor(communeLead, capA, 'Responsable de Commune', hierMembers, hierBusLines, hierDepts), false);
+// Autorité territoriale : le Responsable de Commune peut remplir le rapport de tout membre
+// dont le bus est dans sa commune (capA/membre1 sur bus_z1a, Cocody), pas seulement ses zones.
+assert.equal(canFillReportFor(communeLead, capA, 'Responsable de Commune', hierMembers, hierBusLines, hierDepts), true);
+assert.equal(canFillReportFor(communeLead, membre1, 'Responsable de Commune', hierMembers, hierBusLines, hierDepts), true);
+// Un SIMPLE membre ne remplit QUE le sien, jamais un autre membre de son bus.
+assert.equal(canFillReportFor(membre1, capA, 'Membre', hierMembers, hierBusLines, hierDepts), false);
 
 // Responsable (dept-lead) -> les Responsables de Commune.
 const deptReports = directReportsOf(deptLead, 'Responsable', hierMembers, hierBusLines, hierDepts).map((m) => m.id).sort();
@@ -143,7 +148,8 @@ assert.deepEqual(deptReports, ['communeLead', 'communeLead2']);
 // Pasteur/Admin (FULL_SCOPE_ROLES) -> les dept-leads.
 assert.deepEqual(directReportsOf(pasteur, 'Pasteur', hierMembers, hierBusLines, hierDepts).map((m) => m.id), ['deptLead']);
 assert.equal(canFillReportFor(pasteur, deptLead, 'Pasteur', hierMembers, hierBusLines, hierDepts), true);
-assert.equal(canFillReportFor(pasteur, communeLead, 'Pasteur', hierMembers, hierBusLines, hierDepts), false);
+// Accès complet (Pasteur/Admin) : peut remplir le rapport de tout membre rattaché à un bus.
+assert.equal(canFillReportFor(pasteur, communeLead, 'Pasteur', hierMembers, hierBusLines, hierDepts), true);
 
 // Auto-remplissage toujours autorisé, à tout palier, même sans être un supérieur de qui que ce soit.
 assert.equal(canFillReportFor(membre1, membre1, 'Membre', hierMembers, hierBusLines, hierDepts), true);

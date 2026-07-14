@@ -159,8 +159,13 @@ export function canRegisterMemberViaBloomBus(operator: Member, role: string, dep
   return !!bbRole && ['Capitaine de Bus', 'Responsable de Zone', 'Responsable de Commune'].includes(bbRole);
 }
 
-// Une personne remplit toujours son propre rapport (auto-évaluation) en plus de ceux de
-// ses subordonnés directs — même règle à tous les paliers.
+// Qui peut remplir le rapport d'un membre :
+//  - soi-même (auto-évaluation) ;
+//  - ses subordonnés directs (hiérarchie de saisie) ;
+//  - AUTORITÉ TERRITORIALE : un « responsable » (accès complet, Responsable de Zone/Commune,
+//    Capitaine) peut remplir le rapport de tout membre dont le bus est dans sa portée
+//    (busInScope). Ainsi, en descendant dans un bus, on remplit les rapports de ses membres.
+//    Un SIMPLE membre ne remplit que le sien (pas les autres de son bus).
 export function canFillReportFor(
   operator: Member,
   target: Member,
@@ -170,5 +175,11 @@ export function canFillReportFor(
   departments: Department[],
 ): boolean {
   if (target.id === operator.id) return true;
-  return directReportsOf(operator, role, members, busLines, departments).some((m) => m.id === target.id);
+  if (directReportsOf(operator, role, members, busLines, departments).some((m) => m.id === target.id)) return true;
+  const bbRole = bloomBusRoleOf(operator, departments);
+  const isManager = FULL_SCOPE_ROLES.includes(role)
+    || ['Capitaine de Bus', 'Responsable de Zone', 'Responsable de Commune', 'Responsable'].includes(bbRole ?? '');
+  if (!isManager) return false;
+  const bus = busLines.find((b) => b.id === target.bloomBusId);
+  return !!bus && busInScope(operator, bus, role, busLines, departments);
 }
