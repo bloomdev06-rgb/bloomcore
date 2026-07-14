@@ -14,8 +14,12 @@
 // - N'écrit que dans les collections `members`, `reports`, `ministries` (+ le KV backup).
 //   Aucun nouveau compte de connexion n'est créé.
 // =============================================================================
-import { getCollection, setCollection, getKv, setKv } from './db.ts';
+import { getCollection, setCollection, getKv, setKv, db } from './db.ts';
 import type { Member, Report, Ministry, CommunityLevel, DeptFunction } from '../src/types.ts';
+
+// Attendre (au lieu d'échouer) si le serveur écrit au même moment — utile quand le script
+// tourne dans le conteneur pendant que l'API est active (SQLite, base partagée).
+db.exec('PRAGMA busy_timeout = 8000');
 
 const PREFIX = 'stds_';
 const BACKUP_KEY = 'stds_backup';
