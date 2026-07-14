@@ -96,31 +96,36 @@ export function ensureSeeded(): void {
   const addedEvents = reconcileMissingById('events', INITIAL_EVENTS);
   if (addedEvents) console.log(`[seed] ${addedEvents} événement(s) seed ajouté(s).`);
 
-  // Jeu de test Bloom Bus (dev/staging) : réconcilié aussi sur une base DÉJÀ peuplée, pour
-  // qu'un simple redémarrage suffise à faire apparaître les membres/rapports de test (sans wipe).
+  // Jeu de test Bloom Bus (dev/staging) : REFRESH à chaque démarrage. Les ids `stds_` étant
+  // déterministes, on retire l'ancien jeu puis on ré-injecte la génération COURANTE → toute
+  // évolution (noms, structure) s'applique au simple redéploiement, sans wipe. Les données
+  // NON-`stds_` (membres réels, profils test, édits) sont conservées.
   if (SEED_TEST_PROFILES) {
-    reconcileMissingById('bus_lines', testData.newBuses);
-    const tm = reconcileMissingById('members', testData.members);
-    const tr = reconcileMissingById('reports', testData.reports);
-    // Réapplique les patchs de cohérence même sur une base existante (mem_test_6 = Responsable
-    // dept Bloom Bus, mem_test_10 GPS, tuteurs de ministères) → redéploiement sans wipe suffit.
-    const curMembers = getCollection('members');
+    const keepMembers = getCollection('members').filter((m: any) => !String(m.id).startsWith('stds_'));
+    const keepReports = getCollection('reports').filter((r: any) =>
+      !String(r.id).startsWith('stds_')
+      && !String(r.content?.memberId ?? '').startsWith('stds_')
+      && !String(r.content?.busId ?? '').startsWith('stds_'));
+    const keepBuses = getCollection('bus_lines').filter((b: any) => !String(b.id).startsWith('stds_'));
     const curMinistries = getCollection('ministries');
-    patchTestProfiles(curMembers, curMinistries);
+    patchTestProfiles(keepMembers, curMinistries);
     for (const { ministryId, memberId } of testData.ministryTuteurs) {
       const mi = curMinistries.find((m: any) => m.id === ministryId);
       if (mi) mi.tuteurId = memberId;
     }
-    attachAllToBus(curMembers, getCollection('bus_lines') as any[]); // tous rattachés à un bus
-    setCollection('members', curMembers);
+    const allBuses = [...keepBuses, ...testData.newBuses];
+    const allMembers = [...keepMembers, ...testData.members];
+    attachAllToBus(allMembers, allBuses); // tous les membres rattachés à un bus
+    setCollection('bus_lines', allBuses);
+    setCollection('members', allMembers);
+    setCollection('reports', [...keepReports, ...testData.reports]);
     setCollection('ministries', curMinistries);
-    // Comptes de connexion des ministres de test (INSERT OR IGNORE).
     if (DEMO_PASSWORD) {
       const hasCred = db.prepare('SELECT 1 FROM credentials WHERE member_id = ?');
       const insertCred = db.prepare('INSERT OR IGNORE INTO credentials (member_id, password_hash) VALUES (?, ?)');
       for (const id of testData.credentialMemberIds) if (!hasCred.get(id)) insertCred.run(id, hashPassword(DEMO_PASSWORD));
     }
-    if (tm || tr) console.log(`[seed] jeu de test Bloom Bus réconcilié : +${tm} membre(s), +${tr} rapport(s).`);
+    console.log(`[seed] jeu de test Bloom Bus rafraîchi : ${testData.members.length} membres, ${testData.reports.length} rapports.`);
   }
 
   reconcileSeedMembers();

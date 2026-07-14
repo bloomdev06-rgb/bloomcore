@@ -117,8 +117,9 @@ export function buildTestDataset(departments: Department[], existingBusLines: Bl
     const phone = login ? `+2250598${String(minPhone++).padStart(6, '0')}` : `+2250599${String(regPhone++).padStart(6, '0')}`;
     return {
       id,
+      // Prénom + nom décorrélés (variété) + numéro unique → aucun doublon de nom, clairement test.
       firstName: FIRST[i % FIRST.length],
-      lastName: `${LAST[i % LAST.length]} (TEST)`,
+      lastName: `${LAST[Math.floor(i / FIRST.length) % LAST.length]} (TEST-${String(i + 1).padStart(3, '0')})`,
       phone,
       email: `${id}@bloom.test`,
       gender: i % 2 === 0 ? 'H' : 'F',
