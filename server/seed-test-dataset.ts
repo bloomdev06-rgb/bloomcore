@@ -11,7 +11,7 @@
 // =============================================================================
 import { getCollection, setCollection, getKv, setKv, db } from './db.ts';
 import { hashPassword } from './auth.ts';
-import { buildTestDataset, patchTestProfiles, STDS_PREFIX } from './testDataset.ts';
+import { buildTestDataset, patchTestProfiles, attachAllToBus, STDS_PREFIX } from './testDataset.ts';
 import type { Member, Ministry } from '../src/types.ts';
 
 db.exec('PRAGMA busy_timeout = 8000'); // attendre si le serveur écrit en même temps
@@ -66,7 +66,13 @@ const ds = buildTestDataset(departments, busLines, members);
 // Sauvegarde AVANT patch (comptes test + tous les ministères touchés).
 const touchedMinistryIds = new Set(['min_expansion', ...ds.ministryTuteurs.map((t) => t.ministryId)]);
 const backup: Record<string, any[]> = { members: [], ministries: [] };
-for (const id of ['mem_test_6', 'mem_test_10']) { const m = members.find((x) => x.id === id); if (m) backup.members.push(structuredClone(m)); }
+const backedUp = new Set<string>();
+// Sauvegarde tout membre qui sera muté : patchés (mem_test_6/10) + ceux sans bus (rattachés).
+for (const m of members) {
+  if ((m.id === 'mem_test_6' || m.id === 'mem_test_10' || !m.bloomBusId) && !backedUp.has(m.id)) {
+    backup.members.push(structuredClone(m)); backedUp.add(m.id);
+  }
+}
 for (const mi of ministries) if (touchedMinistryIds.has(mi.id)) backup.ministries.push(structuredClone(mi));
 setKv(BACKUP_KEY, backup);
 
@@ -77,8 +83,12 @@ for (const { ministryId, memberId } of ds.ministryTuteurs) {
   if (mi) mi.tuteurId = memberId;
 }
 
+// TOUS les membres (existants + générés) rattachés à un bus.
+const allMembers = [...members, ...ds.members];
+attachAllToBus(allMembers, [...busLines, ...ds.newBuses]);
+
 // Écriture.
-setCollection('members', [...members, ...ds.members]);
+setCollection('members', allMembers);
 setCollection('reports', [...getCollection('reports'), ...ds.reports]);
 setCollection('ministries', ministries);
 setCollection('bus_lines', [...busLines, ...ds.newBuses]);

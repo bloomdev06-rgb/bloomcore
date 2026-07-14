@@ -19,7 +19,7 @@ import {
   INITIAL_PROJECTS,
   INITIAL_BUS_LINES,
 } from '../src/mockData.ts';
-import { buildTestDataset, patchTestProfiles } from './testDataset.ts';
+import { buildTestDataset, patchTestProfiles, attachAllToBus } from './testDataset.ts';
 
 // H1 — les 18 profils de test + comptes admin de test (mem_test_*/adm_mem_test_*) ne sont
 // seedés QUE là où un mot de passe démo est prévu (dev/staging via SEED_DEMO_PASSWORD).
@@ -42,6 +42,8 @@ if (SEED_TEST_PROFILES) {
     const mi = INITIAL_MINISTRIES.find((m) => m.id === ministryId);
     if (mi) mi.tuteurId = memberId;
   }
+  // TOUS les membres rattachés à un bus (profils test réutilisés + membres seed de base).
+  attachAllToBus(seedMembers, [...INITIAL_BUS_LINES, ...testData.newBuses]);
 }
 
 const ARRAY_SEEDS: Record<string, any[]> = {
@@ -109,6 +111,7 @@ export function ensureSeeded(): void {
       const mi = curMinistries.find((m: any) => m.id === ministryId);
       if (mi) mi.tuteurId = memberId;
     }
+    attachAllToBus(curMembers, getCollection('bus_lines') as any[]); // tous rattachés à un bus
     setCollection('members', curMembers);
     setCollection('ministries', curMinistries);
     // Comptes de connexion des ministres de test (INSERT OR IGNORE).

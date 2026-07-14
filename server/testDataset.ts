@@ -34,6 +34,21 @@ export function patchTestProfiles(members: Member[], ministries: Ministry[]): vo
   if (minExp) minExp.tuteurId = 'mem_test_5';
 }
 
+// Rattache à un Bloom Bus TOUT membre qui n'en a pas encore (comptes test réutilisés, membres
+// seed de base). Round-robin sur les bus fournis (un seul bus par membre, aucun chevauchement).
+// GPS posé sur le centre du bus si absent. À appeler sur la collection complète (env. de test).
+export function attachAllToBus(members: Member[], buses: BloomBusEntity[]): void {
+  if (!buses.length) return;
+  let k = 0;
+  for (const m of members) {
+    if (!m.bloomBusId) {
+      const b = buses[k++ % buses.length];
+      m.bloomBusId = b.id;
+      if (!m.gps) m.gps = { lat: b.centerLat, lng: b.centerLng, commune: b.commune };
+    }
+  }
+}
+
 const FIRST = ['Awa', 'Koffi', 'Adjoua', 'Yao', 'Aya', 'Kouadio', 'Mariam', 'Ibrahim', 'Fatou', 'Seydou', 'Aicha', 'Moussa', 'Rokia', 'Bakary', 'Nafi', 'Drissa', 'Salif', 'Kadi', 'Oumar', 'Bintou', 'Sekou', 'Ramata', 'Vamara', 'Assita', 'Idrissa', 'Mariama', 'Amadou', 'Djeneba', 'Lassina', 'Fanta'];
 const LAST = ['Koné', 'Traoré', 'Ouattara', 'Diallo', 'Bamba', 'Cissé', 'Touré', 'Coulibaly', 'Fofana', 'Sanogo', 'Kouassi', 'Yao', 'Doumbia', 'Sylla', 'Camara'];
 const CULTES = ['1er culte Bloom Church', '2e culte Bloom Church', 'Culte Bloom Light'];
@@ -273,6 +288,19 @@ export function buildTestDataset(departments: Department[], existingBusLines: Bl
       deptAttachmentStatus: 'pending', deptAttachmentOrigin: 'bloom_bus',
       gps: { lat: jitter(b.centerLat, i), lng: jitter(b.centerLng, i), commune: b.commune },
     }));
+  }
+
+  // -------- TOUS les membres rattachés à un Bloom Bus --------
+  // Ceux sans bus (membres de département, cursus pastoral, nouveaux, ministres « purs »)
+  // reçoivent un bloomBusId réparti en round-robin sur les 14 bus (un seul bus chacun,
+  // aucun chevauchement) + un GPS proche de ce bus pour la carte.
+  let bc = 0;
+  for (const m of members) {
+    if (!m.bloomBusId) {
+      const b = allBuses[bc++ % allBuses.length];
+      m.bloomBusId = b.id;
+      m.gps = { lat: jitter(b.centerLat, bc + 3), lng: jitter(b.centerLng, bc + 5), commune: b.commune };
+    }
   }
 
   return { members, reports, newBuses: NEW_BUSES, ministryTuteurs, credentialMemberIds };
