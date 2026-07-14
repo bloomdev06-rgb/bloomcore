@@ -1,4 +1,5 @@
 import React, { useState, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import { Member, Branch, Report, AuditLog, PermissionMatrix, Delegation, FormDef } from '../types';
 import { useDepartments, useBusLines, useProjects, load, hasCapability } from '../data';
 import { isRed } from '../data/kpi';
@@ -136,7 +137,10 @@ export default function Member360View({ member, onClose, onEdit, onUpdate, repor
 
   const isAtRisk = isRed(member);
 
-  return (
+  // createPortal vers document.body : sinon l'overlay `fixed` est capté par un ancêtre avec
+  // `filter`/`transform` (l'animation de page dans App.tsx laisse `filter: blur(0px)`), ce qui
+  // le décale hors écran quand la page est longue (beaucoup de membres) → la fiche « ne s'affiche pas ».
+  return createPortal(
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
       <div className="bg-bc-canvas rounded-[2.5rem] w-full max-w-5xl h-[90vh] border border-bc-border shadow-2xl relative flex flex-col overflow-hidden">
         
@@ -667,6 +671,7 @@ export default function Member360View({ member, onClose, onEdit, onUpdate, repor
           onClose={() => setShowPhotoLightbox(false)}
         />
       )}
-    </div>
+    </div>,
+    document.body,
   );
 }
