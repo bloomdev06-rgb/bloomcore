@@ -42,6 +42,49 @@ export function weekFillWidget(rosterIds: string[], weekOf: string, reports: Rep
   return { filled: filledIds.size, total: rosterIds.length, ok: rosterIds.length > 0 && filledIds.size === rosterIds.length };
 }
 
+// Taux de remplissage RÉEL d'un ensemble de membres pour une semaine : proportion ayant
+// SOUMIS un rapport (rempli = en attente OU validé). C'est la source unique des 2 disques et
+// de la synthèse d'évolution — branché directement sur les rapports des membres du niveau
+// affiché, donc bouge dès qu'un membre remplit et de nouveau quand un supérieur valide.
+export function membersFillRate(
+  memberIds: string[],
+  weekOf: string,
+  reports: Report[],
+): { pct: number; filled: string[]; validated: string[]; pending: string[]; missing: string[] } {
+  const validated: string[] = [];
+  const pending: string[] = [];
+  const missing: string[] = [];
+  for (const id of memberIds) {
+    const st = memberWeekStatus(id, weekOf, reports);
+    if (st === 'validated') validated.push(id);
+    else if (st === 'pending') pending.push(id);
+    else missing.push(id);
+  }
+  const filled = [...validated, ...pending];
+  const pct = memberIds.length ? Math.round((filled.length / memberIds.length) * 100) : 0;
+  return { pct, filled, validated, pending, missing };
+}
+
+// Évolution du taux de remplissage semaine par semaine, sur les mêmes membres/rapports que les
+// disques — pour la synthèse. Les semaines proviennent des rapports réellement présents (ordre
+// chronologique), complétées par `extraWeeks` (ex. S-1/S-2) pour garantir les semaines courantes.
+export function fillRateEvolution(
+  memberIds: string[],
+  reports: Report[],
+  extraWeeks: string[] = [],
+): { week: string; pct: number }[] {
+  const ids = new Set(memberIds);
+  const weeks = new Set<string>(extraWeeks);
+  for (const r of reports) {
+    if (r.reportType === 'rapport_bloom_bus_member' && ids.has(r.content?.memberId)) {
+      weeks.add(r.weekOf ?? weekId(r.date));
+    }
+  }
+  return Array.from(weeks)
+    .sort()
+    .map((w) => ({ week: w, pct: membersFillRate(memberIds, w, reports).pct }));
+}
+
 // Disque cliquable niveau bus (Capitaine) — parmi les membres du roster direct (pas de
 // sous-hiérarchie à ce niveau, donc pas de subordinateFillRate), qui a un rapport pour `weekOf`.
 export function rosterFillDetail(rosterIds: string[], weekOf: string, reports: Report[]): { pct: number; filled: string[]; missing: string[] } {

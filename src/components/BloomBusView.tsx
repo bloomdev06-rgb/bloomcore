@@ -15,10 +15,10 @@ import {
 import { LineChart, Line, XAxis, YAxis, Tooltip, Legend } from "recharts";
 import { Member, Branch, BloomBusEntity, Report, Event, FormDef } from "../types";
 import { useBusLines, useDepartments, save } from "../data";
-import { busInScope, bloomBusRoleOf, fullBloomBusAccess, canFillReportFor, directReportsOf, canRegisterMemberViaBloomBus, FULL_SCOPE_ROLES } from "../data/scope";
+import { busInScope, bloomBusRoleOf, fullBloomBusAccess, canFillReportFor, canRegisterMemberViaBloomBus, FULL_SCOPE_ROLES } from "../data/scope";
 import { moissonTotal, busVisitesTotal, busPresenceCulteTotal, busActivitesTotal, dominantHealthLevel, Period, PeriodInput } from "../data/kpi";
 import { reportingWindow, weekId, weekLabel } from "../data/week";
-import { memberWeekStatus, subordinateFillRate, rosterFillDetail } from "../data/completude";
+import { memberWeekStatus, membersFillRate, fillRateEvolution } from "../data/completude";
 import ReportStatusBoxes from "./ReportStatusBoxes";
 import { ResponsiveChart } from "./ui/ResponsiveChart";
 import { HEALTH_AXES, Ring } from "./DashboardView";
@@ -307,6 +307,10 @@ export default function BloomBusView({
       m.level !== "Nouveau" &&
       (activeBranch === "global" || m.branch === activeBranch), // étanchéité par branche §3
   );
+  // Source unique des disques de remplissage + de la synthèse d'évolution : les membres réels
+  // du Bloom Bus au niveau territorial affiché (bus → ses membres ; zone/commune/racine → tous
+  // les membres des bus en portée). Le taux se recalcule à chaque remplissage/validation.
+  const busMemberIds = busMembers.map((m) => m.id);
   const branchReports = reports.filter(
     (r) => activeBranch === "global" || r.targetBranch === activeBranch,
   );
@@ -340,12 +344,6 @@ export default function BloomBusView({
     : selectedLevel.type === "root" ? "Responsables de Commune"
     : selectedLevel.type === "commune" ? "Responsables de Zone"
     : "Capitaines de Bus"; // zone
-  // La complétude (anneau) d'un Capitaine ne doit compter que les membres pour qui il PEUT
-  // remplir un rapport (directReportsOf) : sinon un autre capitaine/lead rattaché au même bus,
-  // non remplissable, reste éternellement "incomplet" et l'anneau n'atteint jamais 100 %.
-  const fillableRosterIds = operator && !isHierarchicalOperator
-    ? directReportsOf(operator, simulatedRole, members, busLines, departments).map((m) => m.id)
-    : rosterMembers.map((m) => m.id);
   // Rapports en attente de validation dans le roster (S-1 + S-2) — visible par le capitaine+.
   const rosterPendingCount = operatorAutoValidates
     ? rosterMembers.reduce((n, m) =>
@@ -387,6 +385,10 @@ export default function BloomBusView({
     (r) => r.reportType === "rapport_bloom_bus_member" && busMembers.some((m) => m.id === r.content?.memberId) && (activeBranch === "global" || r.targetBranch === activeBranch),
   );
   const busEvolutionData = healthEvolutionSeries(busHealthReports);
+  // Évolution du taux de remplissage par semaine — mêmes membres/rapports que les disques, donc
+  // le dernier point (S-1) coïncide avec le disque S-1. S-1/S-2 garantis même sans rapport.
+  const fillEvolutionData = fillRateEvolution(busMemberIds, branchReports, [s2, s1])
+    .map((d) => ({ week: weekLabel(d.week).replace("Semaine du ", ""), pct: d.pct }));
 
   // Évolution personnelle du membre ouvert dans la modale de suivi.
   const memberHealthReports = reports.filter(
@@ -808,6 +810,28 @@ export default function BloomBusView({
             )}
           </div>
         </div>
+
+        {/* Synthèse — évolution du taux de remplissage par semaine (mêmes données que les disques) */}
+        <div className="bg-white p-5 rounded-[2rem] border border-bc-border shadow-sm flex flex-col shrink-0">
+          <h3 className="text-sm font-ui font-bold text-bc-text mb-1 flex items-center gap-2">
+            <TrendingUp size={16} /> Évolution du remplissage
+          </h3>
+          <p className="text-[10px] text-bc-text-secondary mb-4">% de membres ayant rempli leur rapport, semaine par semaine{busMembers.length ? ` (sur ${busMembers.length} membres)` : ""}.</p>
+          {fillEvolutionData.length === 0 ? (
+            <p className="text-xs text-bc-text-secondary italic text-center py-6 flex-1 flex items-center justify-center">Aucun rapport de membre à synthétiser pour l'instant.</p>
+          ) : (
+            <div className="h-48 min-w-0">
+              <ResponsiveChart height="100%" minHeight={150}>
+                <LineChart data={fillEvolutionData}>
+                  <XAxis dataKey="week" fontSize={9} axisLine={false} tickLine={false} />
+                  <YAxis domain={[0, 100]} fontSize={9} axisLine={false} tickLine={false} width={28} tickFormatter={(v) => `${v}%`} />
+                  <Tooltip contentStyle={{ borderRadius: "1rem", border: "none", boxShadow: "0 4px 6px -1px rgb(0 0 0 / 0.1)", fontSize: 11 }} formatter={(v) => [`${v}%`, "Remplissage"]} />
+                  <Line type="monotone" dataKey="pct" name="Remplissage" stroke="var(--accent-1)" strokeWidth={2} dot={{ r: 3 }} />
+                </LineChart>
+              </ResponsiveChart>
+            </div>
+          )}
+        </div>
         </>
         )}
 
@@ -898,24 +922,22 @@ export default function BloomBusView({
                 )}
               </div>
               <p className="text-[10px] text-bc-text-secondary mb-3">Clique un membre pour faire son rapport de suivi.</p>
-              {/* §6-7 — disque de remplissage cliquable, visible à tous les niveaux avec un
-                  roster : subordinateFillRate (a-t-il rempli SES subordonnés) au-delà du bus,
-                  rosterFillDetail (a-t-il un rapport direct) au niveau bus/Capitaine. */}
-              {operator && rosterMembers.length > 0 && (
+              {/* §6-7 — disques de remplissage cliquables : taux RÉEL des membres du Bloom Bus au
+                  niveau affiché (membersFillRate sur busMemberIds), identique à tous les niveaux.
+                  Se recalcule dès qu'un rapport est rempli (en attente) ou validé. */}
+              {operator && busMemberIds.length > 0 && (
                 <div className="flex items-center gap-4 mb-3 px-1 pb-3 border-b border-bc-border">
                   {([s2, s1] as const).map((w) => {
-                    const rate = isHierarchicalOperator
-                      ? subordinateFillRate(operator, simulatedRole, members, branchReports, busLines, departments, w)
-                      : rosterFillDetail(fillableRosterIds, w, branchReports);
+                    const rate = membersFillRate(busMemberIds, w, branchReports);
                     return (
                       <button
                         key={w}
                         type="button"
                         onClick={() => setFillPopover(fillPopover === w ? null : w)}
                         className="flex items-center gap-2 active-scale"
-                        title="Voir qui a complété son roster"
+                        title="Voir le remplissage des membres du Bloom Bus"
                       >
-                        <Ring value={rate.pct} total={100} color={rate.pct === 100 ? "var(--color-bc-success)" : rate.pct > 0 ? "var(--color-bc-warning)" : "var(--color-bc-danger)"} size={28} onClick={() => setFillPopover(fillPopover === w ? null : w)} />
+                        <Ring value={rate.pct} total={100} color={rate.missing.length === 0 && rate.pending.length === 0 ? "var(--color-bc-success)" : rate.pct > 0 ? "var(--color-bc-warning)" : "var(--color-bc-danger)"} size={28} onClick={() => setFillPopover(fillPopover === w ? null : w)} />
                         <span className="text-[10px] font-bold text-bc-text-secondary text-left">
                           {weekLabel(w)}<br />{rate.pct}%
                         </span>
@@ -924,22 +946,20 @@ export default function BloomBusView({
                   })}
                 </div>
               )}
-              {operator && fillPopover && (() => {
-                const rate = isHierarchicalOperator
-                  ? subordinateFillRate(operator, simulatedRole, members, branchReports, busLines, departments, fillPopover)
-                  : rosterFillDetail(rosterMembers.map((m) => m.id), fillPopover, branchReports);
+              {operator && fillPopover && busMemberIds.length > 0 && (() => {
+                const rate = membersFillRate(busMemberIds, fillPopover, branchReports);
                 const nameOf = (id: string) => { const m = members.find((mm) => mm.id === id); return m ? `${m.firstName} ${m.lastName}` : id; };
                 return (
                   <div className="mb-3 p-3 bg-bc-canvas border border-bc-border rounded-xl text-[11px] space-y-2">
-                    <p className="font-bold text-bc-text">{weekLabel(fillPopover)}</p>
-                    {rate.filled.length > 0 && (
-                      <p><span className="text-bc-success font-bold">✓ Complet :</span> {rate.filled.map(nameOf).join(", ")}</p>
+                    <p className="font-bold text-bc-text">{weekLabel(fillPopover)} — {rate.pct}% rempli</p>
+                    {rate.validated.length > 0 && (
+                      <p><span className="text-bc-success font-bold">✓ Validés :</span> {rate.validated.map(nameOf).join(", ")}</p>
+                    )}
+                    {rate.pending.length > 0 && (
+                      <p><span className="text-bc-warning font-bold">◔ En attente :</span> {rate.pending.map(nameOf).join(", ")}</p>
                     )}
                     {rate.missing.length > 0 && (
-                      <p><span className="text-bc-danger font-bold">✗ Incomplet :</span> {rate.missing.map(nameOf).join(", ")}</p>
-                    )}
-                    {rate.filled.length === 0 && rate.missing.length === 0 && (
-                      <p className="text-bc-text-secondary italic">{isHierarchicalOperator ? "Aucun subordonné." : "Aucun membre."}</p>
+                      <p><span className="text-bc-danger font-bold">✗ Manquants :</span> {rate.missing.map(nameOf).join(", ")}</p>
                     )}
                   </div>
                 );

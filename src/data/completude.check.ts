@@ -1,6 +1,6 @@
 // Run: npx tsx src/data/completude.check.ts
 import assert from 'node:assert';
-import { memberReportStatus, memberWeekStatus, weekFillWidget, subordinateFillRate } from './completude';
+import { memberReportStatus, memberWeekStatus, weekFillWidget, subordinateFillRate, membersFillRate, fillRateEvolution } from './completude';
 import type { Member, Report, BloomBusEntity, Department } from '../types';
 
 const now = new Date(2026, 6, 8); // mercredi 8/7/2026 — S-1 = 2026-06-29, S-2 = 2026-06-22
@@ -87,5 +87,24 @@ const rate = subordinateFillRate(zoneLead, 'Responsable de Zone', members, repor
 assert.equal(rate.pct, 50);
 assert.deepEqual(rate.filled.sort(), ['capA']);
 assert.deepEqual(rate.missing.sort(), ['capB']);
+
+// membersFillRate — taux RÉEL sur un ensemble de membres : rempli = en attente OU validé.
+// 4 membres pour S1 : 1 validé, 1 en attente, 2 rien -> 2/4 = 50 %.
+const fillMembers = ['x1', 'x2', 'x3', 'x4'];
+const fillReports = [{ ...mkReport('x1', S1), validated: true }, { ...mkReport('x2', S1), validated: false }];
+const fr = membersFillRate(fillMembers, S1, fillReports);
+assert.equal(fr.pct, 50);
+assert.deepEqual(fr.validated, ['x1']);
+assert.deepEqual(fr.pending, ['x2']);
+assert.deepEqual(fr.missing.sort(), ['x3', 'x4']);
+assert.equal(membersFillRate([], S1, []).pct, 0); // pas de membres -> 0 %, pas de division par zéro
+
+// fillRateEvolution — même source que le disque : le point de la semaine `S1` doit être IDENTIQUE
+// au pct du disque S1 (cohérence disque ⇄ synthèse), et les semaines forcées apparaissent.
+const evo = fillRateEvolution(fillMembers, [...fillReports, { ...mkReport('x1', S2), validated: true }], [S1, S2]);
+const evoS1 = evo.find((e) => e.week === S1);
+assert.ok(evoS1 && evoS1.pct === fr.pct, 'synthèse S1 == disque S1');
+assert.deepEqual(evo.map((e) => e.week), [S2, S1]); // trié chronologiquement
+assert.equal(evo.find((e) => e.week === S2)!.pct, 25); // 1 validé sur 4
 
 console.log('completude.check OK');
