@@ -25,7 +25,7 @@ import { isRed } from "../data/kpi";
 import { inMemberScope, FULL_SCOPE_ROLES } from "../data/scope";
 import ReportStatusBoxes from "./ReportStatusBoxes";
 import Member360View from "./Member360View";
-import MemberFormModal from "./MemberFormModal";
+import MemberFormModal, { SCHOOL_LEVELS } from "./MemberFormModal";
 import { Avatar } from "./ui/Avatar";
 import { ConfirmDialog } from "./ui/ConfirmDialog";
 import { staggerParent, staggerItem } from "./ui/motion";
@@ -89,6 +89,7 @@ export default function MembersView({
   const [filterDept, setFilterDept] = useState<string>("all");
   const [filterFunction, setFilterFunction] = useState<string>("all");
   const [filterBaptism, setFilterBaptism] = useState<string>("all");
+  const [filterSchoolLevel, setFilterSchoolLevel] = useState<string>("all");
   const [filterRed, setFilterRed] = useState(false);
   const [viewMode, setViewMode] = useState<"grid" | "list">("grid");
   const [selectedMember, setSelectedMember] = useState<Member | null>(null);
@@ -134,10 +135,12 @@ export default function MembersView({
         filterFunction === "all" || Object.values(m.departments).includes(filterFunction as any);
       const matchesBaptism =
         filterBaptism === "all" || m.baptismStatus === filterBaptism;
+      const matchesSchoolLevel =
+        filterSchoolLevel === "all" || m.schoolLevel === filterSchoolLevel;
       const matchesRed = !filterRed || isRed(m);
       const matchesScope = !operator || inMemberScope(operator, m, simulatedRole, INITIAL_BUS_LINES, INITIAL_DEPARTMENTS, ministries);
 
-      return matchesSearch && matchesBranch && matchesLevel && matchesPastoralCursus && matchesDept && matchesFunction && matchesBaptism && matchesRed && matchesScope;
+      return matchesSearch && matchesBranch && matchesLevel && matchesPastoralCursus && matchesDept && matchesFunction && matchesBaptism && matchesSchoolLevel && matchesRed && matchesScope;
     })
     .sort((a, b) => {
       // Sort alphabetically by last name, then first name
@@ -259,6 +262,19 @@ export default function MembersView({
             <option value="all">Tout statut baptême</option>
             <option value="Baptisé">Baptisé</option>
             <option value="Non baptisé">Non baptisé</option>
+          </select>
+
+          {/* Niveau scolaire — liste des élèves/étudiants par niveau (ex. 3ème, Terminale) */}
+          <select
+            id="member-filter-school-level"
+            value={filterSchoolLevel}
+            onChange={(e) => setFilterSchoolLevel(e.target.value)}
+            className="border border-bc-border rounded-full text-xs py-2 px-3 bg-white focus:outline-none focus:border-bc-green"
+          >
+            <option value="all">Tout niveau scolaire</option>
+            {SCHOOL_LEVELS.map((l) => (
+              <option key={l} value={l}>{l}</option>
+            ))}
           </select>
 
           {/* Au rouge toggle */}

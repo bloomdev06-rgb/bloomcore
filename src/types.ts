@@ -67,6 +67,8 @@ export interface Member {
   birthDate: string;
   maritalStatus: 'Célibataire' | 'Marié(e)' | 'Divorcé(e)' | 'Veuf(ve)';
   profession: string;
+  // Niveau scolaire/d'études — renseigné quand la profession est élève ou étudiant (listes par niveau).
+  schoolLevel?: string;
   avatarUrl?: string;
   source?: string;
   gps?: {
@@ -227,6 +229,11 @@ export interface Report {
   // membre, en attente de validation ; true = validé (rempli par le capitaine+ OU validé après
   // coup). undefined = validé (rétrocompat des rapports d'avant ce workflow).
   validated?: boolean;
+  // Verrou 24h Bloom Bus (src/data/reportLock.ts) : horodatages du remplissage initial et de
+  // la validation — le rapport n'est plus modifiable 24h après le dernier de ces événements.
+  // undefined = rapports d'avant ce champ (fallback : fin du jour de `date`).
+  filledAt?: string;
+  validatedAt?: string;
   content: any; // Dynamic JSON content depending on the reportType
 }
 

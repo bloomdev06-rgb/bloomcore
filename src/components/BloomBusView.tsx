@@ -11,10 +11,13 @@ import {
   X,
   TrendingUp,
   Trash2,
+  CalendarDays,
 } from "lucide-react";
 import { LineChart, Line, XAxis, YAxis, Tooltip, Legend } from "recharts";
 import { Member, Branch, BloomBusEntity, Report, Event, FormDef } from "../types";
 import { useBusLines, useDepartments, save } from "../data";
+import { isBusReportLocked } from "../data/reportLock";
+import { toast } from "./ui/Toast";
 import { busInScope, bloomBusRoleOf, fullBloomBusAccess, canFillReportFor, canRegisterMemberViaBloomBus, FULL_SCOPE_ROLES } from "../data/scope";
 import { moissonTotal, busVisitesTotal, busPresenceCulteTotal, busActivitesTotal, dominantHealthLevel, Period, PeriodInput } from "../data/kpi";
 import { reportingWindow, weekId, weekLabel } from "../data/week";
@@ -390,11 +393,29 @@ export default function BloomBusView({
   const fillEvolutionData = fillRateEvolution(busMemberIds, branchReports, [s2, s1])
     .map((d) => ({ week: weekLabel(d.week).replace("Semaine du ", ""), pct: d.pct }));
 
-  // Évolution personnelle du membre ouvert dans la modale de suivi.
-  const memberHealthReports = reports.filter(
-    (r) => r.reportType === "rapport_bloom_bus_member" && r.content?.memberId === targetMemberId && (activeBranch === "global" || r.targetBranch === activeBranch),
-  );
-  const memberEvolutionData = healthEvolutionSeries(memberHealthReports);
+  // Point mensuel des présences (§5) — une présence = un rapport de suivi membre déclarant un
+  // culte ; agrégé par mois (mois du lundi de la semaine rapportée), sur le périmètre affiché.
+  const monthlyPresence = (() => {
+    const byMonth = new Map<string, Record<string, number>>();
+    busHealthReports.forEach((r) => {
+      const culte = r.content?.culte;
+      if (!culte) return;
+      const month = (r.weekOf ?? weekId(r.date)).slice(0, 7);
+      const bucket = byMonth.get(month) ?? {};
+      bucket[culte] = (bucket[culte] ?? 0) + 1;
+      byMonth.set(month, bucket);
+    });
+    return Array.from(byMonth.entries())
+      .sort(([a], [b]) => a.localeCompare(b))
+      .slice(-6) // ponytail: 6 derniers mois suffisent à l'écran ; l'export Rapport couvre le reste
+      .map(([month, counts]) => ({
+        month,
+        label: new Date(Number(month.slice(0, 4)), Number(month.slice(5)) - 1, 1).toLocaleDateString("fr-FR", { month: "long", year: "numeric" }),
+        counts,
+        total: Object.values(counts).reduce((s, v) => s + v, 0),
+      }));
+  })();
+  const CULTE_COLORS = ["bg-bc-green", "bg-bc-cerulean", "bg-bc-fushia"];
 
   const handleSaveMemberHealth = (e: React.FormEvent) => {
     e.preventDefault();
@@ -404,6 +425,12 @@ export default function BloomBusView({
     if (!canFillReportFor(operator, targetMember, simulatedRole, members, busLines, departments)) return;
     // Re-check défensif — le bouton "Enregistrer" est déjà désactivé tant que ces champs manquent.
     if (!selectedWeek || sprVal == null || socVal == null || finVal == null || phyVal == null || !culte) return;
+    // Verrou 24h : rempli et/ou validé → plus modifiable 24h après (le serveur refuse aussi).
+    const existing = reportFor(targetMemberId, selectedWeek);
+    if (existing && isBusReportLocked(existing)) {
+      toast.error("Rapport verrouillé : plus modifiable 24h après remplissage/validation.");
+      return;
+    }
     const updated: Member = {
       ...targetMember,
       healthKPIs: {
@@ -429,6 +456,10 @@ export default function BloomBusView({
       reportType: "rapport_bloom_bus_member",
       confidential: false,
       validated: operatorAutoValidates, // capitaine+ = validé ; membre = en attente
+      // Ancre du verrou 24h : conserve l'horodatage du PREMIER remplissage (une correction
+      // dans la fenêtre ne repousse pas l'échéance).
+      filledAt: existing?.filledAt ?? new Date().toISOString(),
+      validatedAt: operatorAutoValidates ? new Date().toISOString() : existing?.validatedAt,
       content: {
         memberId: targetMemberId,
         memberName: `${targetMember.firstName} ${targetMember.lastName}`,
@@ -457,7 +488,7 @@ export default function BloomBusView({
   // Validation effective : passe le rapport (membre, semaine) à validated:true, puis ferme.
   const handleValidateReport = (memberId: string, week: string) => {
     const r = reportFor(memberId, week);
-    if (r) onAddReport({ ...r, validated: true });
+    if (r) onAddReport({ ...r, validated: true, validatedAt: new Date().toISOString() });
     setShowMemberReportModal(false);
   };
 
@@ -479,6 +510,8 @@ export default function BloomBusView({
   const currentReport = selectedWeek ? reportFor(targetMemberId, selectedWeek) : undefined;
   const canValidateCurrent = !!currentReport && currentReport.validated === false
     && operatorAutoValidates && !!operator && targetMemberId !== operator.id;
+  // Verrou 24h : le contenu n'est plus modifiable ; la validation (relecture) reste permise.
+  const currentLocked = !!currentReport && isBusReportLocked(currentReport);
 
   const handleSaveLifeReport = (e: React.FormEvent) => {
     e.preventDefault();
@@ -492,6 +525,7 @@ export default function BloomBusView({
       date: new Date().toISOString().split("T")[0],
       reportType: "rapport_bloom_bus_life",
       confidential: false,
+      filledAt: new Date().toISOString(),
       content: {
         busId: selectedLevel.id,
         activityName,
@@ -832,6 +866,45 @@ export default function BloomBusView({
             </div>
           )}
         </div>
+
+        {/* Point mensuel des présences — total par mois + répartition par culte */}
+        <div className="bg-white p-5 rounded-[2rem] border border-bc-border shadow-sm flex flex-col shrink-0">
+          <h3 className="text-sm font-ui font-bold text-bc-text mb-1 flex items-center gap-2">
+            <CalendarDays size={16} /> Point mensuel des présences
+          </h3>
+          <p className="text-[10px] text-bc-text-secondary mb-4">Présences au culte déclarées dans les rapports de suivi, mois par mois.</p>
+          {monthlyPresence.length === 0 ? (
+            <p className="text-xs text-bc-text-secondary italic text-center py-6">Aucune présence déclarée pour l'instant.</p>
+          ) : (
+            <>
+              <div className="space-y-3">
+                {monthlyPresence.map((m) => (
+                  <div key={m.month}>
+                    <div className="flex items-center justify-between mb-1">
+                      <span className="text-xs font-bold text-bc-text capitalize">{m.label}</span>
+                      <span className="text-xs font-bold text-bc-text tabular-nums">{m.total} présence{m.total > 1 ? "s" : ""}</span>
+                    </div>
+                    <div className="flex h-2 rounded-full overflow-hidden bg-bc-canvas">
+                      {CULTE_OPTIONS.map((c, i) => {
+                        const v = m.counts[c] ?? 0;
+                        return v > 0 ? (
+                          <div key={c} className={`${CULTE_COLORS[i]} transition-all ease-out-spring`} style={{ width: `${(v / m.total) * 100}%` }} />
+                        ) : null;
+                      })}
+                    </div>
+                  </div>
+                ))}
+              </div>
+              <div className="flex flex-wrap gap-x-4 gap-y-1 mt-4">
+                {CULTE_OPTIONS.map((c, i) => (
+                  <span key={c} className="flex items-center gap-1.5 text-[10px] text-bc-text-secondary font-medium">
+                    <span className={`w-2 h-2 rounded-full ${CULTE_COLORS[i]}`} /> {c}
+                  </span>
+                ))}
+              </div>
+            </>
+          )}
+        </div>
         </>
         )}
 
@@ -1036,27 +1109,6 @@ export default function BloomBusView({
                 </div>
               )}
 
-              {memberEvolutionData.length > 0 && (
-                <div className="p-3 rounded-xl border border-bc-border">
-                  <span className="text-[10px] text-bc-text-secondary font-bold uppercase flex items-center gap-1 mb-1">
-                    <TrendingUp size={11} /> Évolution personnelle
-                  </span>
-                  <div className="h-32 min-w-0">
-                    <ResponsiveChart height="100%" minHeight={100}>
-                      <LineChart data={memberEvolutionData}>
-                        <XAxis dataKey="date" fontSize={8} axisLine={false} tickLine={false} />
-                        <YAxis domain={[1, 5]} fontSize={8} axisLine={false} tickLine={false} width={16} />
-                        <Tooltip contentStyle={{ borderRadius: "1rem", border: "none", boxShadow: "0 4px 6px -1px rgb(0 0 0 / 0.1)", fontSize: 10 }} />
-                        <Line type="monotone" dataKey="Spirituelle" stroke="var(--accent-1)" strokeWidth={2} dot={false} />
-                        <Line type="monotone" dataKey="Sociale" stroke="var(--accent-2)" strokeWidth={2} dot={false} />
-                        <Line type="monotone" dataKey="Physique" stroke="var(--color-bc-purple)" strokeWidth={2} dot={false} />
-                        <Line type="monotone" dataKey="Financière" stroke="var(--color-bc-text-secondary)" strokeWidth={2} dot={false} />
-                      </LineChart>
-                    </ResponsiveChart>
-                  </div>
-                </div>
-              )}
-
               <div>
                 <label className="block text-xs font-bold text-bc-text-secondary mb-1.5">Semaine concernée</label>
                 <div className="grid grid-cols-2 gap-2">
@@ -1064,6 +1116,10 @@ export default function BloomBusView({
                     const already = branchReports.some(
                       (r) => r.reportType === "rapport_bloom_bus_member" && r.content?.memberId === targetMemberId && (r.weekOf ?? weekId(r.date)) === w,
                     );
+                    const weekReport = branchReports.find(
+                      (r) => r.reportType === "rapport_bloom_bus_member" && r.content?.memberId === targetMemberId && (r.weekOf ?? weekId(r.date)) === w,
+                    );
+                    const weekLocked = !!weekReport && isBusReportLocked(weekReport);
                     return (
                       <button
                         type="button"
@@ -1072,7 +1128,7 @@ export default function BloomBusView({
                         className={`py-2 px-2 rounded-xl text-[11px] font-bold border transition-colors active-scale text-center ${selectedWeek === w ? "bg-bc-green text-white border-bc-green" : "bg-white text-bc-text-secondary border-bc-border hover:bg-bc-canvas"}`}
                       >
                         {weekLabel(w)}
-                        {already && <span className="block text-[9px] font-normal opacity-80 mt-0.5">déjà rempli</span>}
+                        {already && <span className="block text-[9px] font-normal opacity-80 mt-0.5">{weekLocked ? "déjà rempli · verrouillé" : "déjà rempli"}</span>}
                       </button>
                     );
                   })}
@@ -1109,6 +1165,11 @@ export default function BloomBusView({
                   />
                 </div>
               </div>
+              {currentLocked && (
+                <div className="p-3 rounded-xl bg-bc-danger/10 border border-bc-danger/30 text-[11px] text-bc-text">
+                  Rapport <strong>verrouillé</strong> : plus de 24h se sont écoulées depuis son remplissage/validation, il n'est plus modifiable.
+                </div>
+              )}
               <div className="flex justify-end gap-3 pt-4">
                 <button
                   type="button"
@@ -1119,7 +1180,7 @@ export default function BloomBusView({
                 </button>
                 <button
                   type="submit"
-                  disabled={!selectedWeek || sprVal == null || socVal == null || finVal == null || phyVal == null || !culte}
+                  disabled={currentLocked || !selectedWeek || sprVal == null || socVal == null || finVal == null || phyVal == null || !culte}
                   className={`px-5 py-2.5 rounded-full text-xs font-bold transition-colors active-scale disabled:opacity-40 disabled:cursor-not-allowed ${canValidateCurrent ? "bg-bc-canvas text-bc-text-secondary hover:bg-bc-border/40" : "bg-bc-green text-white hover:opacity-90"}`}
                 >
                   {canValidateCurrent ? "Corriger" : "Enregistrer"}

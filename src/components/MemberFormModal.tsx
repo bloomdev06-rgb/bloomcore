@@ -7,6 +7,13 @@ import { PhotoLightbox } from "./ui/PhotoLightbox";
 import { Modal } from "./ui/Modal";
 import { bloomBusRoleOf } from "../data/scope";
 
+// Système ivoirien : primaire → lycée + niveaux du supérieur.
+export const SCHOOL_LEVELS = [
+  "CP1", "CP2", "CE1", "CE2", "CM1", "CM2",
+  "6ème", "5ème", "4ème", "3ème", "2nde", "1ère", "Terminale",
+  "BTS", "Licence 1", "Licence 2", "Licence 3", "Master 1", "Master 2", "Doctorat",
+];
+
 interface MemberFormModalProps {
   open: boolean;
   onClose: () => void;
@@ -69,6 +76,9 @@ export default function MemberFormModal({
     "Célibataire" | "Marié(e)" | "Divorcé(e)" | "Veuf(ve)"
   >("Célibataire");
   const [profession, setProfession] = useState("");
+  const [schoolLevel, setSchoolLevel] = useState("");
+  // Niveau demandé seulement pour élève/étudiant — détecté sur la profession saisie (texte libre).
+  const isStudent = /élève|eleve|étudiant|etudiant/i.test(profession);
   const [commune, setCommune] = useState("Cocody");
   const [lat, setLat] = useState("5.3854");
   const [lng, setLng] = useState("-3.9781");
@@ -100,6 +110,7 @@ export default function MemberFormModal({
       setBirthDate(member.birthDate);
       setMaritalStatus(member.maritalStatus);
       setProfession(member.profession);
+      setSchoolLevel(member.schoolLevel || "");
       setCommune(member.gps?.commune || "Cocody");
       setLat(member.gps?.lat.toString() || "5.3854");
       setLng(member.gps?.lng.toString() || "-3.9781");
@@ -126,6 +137,7 @@ export default function MemberFormModal({
       setBirthDate("1998-01-01");
       setMaritalStatus("Célibataire");
       setProfession("");
+      setSchoolLevel("");
       setCommune("Cocody");
       setLat("5.3854");
       setLng("-3.9781");
@@ -259,6 +271,7 @@ export default function MemberFormModal({
         birthDate,
         maritalStatus,
         profession,
+        schoolLevel: isStudent ? schoolLevel || undefined : undefined,
         gps: gpsCoords,
         bloomBusId: selectedBloomBusId || undefined,
         branch: memberBranch,
@@ -283,6 +296,7 @@ export default function MemberFormModal({
         birthDate,
         maritalStatus,
         profession,
+        schoolLevel: isStudent ? schoolLevel || undefined : undefined,
         gps: gpsCoords,
         bloomBusId: selectedBloomBusId || undefined,
         branch: memberBranch,
@@ -473,11 +487,29 @@ export default function MemberFormModal({
                 type="text"
                 value={profession}
                 onChange={(e) => setProfession(e.target.value)}
-                placeholder="ex: Web designer"
+                placeholder="ex: Web designer, Élève, Étudiant"
                 className="w-full border border-bc-border rounded-full px-3 py-2 text-xs focus:outline-none focus:border-bc-green"
               />
             </div>
           </div>
+
+          {/* Niveau scolaire — liste canonique (pas de texte libre) pour que les listes par niveau (3ème, Terminale…) restent filtrables */}
+          {isStudent && (
+            <div>
+              <label className="block text-xs font-bold text-bc-text mb-1">Niveau (classe / niveau d'études)</label>
+              <select
+                id="form-school-level"
+                value={schoolLevel}
+                onChange={(e) => setSchoolLevel(e.target.value)}
+                className="w-full border border-bc-border rounded-full px-3 py-2 text-xs focus:outline-none focus:border-bc-green bg-white"
+              >
+                <option value="">— Sélectionner —</option>
+                {SCHOOL_LEVELS.map((l) => (
+                  <option key={l} value={l}>{l}</option>
+                ))}
+              </select>
+            </div>
+          )}
 
           {/* Territory & GPS Coordinates */}
           <div className="p-4 bg-bc-canvas/40 border border-bc-border rounded-[2rem] space-y-3">

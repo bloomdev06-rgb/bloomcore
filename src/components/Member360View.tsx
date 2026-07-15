@@ -220,10 +220,12 @@ export default function Member360View({ member, onClose, onEdit, onUpdate, repor
         </div>
 
         {/* Content Area */}
-        <div className="flex-1 flex flex-col md:flex-row overflow-hidden">
+        {/* Mobile : une seule colonne scrollable (la colonne Santé shrink-0 mangeait les 90vh et
+            bloquait tout défilement) ; desktop : deux panneaux à scroll indépendant. */}
+        <div className="flex-1 flex flex-col md:flex-row overflow-y-auto md:overflow-hidden">
           
           {/* Side Dashboard (Health) */}
-          <div className="w-full md:w-72 bg-white border-r border-bc-border p-6 shrink-0 overflow-y-auto">
+          <div className="w-full md:w-72 bg-white border-b md:border-b-0 md:border-r border-bc-border p-6 shrink-0 md:overflow-y-auto">
             <h3 className="font-ui font-bold text-bc-text mb-4 flex items-center gap-2">
               <Activity size={16} /> Santé 360°
             </h3>
@@ -267,7 +269,7 @@ export default function Member360View({ member, onClose, onEdit, onUpdate, repor
           </div>
 
           {/* Main Tabs Area */}
-          <div className="flex-1 flex flex-col overflow-hidden bg-bc-canvas/50">
+          <div className="flex-1 flex flex-col md:overflow-hidden bg-bc-canvas/50">
             <div className="flex items-center border-b border-bc-border bg-white shrink-0 px-2">
               <button 
                 onClick={() => {
@@ -310,7 +312,7 @@ export default function Member360View({ member, onClose, onEdit, onUpdate, repor
               </button>
             </div>
 
-            <div className="flex-1 overflow-y-auto p-6">
+            <div className="flex-1 md:overflow-y-auto p-6">
               
               {activeTab === 'perso' && (
                 <div className="space-y-6 max-w-2xl">
@@ -330,7 +332,7 @@ export default function Member360View({ member, onClose, onEdit, onUpdate, repor
                         <Briefcase size={14} />
                         <span className="text-[10px] font-bold uppercase tracking-wider">Situation</span>
                       </div>
-                      <p className="text-sm font-bold text-bc-text">{canSeeFinances ? (member.profession || 'Non renseignée') : <span className="italic text-bc-text-secondary">Confidentiel</span>}</p>
+                      <p className="text-sm font-bold text-bc-text">{canSeeFinances ? ((member.profession || 'Non renseignée') + (member.schoolLevel ? ` — ${member.schoolLevel}` : '')) : <span className="italic text-bc-text-secondary">Confidentiel</span>}</p>
                       <p className="text-xs text-bc-text-secondary mt-1">{member.maritalStatus}</p>
                     </div>
 

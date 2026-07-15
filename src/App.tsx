@@ -665,7 +665,7 @@ export default function App() {
       case 'programs':
         return <ProgrammesView members={members} onUpdateMember={handleUpdateMember} onAddAuditLog={handleAddAuditLog} activeBranch={activeBranch} simulatedRole={simulatedRole} operator={operator} permissionMatrix={permissionMatrix} />;
       case 'reports':
-        return <ReportsView reports={reports} activeBranch={activeBranch} simulatedRole={simulatedRole} />;
+        return <ReportsView reports={reports} activeBranch={activeBranch} simulatedRole={simulatedRole} members={members} events={events} />;
       case 'permissions':
         return (
           <PermissionsView

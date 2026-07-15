@@ -82,7 +82,7 @@ export default function Header({
 
   return (
     <header className="print:hidden bg-white border-b border-bc-border sticky top-0 z-20 h-16 px-4 md:px-6 flex items-center justify-between">
-      <div className="flex items-center gap-3 w-full md:w-auto">
+      <div className="flex items-center gap-3">
         {setSidebarCollapsed && (
           <button 
             className="lg:hidden p-2 -ml-2 text-bc-text hover:bg-bc-canvas rounded-full"
@@ -103,7 +103,7 @@ export default function Header({
         </div>
       </div>
 
-      <div className="flex items-center gap-4 w-full md:w-auto justify-between md:justify-end">
+      <div className="flex items-center gap-1.5 sm:gap-4 justify-end min-w-0">
         {/* Mobile menu toggle could go here, omitting for now to keep clean */}
         
         {/* Branch Switcher (Multi-branch commuter) */}
@@ -130,7 +130,7 @@ export default function Header({
               />
             )}
             <span className={`w-2 h-2 rounded-full ${activeBranch === 'church' ? 'bg-white' : 'bg-bc-text-secondary'}`} />
-            <span>Bloom Church</span>
+            <span className="hidden sm:inline">Bloom Church</span>
           </button>
           <button
             id="branch-switch-light-btn"
@@ -149,7 +149,7 @@ export default function Header({
               />
             )}
             <span className={`w-2 h-2 rounded-full ${activeBranch === 'light' ? 'bg-white' : 'bg-bc-text-secondary'}`} />
-            <span>Bloom Light</span>
+            <span className="hidden sm:inline">Bloom Light</span>
           </button>
           <button
             id="branch-switch-global-btn"
@@ -168,7 +168,7 @@ export default function Header({
               />
             )}
             <span className={`w-2 h-2 rounded-full ${activeBranch === 'global' ? 'bg-white' : 'bg-bc-text-secondary'}`} />
-            <span>Global</span>
+            <span className="hidden sm:inline">Global</span>
           </button>
         </div>
 
@@ -200,7 +200,7 @@ export default function Header({
                 animate={{ opacity: 1, y: 0, scale: 1 }}
                 exit={{ opacity: 0, y: 8, scale: 0.95 }}
                 transition={{ duration: 0.15, ease: 'easeOut' }}
-                className="absolute right-0 mt-3 w-80 bg-white border border-bc-border rounded-[2rem] shadow-xl z-50 overflow-hidden origin-top-right"
+                className="fixed sm:absolute left-4 right-4 sm:left-auto sm:right-0 top-16 sm:top-auto mt-3 sm:w-80 bg-white border border-bc-border rounded-[2rem] shadow-xl z-50 overflow-hidden origin-top-right"
               >
                 <div className="px-4 py-3 border-b border-bc-border flex justify-between items-center bg-bc-canvas/40">
                   <span className="text-xs font-ui font-bold text-bc-text">Notifications & Alertes</span>
@@ -246,7 +246,7 @@ export default function Header({
         </div>
 
         {/* Operator Profile */}
-        <div className="flex items-center gap-3 pl-4 border-l border-bc-border relative">
+        <div className="flex items-center gap-3 pl-1.5 sm:pl-4 border-l border-bc-border relative">
           {/* Avatar → directly opens Mon Profil (préférences/logout live there) */}
           <button
             className="flex items-center gap-3 text-left focus:outline-none"

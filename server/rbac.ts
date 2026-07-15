@@ -5,6 +5,7 @@
 import { Member, Ministry, PermissionMatrix, Delegation, AdminAccount, Department, BloomBusEntity } from '../src/types.ts';
 import { hasCapability } from '../src/data/permissions.ts';
 import { inMemberScope, canFillReportFor, bloomBusRoleOf } from '../src/data/scope.ts';
+import { isBusReportLocked } from '../src/data/reportLock.ts';
 import { getKv } from './db.ts';
 import { GuardError, readCollection, canonical } from './guards.ts';
 
@@ -177,6 +178,26 @@ export function assertCanWrite(name: string, ctx: RbacContext, incoming: any[]):
     case 'reports': {
       if (!hasAny(roles, ABOVE_MEMBER_ROLES) && !hasCapAnyRole(ctx, 'rapport_service')) {
         throw new GuardError(403, 'reports: rôle serviteur ou délégation requis');
+      }
+      // Verrou 24h : un rapport Bloom Bus rempli et/ou validé n'est plus modifiable (ni
+      // supprimable) 24h après le dernier de ces deux événements — pour TOUS les rôles,
+      // admins compris (immuabilité des rapports déposés). Seul l'acte de validation
+      // (validated/validatedAt) reste permis après coup : relecture, pas modification.
+      {
+        const oldById = new Map(readCollection('reports', true).map((s: any) => [String(s.id), s]));
+        for (const r of touchedItems(name, incoming)) {
+          const old = oldById.get(String(r.id));
+          if (!old || old.deletedAt || !isBusReportLocked(old)) continue;
+          const validationOnly = canonical({ ...old, validated: r.validated, validatedAt: r.validatedAt }) === canonical(r);
+          if (!validationOnly) {
+            throw new GuardError(403, `reports: ${r.id} verrouillé — rapport Bloom Bus non modifiable 24h après remplissage/validation`);
+          }
+        }
+        for (const r of removedItems(name, incoming, ctx)) {
+          if (isBusReportLocked(r)) {
+            throw new GuardError(403, `reports: ${r.id} verrouillé — suppression impossible 24h après remplissage/validation`);
+          }
+        }
       }
       if (!hasAny(roles, FULL_SCOPE_ROLES)) {
         const scopeRole = SCOPE_ROLE_ORDER.find(([r]) => roles.includes(r))?.[1] ?? 'Membre';
