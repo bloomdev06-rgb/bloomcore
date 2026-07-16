@@ -3,7 +3,7 @@ import assert from 'node:assert';
 import {
   periodRange, levelToPercent, dominantHealthLevel, isRed, busMobilisationRate,
   moissonTotal, moissonBySource, busVisitesTotal, busPresenceCulteTotal, busActivitesTotal, activeBusIds, activeMemberIds, Period,
-  pendingFollowUps, periodHealthLevels,
+  pendingFollowUps, periodHealthLevels, periodWindows,
 } from './kpi';
 import { Member, Report } from '../types';
 
@@ -142,5 +142,19 @@ const deptReports: Report[] = [
 ];
 assert.deepEqual([...activeMemberIds(deptReports, 'week', nowRed, 'dept_x')].sort(), ['mem_1', 'mem_2', 'mem_3']);
 assert.deepEqual([...activeMemberIds(deptReports, 'week', nowRed)].sort(), ['mem_1', 'mem_2', 'mem_3', 'mem_9']);
+
+// periodWindows : hebdo sur les petites plages, mensuel sur l'année, clampé sur custom sans bornes.
+{
+  const wWeek = periodWindows('week', nowRed);
+  assert.ok(wWeek.length >= 2 && wWeek.length <= 18, `week → ${wWeek.length} fenêtres`);
+  assert.ok(wWeek.every((w) => w.to - w.from === 7 * 86_400_000), 'fenêtres hebdo de 7 jours');
+  const wYear = periodWindows('year', nowRed);
+  assert.ok(wYear.length >= 12 && wYear.length <= 13, `year → ${wYear.length} fenêtres mensuelles`);
+  const wEpoch = periodWindows('custom', nowRed); // sans bornes → depuis epoch, doit être clampé
+  assert.ok(wEpoch.length <= 24, `custom epoch clampé → ${wEpoch.length}`);
+  // la dernière fenêtre contient bien now
+  const last = periodWindows('month', nowRed).at(-1)!;
+  assert.ok(nowRed.getTime() >= last.from && nowRed.getTime() < last.to, 'now dans la dernière fenêtre');
+}
 
 console.log('kpi.check OK');

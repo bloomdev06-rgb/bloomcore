@@ -19,9 +19,9 @@ import { useBusLines, useDepartments, save } from "../data";
 import { isBusReportLocked } from "../data/reportLock";
 import { toast } from "./ui/Toast";
 import { busInScope, bloomBusRoleOf, fullBloomBusAccess, canFillReportFor, canRegisterMemberViaBloomBus, FULL_SCOPE_ROLES } from "../data/scope";
-import { moissonTotal, busVisitesTotal, busPresenceCulteTotal, busActivitesTotal, dominantHealthLevel, Period, PeriodInput } from "../data/kpi";
-import { reportingWindow, weekId, weekLabel } from "../data/week";
-import { memberWeekStatus, membersFillRate, fillRateEvolution } from "../data/completude";
+import { moissonTotal, busVisitesTotal, busPresenceCulteTotal, busActivitesTotal, periodHealthLevels, periodRange, Period, PeriodInput } from "../data/kpi";
+import { reportingWindow, weekId, weekLabel, mondaysInRange } from "../data/week";
+import { memberWeekStatus, membersFillRate } from "../data/completude";
 import ReportStatusBoxes from "./ReportStatusBoxes";
 import { ResponsiveChart } from "./ui/ResponsiveChart";
 import { HEALTH_AXES, Ring } from "./DashboardView";
@@ -347,6 +347,10 @@ export default function BloomBusView({
     : selectedLevel.type === "root" ? "Responsables de Commune"
     : selectedLevel.type === "commune" ? "Responsables de Zone"
     : "Capitaines de Bus"; // zone
+  // Disques de remplissage + courbe : le niveau suit le remplissage des responsables du niveau
+  // DIRECTEMENT inférieur (commune → resp. de zone, zone → capitaines, bus → membres du bus),
+  // pas de tous les membres du périmètre — même ensemble que le roster.
+  const rosterIds = rosterMembers.map((m) => m.id);
   // Rapports en attente de validation dans le roster (S-1 + S-2) — visible par le capitaine+.
   const rosterPendingCount = operatorAutoValidates
     ? rosterMembers.reduce((n, m) =>
@@ -387,17 +391,26 @@ export default function BloomBusView({
   const busHealthReports = reports.filter(
     (r) => r.reportType === "rapport_bloom_bus_member" && busMembers.some((m) => m.id === r.content?.memberId) && (activeBranch === "global" || r.targetBranch === activeBranch),
   );
-  const busEvolutionData = healthEvolutionSeries(busHealthReports);
-  // Évolution du taux de remplissage par semaine — mêmes membres/rapports que les disques, donc
-  // le dernier point (S-1) coïncide avec le disque S-1. S-1/S-2 garantis même sans rapport.
-  const fillEvolutionData = fillRateEvolution(busMemberIds, branchReports, [s2, s1])
-    .map((d) => ({ week: weekLabel(d.week).replace("Semaine du ", ""), pct: d.pct }));
+  // Toutes les synthèses ci-dessous suivent le sélecteur de période (semaine visée weekOf).
+  const { from: hpFrom, to: hpTo } = periodRange(kpiPeriod);
+  const periodBusHealthReports = busHealthReports.filter((r) => {
+    const d = new Date(r.weekOf ?? weekId(r.date));
+    return d >= hpFrom && d <= hpTo;
+  });
+  const busHealth = periodHealthLevels(busHealthReports, kpiPeriod);
+  const busEvolutionData = healthEvolutionSeries(periodBusHealthReports);
+  // Évolution du taux de remplissage : une valeur par semaine de la période sélectionnée,
+  // sur les mêmes membres que les disques (responsables du niveau directement inférieur).
+  const fillEvolutionData = mondaysInRange(hpFrom, hpTo).map((w) => ({
+    week: weekLabel(w).replace("Semaine du ", ""),
+    pct: membersFillRate(rosterIds, w, branchReports).pct,
+  }));
 
   // Point mensuel des présences (§5) — une présence = un rapport de suivi membre déclarant un
   // culte ; agrégé par mois (mois du lundi de la semaine rapportée), sur le périmètre affiché.
   const monthlyPresence = (() => {
     const byMonth = new Map<string, Record<string, number>>();
-    busHealthReports.forEach((r) => {
+    periodBusHealthReports.forEach((r) => {
       const culte = r.content?.culte;
       if (!culte) return;
       const month = (r.weekOf ?? weekId(r.date)).slice(0, 7);
@@ -806,7 +819,8 @@ export default function BloomBusView({
               <div className="flex flex-col h-full justify-center space-y-4">
                 <div className="grid grid-cols-4 gap-1 w-full text-center">
                   {BUS_HEALTH_AXES.map((axis) => {
-                    const level = dominantHealthLevel(busMembers, axis.key);
+                    // Niveau dominant des derniers rapports DE LA PÉRIODE (0 = pas de donnée).
+                    const level = busHealth[axis.key as keyof typeof busHealth] ?? 0;
                     return (
                       <div key={axis.key} className="min-w-0">
                         <HealthSmiley value={level} size={26} />
@@ -815,7 +829,7 @@ export default function BloomBusView({
                     );
                   })}
                 </div>
-                <p className="text-center text-[10px] text-bc-text-secondary">Niveau dominant par critère (sur {busMembers.length} membres)</p>
+                <p className="text-center text-[10px] text-bc-text-secondary">Niveau dominant par critère sur la période (sur {busMembers.length} membres)</p>
               </div>
             )}
           </div>
@@ -850,7 +864,7 @@ export default function BloomBusView({
           <h3 className="text-sm font-ui font-bold text-bc-text mb-1 flex items-center gap-2">
             <TrendingUp size={16} /> Évolution du remplissage
           </h3>
-          <p className="text-[10px] text-bc-text-secondary mb-4">% de membres ayant rempli leur rapport, semaine par semaine{busMembers.length ? ` (sur ${busMembers.length} membres)` : ""}.</p>
+          <p className="text-[10px] text-bc-text-secondary mb-4">% de rapports remplis par semaine, sur la période{rosterIds.length ? ` — ${rosterTitle.toLowerCase()} (${rosterIds.length})` : ""}.</p>
           {fillEvolutionData.length === 0 ? (
             <p className="text-xs text-bc-text-secondary italic text-center py-6 flex-1 flex items-center justify-center">Aucun rapport de membre à synthétiser pour l'instant.</p>
           ) : (
@@ -996,12 +1010,13 @@ export default function BloomBusView({
               </div>
               <p className="text-[10px] text-bc-text-secondary mb-3">Clique un membre pour faire son rapport de suivi.</p>
               {/* §6-7 — disques de remplissage cliquables : taux RÉEL des membres du Bloom Bus au
-                  niveau affiché (membersFillRate sur busMemberIds), identique à tous les niveaux.
+                  niveau affiché (membersFillRate sur les responsables du niveau directement
+                  inférieur — rosterIds), identique à tous les niveaux.
                   Se recalcule dès qu'un rapport est rempli (en attente) ou validé. */}
-              {operator && busMemberIds.length > 0 && (
+              {operator && rosterIds.length > 0 && (
                 <div className="flex items-center gap-4 mb-3 px-1 pb-3 border-b border-bc-border">
                   {([s2, s1] as const).map((w) => {
-                    const rate = membersFillRate(busMemberIds, w, branchReports);
+                    const rate = membersFillRate(rosterIds, w, branchReports);
                     return (
                       <button
                         key={w}
@@ -1019,8 +1034,8 @@ export default function BloomBusView({
                   })}
                 </div>
               )}
-              {operator && fillPopover && busMemberIds.length > 0 && (() => {
-                const rate = membersFillRate(busMemberIds, fillPopover, branchReports);
+              {operator && fillPopover && rosterIds.length > 0 && (() => {
+                const rate = membersFillRate(rosterIds, fillPopover, branchReports);
                 const nameOf = (id: string) => { const m = members.find((mm) => mm.id === id); return m ? `${m.firstName} ${m.lastName}` : id; };
                 return (
                   <div className="mb-3 p-3 bg-bc-canvas border border-bc-border rounded-xl text-[11px] space-y-2">

@@ -111,6 +111,9 @@ export interface Member {
   receptionValidated?: boolean; // §6.2 — Responsable validated the reception (gate into "En attente"). undefined = treated as validated (legacy seeds)
   integrationAssignedTo?: string; // Member ID who follows up
   integrationDateRegistered?: string; // Date ADN registered them
+  // Événement/culte de réception (fiche d'accueil ADN) : id d'Event, ou 'autre' (reçu hors
+  // cadre). undefined = fiches d'avant ce champ → bucket « Autre / non renseigné » au dashboard ADN.
+  receivedEventId?: string;
   lastContact?: string; // D5 — date du dernier contact/suivi (visite, rapport coach, MAJ intégration). Réinitialise l'horloge "au rouge".
   ojFlag?: boolean; // Oui à Jésus
   integrationNotes?: string;
@@ -193,6 +196,7 @@ export interface Event {
   type: string; // Catégorie libre (Culte, Séminaire, Retraite…) — liste gérable + ajout de type
   date: string;
   time?: string; // Heure de début 'HH:MM'
+  endTime?: string; // Heure de fin 'HH:MM' — events existants en base peuvent ne pas l'avoir : rendu tolérant
   branch: Branch;
   closed: boolean;
   scope?: 'church' | 'light' | 'both';

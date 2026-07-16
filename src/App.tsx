@@ -4,7 +4,6 @@ import { resolveMemberRole } from './data/roles';
 import { MEMBERS_TAB_DEPT_ONLY_ROLES } from './data/scope';
 import { downscaleImage } from './lib/image';
 
-const CULT_TYPES = ['Culte du Dimanche', 'Culte de Prière', 'Veillée', 'Culte des Jeunes', 'Réunion de Maison'];
 import {
   Member,
   Event,
@@ -41,8 +40,11 @@ const PermissionsView = lazy(() => import('./components/PermissionsView'));
 const AuditView = lazy(() => import('./components/AuditView'));
 const ProjectsView = lazy(() => import('./components/ProjectsView'));
 const CursusView = lazy(() => import('./components/CursusView'));
+const AdnView = lazy(() => import('./components/AdnView'));
+const CulteReportView = lazy(() => import('./components/CulteReportView'));
 const ProfileView = lazy(() => import('./components/ProfileView'));
 import AuthView from './components/AuthView';
+import CreateDepartmentModal from './components/CreateDepartmentModal';
 import { ToastContainer } from './components/ui/Toast';
 
 import { UserCheck, Sparkles, X, Heart, Loader2 } from 'lucide-react';
@@ -180,29 +182,10 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [members, settings]);
 
-  // P1.4 — labels read live from FormBuilder's fd_nouveau FormDef, id-matched.
-  const nouveauForm = forms.find((f) => f.id === 'fd_nouveau');
-  const nouveauLabel = (fieldId: string, fallback: string) =>
-    nouveauForm?.fields.find((f) => f.id === fieldId)?.label ?? fallback;
-
-  // Global Quick Form State (ADN)
-  const [showGlobalQuickForm, setShowGlobalQuickForm] = useState(false);
-  const [quickFirstname, setQuickFirstname] = useState('');
-  const [quickLastname, setQuickLastname] = useState('');
-  const [quickPhone, setQuickPhone] = useState('');
-  const [quickCommune, setQuickCommune] = useState('Cocody');
-  const [quickOj, setQuickOj] = useState(false); // true = OJ, false = Nouveau (NV)
-  const [quickWish, setQuickWish] = useState<'Membre' | 'Visiteur'>('Membre');
-  const [quickActivityDate, setQuickActivityDate] = useState(new Date().toISOString().split('T')[0]);
-  const [quickCultType, setQuickCultType] = useState('Culte du Dimanche');
-  const [quickGender, setQuickGender] = useState<'H' | 'F'>('H');
-  const [quickBirthDate, setQuickBirthDate] = useState('');
-  const [quickDept, setQuickDept] = useState('dept_louange');
-  const [quickPhotoUrl, setQuickPhotoUrl] = useState('');
-  const [quickGps, setQuickGps] = useState<{ lat: number; lng: number } | null>(null);
-  const [quickSource, setQuickSource] = useState('Invitation');
   const departmentOptions = useDepartments();
   const ministrySeeds = useMinistries();
+  // Modal « Créer un département » — ouvert depuis la sidebar (pasteurs/admins).
+  const [showCreateDept, setShowCreateDept] = useState(false);
   const adminAccounts = useAdmins();
   const busLines = useBusLines();
 
@@ -387,6 +370,12 @@ export default function App() {
     }
   };
 
+  // Mise à jour en place d'un rapport existant (upsert des comptages ADN/culte par eventId) —
+  // sans notification ni audit REPORT_SUBMITTED : c'est une correction, pas une soumission.
+  const handleUpdateReport = (r: Report) => {
+    setReports(prev => prev.map(x => x.id === r.id ? r : x));
+  };
+
   const handleAddReport = (r: Report) => {
     // Upsert par id : les rapports à id unique (Date.now) s'insèrent normalement ; ceux à id
     // déterministe (ex. rapport santé Bloom Bus par membre+semaine) REMPLACENT l'existant au
@@ -481,81 +470,6 @@ export default function App() {
     setNotifications(prev => prev.map(n => n.id === id ? { ...n, read: true } : n));
   };
 
-  const handleSaveQuickNouveau = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!quickFirstname || !quickLastname || !quickPhone || !quickPhotoUrl) {
-      alert('Veuillez remplir les informations obligatoires (Prénom, Nom, Contact, Photo).');
-      return;
-    }
-
-    if (members.some(m => m.phone === quickPhone)) {
-      alert('Ce numéro de téléphone est déjà utilisé par un autre membre.');
-      return;
-    }
-
-    const newNouveau: Member = {
-      id: `new_quick_${Date.now()}`,
-      firstName: quickFirstname,
-      lastName: quickLastname,
-      phone: quickPhone,
-      email: `${quickFirstname.toLowerCase()}.${quickLastname.toLowerCase()}@gmail.com`,
-      gender: quickGender,
-      birthDate: quickBirthDate || '2000-01-01',
-      maritalStatus: 'Célibataire',
-      profession: 'Étudiant',
-      branch: activeBranch,
-      level: 'Nouveau',
-      pastoralCursus: 'Aucun',
-      departments: { [quickDept]: 'Membre' },
-      entryDate: quickActivityDate,
-      integrationState: 'En attente',
-      receptionValidated: false, // §6.2 — awaits Responsable's reception validation
-      membershipWish: quickWish,
-      integrationDateRegistered: quickActivityDate, // date d'activité (culte) = date de saisie ADN
-      // ponytail: type de culte stocké en note tant que l'entité Événement/rapport ADN n'est pas branchée
-      integrationNotes: `Culte : ${quickCultType}`,
-      ojFlag: quickOj,
-      hasPassedToBossForm: false,
-      avatarUrl: quickPhotoUrl,
-      source: quickSource,
-      gps: {
-        lat: quickGps?.lat ?? 5.3854,
-        lng: quickGps?.lng ?? -3.9781,
-        commune: quickCommune
-      },
-      healthKPIs: {
-        spirituel: 2,
-        social: 2,
-        financier: 2,
-        physique: 3,
-        presenceCulte: 1,
-        presenceService: 1
-      },
-      baptismStatus: 'Non baptisé'
-    };
-
-    handleAddMember(newNouveau);
-    setShowGlobalQuickForm(false);
-    
-    // Clear
-    setQuickFirstname('');
-    setQuickLastname('');
-    setQuickPhone('');
-    setQuickOj(false);
-    setQuickWish('Membre');
-    setQuickGender('H');
-    setQuickBirthDate('');
-    setQuickDept('dept_louange');
-    setQuickCultType('Culte du Dimanche');
-    setQuickActivityDate(new Date().toISOString().split('T')[0]);
-    setQuickPhotoUrl('');
-    setQuickGps(null);
-    setQuickSource('Invitation');
-
-    alert('Nouveau membre enregistré avec succès par l\'ADN (Accueil des Nouveaux) !');
-    setActiveTab('integration');
-  };
-
   // P4.19 — membre connecté (remplace les anciens hardcodes mem_1).
   const operator = members.find(m => m.id === loggedInMemberId) ?? members[0];
   // §6.2 — une notification ciblée (escalade J+7) n'est visible que du Ministre visé ;
@@ -576,7 +490,7 @@ export default function App() {
             activeBranch={activeBranch}
             simulatedRole={simulatedRole}
             setActiveTab={setActiveTab}
-            onOpenQuickNewForm={() => setShowGlobalQuickForm(true)}
+            onOpenQuickNewForm={() => setActiveTab('adn')}
             operatorId={operator?.id}
             onMarkReportTreated={(reportId) => setReports(prev => prev.map(r =>
               r.id === reportId ? { ...r, content: { ...r.content, traite: true } } : r))}
@@ -608,6 +522,36 @@ export default function App() {
             simulatedRole={simulatedRole}
           />
         );
+      case 'adn':
+        return (
+          <AdnView
+            members={members}
+            events={events}
+            reports={reports}
+            forms={forms}
+            operator={operator}
+            activeBranch={activeBranch}
+            simulatedRole={simulatedRole}
+            audits={audits}
+            permissionMatrix={permissionMatrix}
+            onAddMember={handleAddMember}
+            onUpdateMember={handleUpdateMember}
+            onAddReport={handleAddReport}
+            onUpdateReport={handleUpdateReport}
+          />
+        );
+      case 'rapportculte':
+        return (
+          <CulteReportView
+            events={events}
+            reports={reports}
+            operator={operator}
+            activeBranch={activeBranch}
+            simulatedRole={simulatedRole}
+            onAddReport={handleAddReport}
+            onUpdateReport={handleUpdateReport}
+          />
+        );
       case 'bloombus':
         return (
           <BloomBusView
@@ -631,6 +575,7 @@ export default function App() {
             onAddEvent={handleAddEvent}
             onUpdateEvent={(ev) => setEvents(prev => prev.map(e => e.id === ev.id ? ev : e))}
             onAddReport={handleAddReport}
+            onUpdateReport={handleUpdateReport}
             activeBranch={activeBranch}
             simulatedRole={simulatedRole}
             members={members}
@@ -659,7 +604,7 @@ export default function App() {
       case 'ministeres':
         return <MinisteresView activeBranch={activeBranch} simulatedRole={simulatedRole} members={members} reports={reports} operator={operator} departments={departments} onUpdateDepartments={setDepartments} onAddAuditLog={handleAddAuditLog} />;
       case 'departments':
-        return <DepartmentsView activeBranch={activeBranch} simulatedRole={simulatedRole} members={members} reports={reports} events={events} audits={audits} permissionMatrix={permissionMatrix} forms={forms} departments={departments} onUpdateDepartments={setDepartments} onUpdateMember={handleUpdateMember} onAddMember={handleAddMember} busLines={busLines} onAddReport={handleAddReport} onAddAuditLog={handleAddAuditLog} selectedDept={selectedDept} setSelectedDept={setSelectedDept} operatorId={operator?.id} onOpenQuickNewForm={() => setShowGlobalQuickForm(true)} />;
+        return <DepartmentsView activeBranch={activeBranch} simulatedRole={simulatedRole} members={members} reports={reports} events={events} audits={audits} permissionMatrix={permissionMatrix} forms={forms} departments={departments} onUpdateDepartments={setDepartments} onUpdateMember={handleUpdateMember} onAddMember={handleAddMember} busLines={busLines} onAddReport={handleAddReport} onAddAuditLog={handleAddAuditLog} selectedDept={selectedDept} setSelectedDept={setSelectedDept} operatorId={operator?.id} onOpenQuickNewForm={() => setActiveTab('adn')} />;
       case 'formations':
         return <FormationsView activeBranch={activeBranch} simulatedRole={simulatedRole} members={members} operator={operator} permissionMatrix={permissionMatrix} />;
       case 'programs':
@@ -709,6 +654,7 @@ export default function App() {
         permissionMatrix={permissionMatrix}
         members={members}
         operator={operator}
+        onCreateDepartment={() => setShowCreateDept(true)}
       />
 
       {/* Main content viewport */}
@@ -750,276 +696,27 @@ export default function App() {
         </main>
       </div>
 
-      {/* Floating Action Buttons — visible sur toutes les pages pour ces rôles */}
-      {['ADN', 'Admin', 'Super Admin'].includes(simulatedRole) && (
-        <button
-          id="floating-adn-btn"
-          onClick={() => setShowGlobalQuickForm(true)}
-          className={`fixed bottom-6 right-6 p-4 rounded-full text-white shadow-2xl md:hover:scale-105 transition-transform duration-200 ease-out-spring active-scale z-40 cursor-pointer min-h-[56px] min-w-[56px] flex items-center justify-center ${
-            'bg-bc-green'
-          }`}
-          title="Nouveau & OJ ADN"
-        >
-          <span className="flex items-center gap-1">
-            <UserCheck size={22} />
-            <span className="text-xs font-ui font-black uppercase tracking-wider pr-1">➕ ADN</span>
-          </span>
-        </button>
-      )}
 
-      {/* Global Quick ADN Nouveau Modal */}
-      {showGlobalQuickForm && (
-        <div className="fixed inset-0 bg-black/55 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-[2.5rem] max-w-md w-full p-6 border border-bc-border shadow-2xl relative">
-            <button
-              id="close-global-quick-btn"
-              onClick={() => setShowGlobalQuickForm(false)}
-              className="absolute top-4 right-4 p-2 text-bc-text-secondary hover:text-bc-purple transition-colors"
-            >
-              <X size={20} />
-            </button>
-
-            <h3 className="text-base font-ui font-bold text-bc-text flex items-center gap-2 mb-4">
-              <UserCheck size={18} className={'text-bc-text'} />
-              Fiche d'Accueil ADN & OJ (Moisson Directe)
-            </h3>
-
-            <form onSubmit={handleSaveQuickNouveau} className="space-y-4">
-              {/* Type de membre (OJ / Nouveau) */}
-              <div>
-                <label className="block text-xs font-bold text-bc-text mb-1">{nouveauLabel('f0', 'Type de membre')} *</label>
-                <div className="grid grid-cols-2 gap-2">
-                  <button
-                    type="button"
-                    onClick={() => setQuickOj(true)}
-                    className={`text-left p-3 rounded-2xl border transition-colors ${quickOj ? 'bg-bc-green/10 border-bc-green' : 'bg-white border-bc-border hover:bg-bc-canvas'}`}
-                  >
-                    <span className="block text-xs font-bold text-bc-text">Oui Jésus (OJ)</span>
-                    <span className="block text-[10px] text-bc-text-secondary">A donné sa vie à Jésus aujourd'hui</span>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setQuickOj(false)}
-                    className={`text-left p-3 rounded-2xl border transition-colors ${!quickOj ? 'bg-bc-green/10 border-bc-green' : 'bg-white border-bc-border hover:bg-bc-canvas'}`}
-                  >
-                    <span className="block text-xs font-bold text-bc-text">Nouveau (NV)</span>
-                    <span className="block text-[10px] text-bc-text-secondary">Premier(s) passage(s) à l'église</span>
-                  </button>
-                </div>
-              </div>
-
-              {/* Date d'activité (culte) + Type de culte */}
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-xs font-bold text-bc-text mb-1">{nouveauLabel('f1', "Date d'activité (culte)")} *</label>
-                  <input
-                    type="date"
-                    required
-                    value={quickActivityDate}
-                    onChange={(e) => setQuickActivityDate(e.target.value)}
-                    className="w-full border border-bc-border rounded-full px-3 py-2 text-xs bg-white focus:outline-none focus:border-bc-green"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-bold text-bc-text mb-1">{nouveauLabel('f2', 'Type de culte')}</label>
-                  <select
-                    value={quickCultType}
-                    onChange={(e) => setQuickCultType(e.target.value)}
-                    className="w-full border border-bc-border rounded-full px-3 py-2 text-xs bg-white focus:outline-none"
-                  >
-                    {CULT_TYPES.map(c => <option key={c} value={c}>{c}</option>)}
-                  </select>
-                </div>
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-xs font-bold text-bc-text mb-1">{nouveauLabel('f3', 'Prénom')} *</label>
-                  <input
-                    id="quick-firstname"
-                    type="text"
-                    required
-                    value={quickFirstname}
-                    onChange={(e) => setQuickFirstname(e.target.value)}
-                    className="w-full border border-bc-border rounded-full px-3 py-2 text-xs focus:outline-none focus:border-bc-green"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-bold text-bc-text mb-1">{nouveauLabel('f4', 'Nom')} *</label>
-                  <input
-                    id="quick-lastname"
-                    type="text"
-                    required
-                    value={quickLastname}
-                    onChange={(e) => setQuickLastname(e.target.value)}
-                    className="w-full border border-bc-border rounded-full px-3 py-2 text-xs focus:outline-none focus:border-bc-green"
-                  />
-                </div>
-              </div>
-
-              {/* Contact + Genre */}
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-xs font-bold text-bc-text mb-1">{nouveauLabel('f5', 'Contact')} *</label>
-                  <input
-                    id="quick-phone"
-                    type="text"
-                    required
-                    placeholder="+225..."
-                    value={quickPhone}
-                    onChange={(e) => setQuickPhone(e.target.value)}
-                    className="w-full border border-bc-border rounded-full px-3 py-2 text-xs focus:outline-none focus:border-bc-green font-mono"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-bold text-bc-text mb-1">{nouveauLabel('f6', 'Genre')}</label>
-                  <select
-                    value={quickGender}
-                    onChange={(e) => setQuickGender(e.target.value as 'H' | 'F')}
-                    className="w-full border border-bc-border rounded-full px-3 py-2 text-xs bg-white focus:outline-none"
-                  >
-                    <option value="H">Homme</option>
-                    <option value="F">Femme</option>
-                  </select>
-                </div>
-              </div>
-
-              {/* Date de naissance + Commune */}
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-xs font-bold text-bc-text mb-1">{nouveauLabel('f7', 'Date de naissance')}</label>
-                  <input
-                    type="date"
-                    value={quickBirthDate}
-                    onChange={(e) => setQuickBirthDate(e.target.value)}
-                    className="w-full border border-bc-border rounded-full px-3 py-2 text-xs bg-white focus:outline-none focus:border-bc-green"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-bold text-bc-text mb-1">{nouveauLabel('f8', 'Commune / Quartier')}</label>
-                  <select
-                    id="quick-commune-select"
-                    value={quickCommune}
-                    onChange={(e) => setQuickCommune(e.target.value)}
-                    className="w-full border border-bc-border rounded-full px-3 py-2 text-xs bg-white focus:outline-none"
-                  >
-                    <option value="Cocody">Cocody</option>
-                    <option value="Yopougon">Yopougon</option>
-                    <option value="Abobo">Abobo</option>
-                    <option value="Koumassi">Koumassi</option>
-                  </select>
-                </div>
-              </div>
-
-              {/* Photo (obligatoire) + Source */}
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-xs font-bold text-bc-text mb-1">{nouveauLabel('f9', 'Photo')} *</label>
-                  <input
-                    id="quick-photo-input"
-                    type="file"
-                    accept="image/*"
-                    required
-                    onChange={(e) => {
-                      const file = e.target.files?.[0];
-                      if (!file) return;
-                      // Resize + gestion d'erreur (C2/B6) — une photo pleine résolution
-                      // faisait exploser le quota localStorage et crasher en boucle.
-                      downscaleImage(file).then(setQuickPhotoUrl).catch((err) => alert(err.message));
-                    }}
-                    className="w-full border border-bc-border rounded-full px-3 py-1.5 text-[10px] bg-white focus:outline-none"
-                  />
-                  {quickPhotoUrl && (
-                    <img src={quickPhotoUrl} alt="Aperçu" className="mt-2 w-12 h-12 rounded-full object-cover border border-bc-border" />
-                  )}
-                </div>
-                <div>
-                  <label className="block text-xs font-bold text-bc-text mb-1">{nouveauLabel('f10', 'Comment nous a-t-il connu ?')}</label>
-                  <select
-                    value={quickSource}
-                    onChange={(e) => setQuickSource(e.target.value)}
-                    className="w-full border border-bc-border rounded-full px-3 py-2 text-xs bg-white focus:outline-none"
-                  >
-                    <option value="Invitation">Invitation (ami/famille)</option>
-                    <option value="Réseaux sociaux">Réseaux sociaux</option>
-                    <option value="Passage devant l'église">Passage devant l'église</option>
-                    <option value="Évangélisation">Évangélisation</option>
-                    <option value="Autre">Autre</option>
-                  </select>
-                </div>
-              </div>
-
-              {/* Localisation GPS */}
-              <div>
-                <button
-                  type="button"
-                  onClick={() => {
-                    if (!navigator.geolocation) {
-                      alert('Géolocalisation non disponible sur cet appareil.');
-                      return;
-                    }
-                    navigator.geolocation.getCurrentPosition(
-                      (pos) => setQuickGps({ lat: pos.coords.latitude, lng: pos.coords.longitude }),
-                      () => alert('Impossible de récupérer la position GPS.')
-                    );
-                  }}
-                  className="text-xs font-bold px-3 py-2 rounded-full border border-bc-border hover:bg-bc-canvas"
-                >
-                  📍 {quickGps ? `Position capturée (${quickGps.lat.toFixed(4)}, ${quickGps.lng.toFixed(4)})` : 'Localiser (GPS)'}
-                </button>
-              </div>
-
-              {/* Souhaites-tu être… (membre vs simple visiteur) */}
-              <div>
-                <label className="block text-xs font-bold text-bc-text mb-1">{nouveauLabel('f11', 'Souhaites-tu être…')}</label>
-                <div className="grid grid-cols-2 gap-2">
-                  {(['Membre', 'Visiteur'] as const).map(opt => (
-                    <button
-                      key={opt}
-                      type="button"
-                      onClick={() => setQuickWish(opt)}
-                      className={`px-3 py-2 rounded-full text-xs font-bold border transition-colors ${
-                        quickWish === opt ? 'bg-bc-green text-white border-bc-green' : 'bg-white text-bc-text-secondary border-bc-border hover:bg-bc-canvas'
-                      }`}
-                    >
-                      {opt === 'Membre' ? 'Membre' : 'Simple visiteur'}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              {/* Département d'intérêt */}
-              <div>
-                <label className="block text-xs font-bold text-bc-text mb-1">{nouveauLabel('f12', "Département d'intérêt")}</label>
-                <select
-                  value={quickDept}
-                  onChange={(e) => setQuickDept(e.target.value)}
-                  className="w-full border border-bc-border rounded-full px-3 py-2 text-xs bg-white focus:outline-none"
-                >
-                  {departmentOptions.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
-                </select>
-              </div>
-
-              <div className="flex gap-3 justify-end pt-3 border-t border-bc-border">
-                <button
-                  id="quick-cancel-btn"
-                  type="button"
-                  onClick={() => setShowGlobalQuickForm(false)}
-                  className="px-4 py-2 border border-bc-border text-bc-text-secondary rounded-full text-xs hover:bg-bc-canvas"
-                >
-                  Annuler
-                </button>
-                <button
-                  id="quick-submit-btn"
-                  type="submit"
-                  className={`px-5 py-2 text-white rounded-full text-xs font-ui font-bold hover:opacity-90 ${'bg-bc-green'}`}
-                >
-                  Enregistrer ADN
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
+      {showCreateDept && (
+        <CreateDepartmentModal
+          ministries={ministrySeeds}
+          onClose={() => setShowCreateDept(false)}
+          onCreate={(d) => {
+            setDepartments(prev => [...prev, d]);
+            handleAddAuditLog({
+              id: genId('aud_dept'),
+              timestamp: new Date().toISOString(),
+              actionType: 'DEPT_CREATED',
+              operatorName: operator ? `${operator.firstName} ${operator.lastName}` : simulatedRole,
+              operatorId: operator?.id ?? '',
+              entity: 'department',
+              details: `Département « ${d.name} » créé depuis la barre latérale.`,
+            });
+            setShowCreateDept(false);
+            setSelectedDept(d.id);
+            setActiveTab('departments');
+          }}
+        />
       )}
 
       <ToastContainer />

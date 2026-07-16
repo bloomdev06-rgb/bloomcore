@@ -4,7 +4,8 @@ import { Branch, Member, PermissionMatrix } from '../types';
 import {
   LayoutDashboard, Users, Grid, LayoutList, Bus, Calendar,
   Activity, Heart, GraduationCap, Shield, UserCog, Settings,
-  FormInput, History, X, UserPlus, ChevronDown, FileText, Droplet
+  FormInput, History, X, UserPlus, ChevronDown, FileText, Droplet,
+  UserCheck, ClipboardList, Plus
 } from 'lucide-react';
 import { useMediaQuery } from '../hooks/useMediaQuery';
 import { useDepartments, useMinistries, canView as canViewTab } from '../data';
@@ -22,6 +23,8 @@ interface SidebarProps {
   permissionMatrix: PermissionMatrix;
   members: Member[];
   operator?: Member;
+  // Ouvre le modal « Créer un département » (monté dans App) — bouton visible pasteurs/admins.
+  onCreateDepartment?: () => void;
 }
 
 export default function Sidebar({
@@ -35,7 +38,8 @@ export default function Sidebar({
   setSelectedDept,
   permissionMatrix,
   members,
-  operator
+  operator,
+  onCreateDepartment
 }: SidebarProps) {
   const isChurch = activeBranch === 'church';
   const isDesktop = useMediaQuery('(min-width: 1024px)');
@@ -50,11 +54,16 @@ export default function Sidebar({
     next.has(id) ? next.delete(id) : next.add(id);
     return next;
   });
+  // Auto-déplier le ministère du département sélectionné — UNIQUEMENT quand la sélection
+  // change. Dépendre du tableau `departments` re-déclenchait l'effet à chaque render
+  // (useDepartments() = load() → nouvelle identité), ré-ouvrant le ministère juste après
+  // chaque tentative de repli : impossible d'enrouler la Rétention (dept auto-sélectionné
+  // Intégration/ADN lui appartient). La string dérivée est stable, l'effet ne joue qu'au
+  // vrai changement.
+  const selectedMinistryId = selectedDept ? departments.find(d => d.id === selectedDept)?.ministryId : undefined;
   useEffect(() => {
-    if (!selectedDept) return;
-    const ministryId = departments.find(d => d.id === selectedDept)?.ministryId;
-    if (ministryId) setExpandedMinistries(prev => (prev.has(ministryId) ? prev : new Set(prev).add(ministryId)));
-  }, [selectedDept, departments]);
+    if (selectedMinistryId) setExpandedMinistries(prev => (prev.has(selectedMinistryId) ? prev : new Set(prev).add(selectedMinistryId)));
+  }, [selectedMinistryId]);
 
   // On desktop, we might want to respect the collapsed state from the parent.
   // On mobile, 'collapsed' actually means 'drawer is closed' and !collapsed means 'drawer is open'.
@@ -73,8 +82,10 @@ export default function Sidebar({
     { id: 'ministeres', label: 'Ministères', icon: Grid },
     { id: 'departments', label: 'Départements', icon: LayoutList },
     { id: 'integration', label: 'Intégration', icon: UserPlus },
+    { id: 'adn', label: 'ADN', icon: UserCheck },
     { id: 'bloombus', label: 'Bloom Bus', icon: Bus },
     { id: 'events', label: 'Cultes & Événements', icon: Calendar },
+    { id: 'rapportculte', label: 'Rapport de culte', icon: ClipboardList },
     { id: 'projects', label: 'Projets', icon: Activity },
     { id: 'cursus', label: 'Cursus Pastoral', icon: Heart },
     { id: 'formations', label: 'Formations', icon: GraduationCap },
@@ -199,6 +210,16 @@ export default function Sidebar({
                   Responsable/Adjoint, cantonné à son seul département (pas de liste à parcourir). */}
               {item.id === 'departments' && isActive && deptsExpanded && !isDeptScoped && (!collapsed || !isDesktop) && (
                 <div className="mt-1 mb-2 ml-4 pl-3 border-l-2 border-bc-border space-y-0.5">
+                  {/* Créer un département — en tête de la liste des ministères, pasteurs & admins seulement */}
+                  {['Pasteur', 'Pasteur Principal', 'Admin', 'Super Admin'].includes(simulatedRole) && onCreateDepartment && (
+                    <button
+                      id="sidebar-create-dept-btn"
+                      onClick={onCreateDepartment}
+                      className="w-full flex items-center gap-1.5 px-2 py-1.5 rounded-lg text-[11px] font-bold text-bc-green hover:bg-bc-green/10 transition-colors"
+                    >
+                      <Plus size={12} className="shrink-0" /> Créer un département
+                    </button>
+                  )}
                   {ministries.map(ministry => {
                     const mDepts = departments.filter(d => d.ministryId === ministry.id);
                     if (mDepts.length === 0) return null;

@@ -25,14 +25,6 @@ export function periodRange(period: PeriodInput, now: Date = new Date()): { from
   return { from, to: now };
 }
 
-// Fenêtre "membre actif" de l'Accueil : 1 mois + 1 semaine glissants par rapport à aujourd'hui,
-// indépendante du sélecteur de période.
-export function activeMemberWindow(now: Date = new Date()): { from: Date; to: Date } {
-  const from = new Date(now);
-  from.setDate(from.getDate() - 37);
-  return { from, to: now };
-}
-
 // Health level 1..5 (Très faible → Très bon) → 0..100 % for radar/health widgets.
 export function levelToPercent(level: number): number {
   return Math.round(((Math.max(1, Math.min(5, level)) - 1) / 4) * 100);
@@ -200,17 +192,36 @@ export function activeBusIds(reports: Report[], period: PeriodInput, now: Date =
 // ponytail: reste vide tant qu'aucun rapport n'est déposé pour ce scope — donnée réelle manquante, pas un bug
 // (voir AUDIT-FRONTEND P1.3). rapport_activite n'a pas encore de constructeur de formulaire (P2, non branché) ;
 // le check est déjà là pour ne rien casser une fois ce type produit avec le même content.presencesService.
-// Dashboard sparklines — N dernières semaines calendaires (lundi->dimanche), la plus
-// récente étant la semaine en cours contenant `now`.
-function weekWindows(weeks: number, now: Date): { week: string; from: number; to: number }[] {
-  const currentMonday = mondayOf(now);
+// Dashboard sparklines/séries — fenêtres de la période sélectionnée : hebdomadaires
+// (lundi→lundi) tant que la plage est courte (≤ ~4 mois), mensuelles au-delà.
+// Clamp impératif : periodRange('custom') sans bornes part de epoch — on ne génère
+// jamais plus de 18 fenêtres hebdo / 24 mensuelles.
+export function periodWindows(period: PeriodInput, now: Date = new Date()): { week: string; from: number; to: number }[] {
+  const { from: pFrom, to: pTo } = periodRange(period, now);
+  const days = Math.ceil((pTo.getTime() - pFrom.getTime()) / 86_400_000);
+  if (days <= 120) {
+    const weeks = Math.min(Math.max(Math.ceil(days / 7), 2), 18);
+    const lastMonday = mondayOf(pTo);
+    const wins: { week: string; from: number; to: number }[] = [];
+    for (let i = weeks - 1; i >= 0; i--) {
+      const from = new Date(lastMonday);
+      from.setDate(from.getDate() - i * 7);
+      const to = new Date(from);
+      to.setDate(to.getDate() + 7);
+      wins.push({ week: weekId(from), from: from.getTime(), to: to.getTime() });
+    }
+    return wins;
+  }
+  const months = Math.min(Math.ceil(days / 30), 24);
   const wins: { week: string; from: number; to: number }[] = [];
-  for (let i = weeks - 1; i >= 0; i--) {
-    const from = new Date(currentMonday);
-    from.setDate(from.getDate() - i * 7);
-    const to = new Date(from);
-    to.setDate(to.getDate() + 7);
-    wins.push({ week: weekId(from), from: from.getTime(), to: to.getTime() });
+  for (let i = months - 1; i >= 0; i--) {
+    const from = new Date(pTo.getFullYear(), pTo.getMonth() - i, 1);
+    const to = new Date(from.getFullYear(), from.getMonth() + 1, 1);
+    wins.push({
+      week: from.toLocaleDateString('fr-FR', { month: 'short', year: '2-digit' }),
+      from: from.getTime(),
+      to: to.getTime(),
+    });
   }
   return wins;
 }
@@ -221,11 +232,11 @@ function weekWindows(weeks: number, now: Date): { week: string; from: number; to
 export function weeklyGrowthSeries(
   members: Member[],
   reports: Report[],
-  weeks: number = 8,
+  period: PeriodInput,
   now: Date = new Date(),
 ): { name: string; nouveaux: number; participants: number }[] {
-  const active = weeklyActiveCounts(reports, weeks, now);
-  return weekWindows(weeks, now).map(({ week, from, to }, i) => ({
+  const active = weeklyActiveCounts(reports, period, now);
+  return periodWindows(period, now).map(({ week, from, to }, i) => ({
     name: week,
     nouveaux: members.filter((m) => {
       const iso = m.integrationDateRegistered || m.entryDate;
@@ -237,8 +248,8 @@ export function weeklyGrowthSeries(
   }));
 }
 
-export function weeklyBaptismCounts(members: Member[], weeks: number = 8, now: Date = new Date()): { week: string; count: number }[] {
-  return weekWindows(weeks, now).map(({ week, from, to }) => ({
+export function weeklyBaptismCounts(members: Member[], period: PeriodInput, now: Date = new Date()): { week: string; count: number }[] {
+  return periodWindows(period, now).map(({ week, from, to }) => ({
     week,
     count: members.filter((m) => {
       if (!m.baptismDate) return false;
@@ -249,8 +260,8 @@ export function weeklyBaptismCounts(members: Member[], weeks: number = 8, now: D
 }
 
 // Membres actifs distincts par semaine (même définition que activeMemberIds).
-export function weeklyActiveCounts(reports: Report[], weeks: number = 8, now: Date = new Date()): { week: string; count: number }[] {
-  return weekWindows(weeks, now).map(({ week, from, to }) => {
+export function weeklyActiveCounts(reports: Report[], period: PeriodInput, now: Date = new Date()): { week: string; count: number }[] {
+  return periodWindows(period, now).map(({ week, from, to }) => {
     const ids = new Set<string>();
     for (const r of reports) {
       if (r.reportType !== 'rapport_service' && r.reportType !== 'rapport_activite') continue;
@@ -264,8 +275,8 @@ export function weeklyActiveCounts(reports: Report[], weeks: number = 8, now: Da
 }
 
 // Moisson (ADN + Bloom Bus) par semaine (même définition que moissonTotal sans scope bus).
-export function weeklyMoissonCounts(reports: Report[], weeks: number = 8, now: Date = new Date()): { week: string; count: number }[] {
-  return weekWindows(weeks, now).map(({ week, from, to }) => {
+export function weeklyMoissonCounts(reports: Report[], period: PeriodInput, now: Date = new Date()): { week: string; count: number }[] {
+  return periodWindows(period, now).map(({ week, from, to }) => {
     let count = 0;
     for (const r of reports) {
       const d = new Date(r.date).getTime();
@@ -314,8 +325,8 @@ export function ojTotal(reports: Report[], period: PeriodInput, now: Date = new 
 }
 
 // OJ par semaine (même définition que ojTotal), pour le sparkline du dashboard.
-export function weeklyOjCounts(reports: Report[], weeks: number = 8, now: Date = new Date()): { week: string; count: number }[] {
-  return weekWindows(weeks, now).map(({ week, from, to }) => {
+export function weeklyOjCounts(reports: Report[], period: PeriodInput, now: Date = new Date()): { week: string; count: number }[] {
+  return periodWindows(period, now).map(({ week, from, to }) => {
     let count = 0;
     for (const r of reports) {
       if (r.reportType !== 'rapport_adn') continue;

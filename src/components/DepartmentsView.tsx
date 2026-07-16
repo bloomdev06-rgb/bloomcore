@@ -3,7 +3,7 @@ import { Branch, Member, Report, Department, DepartmentType, SpecialFunction, Ac
 import { LayoutList, ChevronRight, Users, Calendar, Activity, Plus, X, Sparkles, FileText, CheckCircle, UserCheck, Heart, TrendingUp, Clock, AlertCircle, FolderKanban } from 'lucide-react';
 import { useMinistries, useProjects, load, save, activitiesSeed } from '../data';
 import {
-  activeMemberIds, activeMemberWindow, dominantHealthLevel, isRed, moissonBySource, ojTotal,
+  activeMemberIds, dominantHealthLevel, isRed, moissonBySource, ojTotal,
   pendingFollowUps, periodRange, projectProgress, Period, PeriodInput, weeklyActiveCounts, weeklyBaptismCounts,
   weeklyGrowthSeries, weeklyMoissonCounts, weeklyOjCounts,
 } from '../data/kpi';
@@ -20,6 +20,7 @@ import { HealthSmiley } from './ui/HealthSmiley';
 import { HEALTH_AXES, Spark, Ring } from './DashboardView';
 import Member360View from './Member360View';
 import MemberFormModal from './MemberFormModal';
+import { SPECIAL_LABEL } from './CreateDepartmentModal';
 
 interface DepartmentsViewProps {
   activeBranch: Branch;
@@ -50,10 +51,6 @@ const REPORT_ROWS: { type: Report['reportType']; label: string }[] = [
   { type: 'rapport_observation', label: 'Observation typée (avec / sans suivi)' },
 ];
 
-const SPECIAL_LABEL: Record<SpecialFunction, string> = {
-  adn: 'ADN', portiers: 'Portiers', integration: 'Intégration',
-  bloom_bus: 'Bloom Bus', gestion_cultes: 'Gestion des Cultes', parcours_etapes: 'Parcours à étapes',
-};
 
 // Rôles cantonnés à un seul département (cf. Sidebar isDeptScoped) : département de test
 // associé à chacun, pour qu'ils atterrissent directement dessus sans liste à parcourir.
@@ -75,7 +72,6 @@ const specialFn = (d?: Department): SpecialFunction | undefined => {
 export default function DepartmentsView({ activeBranch, simulatedRole, members = [], reports = [], events = [], audits = [], permissionMatrix, forms = [], departments, onUpdateDepartments, onUpdateMember, onAddMember, busLines = [], onAddReport, onAddAuditLog, selectedDept: selectedDeptProp, setSelectedDept: setSelectedDeptProp, operatorId, onOpenQuickNewForm }: DepartmentsViewProps) {
   const INITIAL_MINISTRIES = useMinistries();
   // B3 — départements = source unique dans App (prop). Créations/sections via onUpdateDepartments.
-  const [showCreate, setShowCreate] = useState(false);
   const [show360Member, setShow360Member] = useState<Member | null>(null);
   // Onglet Membres du département — recherche + formulaire ajout/édition, rattachés
   // au département courant (Responsable ne gère ses membres que depuis ici, cf. Sidebar.tsx).
@@ -136,8 +132,8 @@ export default function DepartmentsView({ activeBranch, simulatedRole, members =
   const sf = specialFn(selectedDeptData);
 
   const deptMembers = members.filter(m => selectedDept && Object.keys(m.departments).includes(selectedDept));
-  // KPIS.md §4 — membres actifs du dept : même fenêtre fixe (1 mois + 1 sem.) que l'Accueil, indépendante du sélecteur.
-  const deptActiveCount = selectedDept ? activeMemberIds(reports, activeMemberWindow(), new Date(), selectedDept).size : 0;
+  // Membres actifs du dept sur la période du sélecteur (aligné Accueil).
+  const deptActiveCount = selectedDept ? activeMemberIds(reports, effectivePeriod, new Date(), selectedDept).size : 0;
   const deptResponsable = deptMembers.find(m => selectedDept && m.departments[selectedDept] === 'Responsable');
   const byFunction = (fn: string) => deptMembers.filter(m => selectedDept && m.departments[selectedDept] === fn);
   // Nouveaux affectés à ce département, suivis par le Responsable jusqu'à Boss :
@@ -198,7 +194,7 @@ export default function DepartmentsView({ activeBranch, simulatedRole, members =
   const deptOj = ojTotal(deptReports, effectivePeriod);
   const deptFollowUps = pendingFollowUps(deptReports);
   const deptRedCount = deptMembers.filter(m => isRed(m)).length;
-  const deptGrowthData = weeklyGrowthSeries(deptMembers, deptReports, 8);
+  const deptGrowthData = weeklyGrowthSeries(deptMembers, deptReports, effectivePeriod);
 
   // P1.4 — labels read live from FormBuilder's fd_service/fd_rsa FormDefs, id-matched.
   const serviceForm = forms.find((f) => f.id === 'fd_service');
@@ -364,11 +360,6 @@ export default function DepartmentsView({ activeBranch, simulatedRole, members =
                     )}
                   </p>
                 </div>
-                {canAdmin && (
-                  <button onClick={() => setShowCreate(true)} className="px-3 py-2 bg-bc-green text-white rounded-full text-xs font-bold hover:opacity-90 flex items-center gap-1.5 active-scale">
-                    <Plus size={14} /> Créer
-                  </button>
-                )}
               </div>
 
               {/* Tab bar — synthèse (accueil) + onglets internes du responsable */}
@@ -451,8 +442,8 @@ export default function DepartmentsView({ activeBranch, simulatedRole, members =
                         <span className="text-[9px] font-bold uppercase tracking-wider">Actifs</span>
                       </div>
                       <div className="text-xl font-ui font-extrabold text-bc-text tracking-tight">{deptActiveCount}</div>
-                      <Spark data={weeklyActiveCounts(deptReports, 8)} color="var(--color-bc-green)" />
-                      <p className="text-[9px] text-bc-text-secondary mt-1">Ont servi (1 mois + 1 sem.)</p>
+                      <Spark data={weeklyActiveCounts(deptReports, effectivePeriod)} color="var(--color-bc-green)" />
+                      <p className="text-[9px] text-bc-text-secondary mt-1">Ont servi sur la période</p>
                     </div>
 
                     <div className="bg-white p-4 rounded-2xl border border-bc-border shadow-soft hover:shadow-md transition-shadow">
@@ -460,7 +451,7 @@ export default function DepartmentsView({ activeBranch, simulatedRole, members =
                         <span className="text-[9px] font-bold uppercase tracking-wider">Baptisés</span>
                       </div>
                       <div className="text-xl font-ui font-extrabold text-bc-text tracking-tight">{deptPeriodBaptised.length}</div>
-                      <Spark data={weeklyBaptismCounts(deptMembers, 8)} color="var(--color-bc-success)" />
+                      <Spark data={weeklyBaptismCounts(deptMembers, effectivePeriod)} color="var(--color-bc-success)" />
                       <p className="text-[9px] text-bc-text-secondary mt-1">Sur la période · {deptBaptisedViaDept} Dépt · {deptPeriodBaptised.length - deptBaptisedViaDept} Fiche</p>
                     </div>
 
@@ -470,7 +461,7 @@ export default function DepartmentsView({ activeBranch, simulatedRole, members =
                         <span className="text-[9px] font-bold uppercase tracking-wider">Moisson</span>
                       </div>
                       <div className="text-xl font-ui font-extrabold text-bc-text tracking-tight">{deptMoisson.adn + deptMoisson.bus}</div>
-                      <Spark data={weeklyMoissonCounts(deptReports, 8)} color="var(--color-bc-gold)" />
+                      <Spark data={weeklyMoissonCounts(deptReports, effectivePeriod)} color="var(--color-bc-gold)" />
                       <p className="text-[9px] text-bc-text-secondary mt-1">Intégrés · {deptMoisson.adn} ADN · {deptMoisson.bus} Bus</p>
                     </div>
 
@@ -480,7 +471,7 @@ export default function DepartmentsView({ activeBranch, simulatedRole, members =
                         <span className="text-[9px] font-bold uppercase tracking-wider">OJ « Oui à Jésus »</span>
                       </div>
                       <div className="text-xl font-ui font-extrabold text-bc-text tracking-tight">{deptOj}</div>
-                      <Spark data={weeklyOjCounts(deptReports, 8)} color="var(--color-bc-cerulean)" />
+                      <Spark data={weeklyOjCounts(deptReports, effectivePeriod)} color="var(--color-bc-cerulean)" />
                       <p className="text-[9px] text-bc-text-secondary mt-1">Sur la période · rapports ADN</p>
                     </div>
 
@@ -1091,28 +1082,6 @@ export default function DepartmentsView({ activeBranch, simulatedRole, members =
         )}
       </div>
 
-      {showCreate && canAdmin && (
-        <CreateDepartmentModal
-          ministries={INITIAL_MINISTRIES}
-          onClose={() => setShowCreate(false)}
-          onCreate={(d) => {
-            onUpdateDepartments((prev) => [...prev, d]);
-            setSelectedDept(d.id);
-            setActiveTab(null);
-            setShowCreate(false);
-            // §12.2 — journal central : les créations de département en faisaient partie.
-            onAddAuditLog?.({
-              id: `aud_dept_${Date.now()}`,
-              timestamp: new Date().toISOString(),
-              actionType: 'DEPARTMENT_CREATED',
-              operatorName: 'Affeny Grah',
-              operatorId: 'mem_1',
-              details: `Création du département "${d.name}".`,
-              branch: activeBranch !== 'global' ? activeBranch : undefined,
-            });
-          }}
-        />
-      )}
 
       {/* Fiche membre 360 au clic sur un membre du département */}
       {show360Member && permissionMatrix && (
@@ -1293,58 +1262,5 @@ export default function DepartmentsView({ activeBranch, simulatedRole, members =
         message="Cette section et son contenu seront définitivement supprimés. Cette action est irréversible."
       />
     </div>
-  );
-}
-
-function CreateDepartmentModal({
-  ministries,
-  onClose,
-  onCreate,
-}: {
-  ministries: { id: string; name: string }[];
-  onClose: () => void;
-  onCreate: (d: Department) => void;
-}) {
-  const [name, setName] = useState('');
-  const [ministryId, setMinistryId] = useState(ministries[0]?.id ?? '');
-  const [type, setType] = useState<DepartmentType>('service');
-  const [special, setSpecial] = useState<SpecialFunction | ''>('');
-
-  const submit = () => {
-    if (!name.trim() || !ministryId) return;
-    onCreate({
-      id: `dept_${Date.now()}`,
-      name: name.trim(),
-      ministryId,
-      type,
-      description: '',
-      specialFunction: type === 'spécial' && special ? special : undefined,
-    });
-  };
-
-  return (
-    <Modal open={true} onClose={onClose} title="Créer un département" maxWidth="max-w-md">
-        <div className="space-y-3">
-          <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Nom du département" className="w-full border border-bc-border rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-bc-green" />
-          <select value={ministryId} onChange={(e) => setMinistryId(e.target.value)} className="w-full border border-bc-border rounded-xl px-3 py-2 text-sm bg-white">
-            {ministries.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
-          </select>
-          <select value={type} onChange={(e) => setType(e.target.value as DepartmentType)} className="w-full border border-bc-border rounded-xl px-3 py-2 text-sm bg-white">
-            <option value="service">Type : normal (service)</option>
-            <option value="spécial">Type : spécial</option>
-          </select>
-          {type === 'spécial' && (
-            <select value={special} onChange={(e) => setSpecial(e.target.value as SpecialFunction)} className="w-full border border-bc-border rounded-xl px-3 py-2 text-sm bg-white">
-              <option value="">— Fonction spéciale —</option>
-              {(['adn', 'portiers', 'integration', 'bloom_bus', 'gestion_cultes', 'parcours_etapes'] as SpecialFunction[]).map((f) => (
-                <option key={f} value={f}>{SPECIAL_LABEL[f]}</option>
-              ))}
-            </select>
-          )}
-        </div>
-        <button onClick={submit} disabled={!name.trim()} className="w-full mt-5 bg-bc-green text-white rounded-full py-2.5 text-sm font-bold hover:opacity-90 disabled:opacity-40 active-scale">
-          Créer le département
-        </button>
-    </Modal>
   );
 }

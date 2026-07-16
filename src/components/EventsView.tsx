@@ -56,6 +56,7 @@ interface EventsViewProps {
   onAddEvent: (event: Event) => void;
   onUpdateEvent?: (event: Event) => void;
   onAddReport: (report: Report) => void;
+  onUpdateReport?: (report: Report) => void;
   activeBranch: Branch;
   simulatedRole: string;
   members?: Member[];
@@ -94,6 +95,7 @@ export default function EventsView({
   onAddEvent,
   onUpdateEvent,
   onAddReport,
+  onUpdateReport,
   activeBranch,
   simulatedRole,
   members = [],
@@ -327,8 +329,22 @@ export default function EventsView({
     };
 
     onAddReport(portiersReport);
-    onAddReport(adnReport);
-    onAddReport(culteReport);
+    // Conciliation avec l'onglet ADN et l'onglet Rapport de culte : un seul rapport
+    // adn/culte par événement (upsert), sinon Moisson/OJ/santé doublent. Les champs
+    // texte déjà remplis (prédicateur, thème…) ne sont pas écrasés par une valeur vide.
+    const existingAdn = (reports ?? []).find(r => r.reportType === 'rapport_adn' && r.eventId === selectedEventId);
+    const existingCulte = (reports ?? []).find(r => r.reportType === 'rapport_culte' && r.eventId === selectedEventId);
+    if (existingAdn && onUpdateReport) {
+      onUpdateReport({ ...existingAdn, content: { ...existingAdn.content, ...adnReport.content } });
+    } else {
+      onAddReport(adnReport);
+    }
+    if (existingCulte && onUpdateReport) {
+      const nonEmpty = Object.fromEntries(Object.entries(culteReport.content).filter(([, v]) => v !== '' && v !== undefined));
+      onUpdateReport({ ...existingCulte, content: { ...existingCulte.content, ...nonEmpty } });
+    } else {
+      onAddReport(culteReport);
+    }
 
     // Clôture persistée (B1) : muter targetEvent.closed en place ne déclenchait aucun
     // setEvents → au reload l'événement redevenait « En cours » et était re-clôturable,

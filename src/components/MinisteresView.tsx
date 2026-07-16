@@ -3,7 +3,7 @@ import { Branch, Ministry, Member, Report, Department, AuditLog } from '../types
 import { Grid, ChevronRight, Users, Folder, ArrowLeft, BarChart3, GripVertical, Plus, X, Flame, Palette, MonitorSpeaker, HeartHandshake, Rocket, Network, BookOpen, TrendingUp, Sparkles, Clock, AlertCircle, Calendar, FolderKanban, Trash2 } from 'lucide-react';
 import { useMinistries, useProjects, load, save, activitiesSeed } from '../data';
 import {
-  activeMemberIds, activeMemberWindow, dominantHealthLevel, isRed, moissonBySource, ojTotal,
+  activeMemberIds, dominantHealthLevel, isRed, moissonBySource, ojTotal,
   pendingFollowUps, periodRange, projectProgress, Period, PeriodInput, weeklyActiveCounts, weeklyBaptismCounts,
   weeklyGrowthSeries, weeklyMoissonCounts, weeklyOjCounts,
 } from '../data/kpi';
@@ -211,7 +211,7 @@ export default function MinisteresView({ activeBranch, simulatedRole, members, r
     const branchReports = reports.filter(r => activeBranch === 'global' || r.targetBranch === activeBranch);
     const SelectedIcon = ministryIcon(selected.name);
     const ministryActiveIds = new Set<string>();
-    mDepts.forEach(d => activeMemberIds(branchReports, activeMemberWindow(), new Date(), d.id).forEach(id => ministryActiveIds.add(id)));
+    mDepts.forEach(d => activeMemberIds(branchReports, effectivePeriod, new Date(), d.id).forEach(id => ministryActiveIds.add(id)));
 
     // KPI de synthèse — mêmes calculs que l'Accueil/Départements, scopés aux départements de ce ministère.
     const mDeptIds = mDepts.map(d => d.id);
@@ -227,7 +227,7 @@ export default function MinisteresView({ activeBranch, simulatedRole, members, r
     const ministryOj = ojTotal(ministryReports, effectivePeriod);
     const ministryFollowUps = pendingFollowUps(ministryReports);
     const ministryRedCount = ministryMembers.filter(m => isRed(m)).length;
-    const ministryGrowthData = weeklyGrowthSeries(ministryMembers, ministryReports, 8);
+    const ministryGrowthData = weeklyGrowthSeries(ministryMembers, ministryReports, effectivePeriod);
     const ministryActivities = load('bc_activities', activitiesSeed).filter(a => mDeptIds.includes(a.departmentId));
     const ministryProjects = useProjects().filter(p => p.status === 'En cours' && p.scope === 'ministry' && p.ministryId === selected.id);
 
@@ -317,8 +317,8 @@ export default function MinisteresView({ activeBranch, simulatedRole, members, r
               <span className="text-[9px] font-bold uppercase tracking-wider">Actifs</span>
             </div>
             <div className="text-xl font-ui font-extrabold text-bc-text tracking-tight">{ministryActiveIds.size}</div>
-            <Spark data={weeklyActiveCounts(ministryReports, 8)} color="var(--color-bc-green)" />
-            <p className="text-[9px] text-bc-text-secondary mt-1">Ont servi (1 mois + 1 sem.)</p>
+            <Spark data={weeklyActiveCounts(ministryReports, effectivePeriod)} color="var(--color-bc-green)" />
+            <p className="text-[9px] text-bc-text-secondary mt-1">Ont servi sur la période</p>
           </div>
 
           <div className="bg-white p-4 rounded-2xl border border-bc-border shadow-soft hover:shadow-md transition-shadow">
@@ -326,7 +326,7 @@ export default function MinisteresView({ activeBranch, simulatedRole, members, r
               <span className="text-[9px] font-bold uppercase tracking-wider">Baptisés</span>
             </div>
             <div className="text-xl font-ui font-extrabold text-bc-text tracking-tight">{ministryPeriodBaptised.length}</div>
-            <Spark data={weeklyBaptismCounts(ministryMembers, 8)} color="var(--color-bc-success)" />
+            <Spark data={weeklyBaptismCounts(ministryMembers, effectivePeriod)} color="var(--color-bc-success)" />
             <p className="text-[9px] text-bc-text-secondary mt-1">Sur la période · {ministryBaptisedViaDept} Dépt · {ministryPeriodBaptised.length - ministryBaptisedViaDept} Fiche</p>
           </div>
 
@@ -336,7 +336,7 @@ export default function MinisteresView({ activeBranch, simulatedRole, members, r
               <span className="text-[9px] font-bold uppercase tracking-wider">Moisson</span>
             </div>
             <div className="text-xl font-ui font-extrabold text-bc-text tracking-tight">{ministryMoisson.adn + ministryMoisson.bus}</div>
-            <Spark data={weeklyMoissonCounts(ministryReports, 8)} color="var(--color-bc-gold)" />
+            <Spark data={weeklyMoissonCounts(ministryReports, effectivePeriod)} color="var(--color-bc-gold)" />
             <p className="text-[9px] text-bc-text-secondary mt-1">Intégrés · {ministryMoisson.adn} ADN · {ministryMoisson.bus} Bus</p>
           </div>
 
@@ -346,7 +346,7 @@ export default function MinisteresView({ activeBranch, simulatedRole, members, r
               <span className="text-[9px] font-bold uppercase tracking-wider">OJ « Oui à Jésus »</span>
             </div>
             <div className="text-xl font-ui font-extrabold text-bc-text tracking-tight">{ministryOj}</div>
-            <Spark data={weeklyOjCounts(ministryReports, 8)} color="var(--color-bc-cerulean)" />
+            <Spark data={weeklyOjCounts(ministryReports, effectivePeriod)} color="var(--color-bc-cerulean)" />
             <p className="text-[9px] text-bc-text-secondary mt-1">Sur la période · rapports ADN</p>
           </div>
 

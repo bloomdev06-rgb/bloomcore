@@ -21,45 +21,6 @@ const CURSUS_ORDER: PastoralCursus[] = ['Aucun', 'Appelé', 'Serviteur', "Gagneu
 const nextCursus = (c: PastoralCursus): PastoralCursus => CURSUS_ORDER[Math.min(CURSUS_ORDER.indexOf(c) + 1, CURSUS_ORDER.length - 1)];
 const isTop = (c: PastoralCursus) => CURSUS_ORDER.indexOf(c) === CURSUS_ORDER.length - 1;
 
-// Mentor→filleul tree node. `pool` caps both roots and children — a mentor filtered
-// out of `pool` makes their filleuls surface as roots instead of vanishing.
-function CursusTreeNode({ member, pool, canManage, onPromote, depth = 0 }: {
-  member: Member; pool: Member[]; canManage: boolean; onPromote: (m: Member) => void; depth?: number;
-}) {
-  // ponytail: depth cap guards against an operator-created mentorId cycle, not expected in practice.
-  const children = depth < 8 ? pool.filter(c => c.mentorId === member.id) : [];
-  return (
-    <div className="flex flex-col items-center">
-      <div className="flex items-center gap-2 py-1.5 px-3 rounded-2xl border border-bc-border bg-white shadow-sm whitespace-nowrap">
-        <Avatar src={member.avatarUrl} initials={`${member.firstName[0]}${member.lastName[0]}`} size="sm" className="w-7 h-7 bg-bc-border/40 text-bc-text-secondary text-[10px] uppercase" />
-        <span className="text-xs font-bold text-bc-text">{member.firstName} {member.lastName}</span>
-        <span className="text-[10px] font-bold text-bc-text-secondary px-2 py-0.5 rounded-full bg-bc-canvas">{member.pastoralCursus}</span>
-        {canManage && !isTop(member.pastoralCursus) && (
-          <button
-            onClick={() => onPromote(member)}
-            className="p-1 text-bc-text-secondary hover:text-bc-green transition-colors active-scale"
-            title={`Promouvoir → ${nextCursus(member.pastoralCursus)}`}
-          >
-            <ArrowUpCircle size={16} />
-          </button>
-        )}
-      </div>
-      {children.length > 0 && (
-        <>
-          <div className="w-px h-4 bg-bc-border" />
-          <div className="flex items-start gap-6">
-            {children.map(c => (
-              <div key={c.id} className="flex flex-col items-center">
-                <div className="w-px h-4 bg-bc-border" />
-                <CursusTreeNode member={c} pool={pool} canManage={canManage} onPromote={onPromote} depth={depth + 1} />
-              </div>
-            ))}
-          </div>
-        </>
-      )}
-    </div>
-  );
-}
 
 export default function CursusView({ activeBranch, simulatedRole, members = [], onUpdateMember, operator }: CursusViewProps) {
   const busLines = useBusLines();
@@ -73,16 +34,20 @@ export default function CursusView({ activeBranch, simulatedRole, members = [], 
   // Spec (Onglet 8) : promotions validées uniquement par le Pasteur Principal.
   const canManage = simulatedRole === 'Pasteur Principal';
 
+  // Branche de la personne connectée — la liste ne montre qu'elle ; l'organigramme
+  // montre les 2 branches et met celle-ci en avant.
+  const operatorBranch: Branch = operator?.branch ?? (activeBranch === 'global' ? 'church' : activeBranch);
+
   // Même cloisonnement que MembersView (scope.ts) : un Coach/Responsable ne voit que
   // le cursus des membres de son propre département, pas de tout le branch.
-  const cursusMembers = members.filter(m =>
+  const cursusBase = members.filter(m =>
     m.pastoralCursus &&
     m.pastoralCursus !== 'Aucun' &&
-    (activeBranch === 'global' || m.branch === activeBranch) &&
     (!operator || inMemberScope(operator, m, simulatedRole, busLines, departments, ministries))
   );
+  const cursusMembers = cursusBase.filter(m => m.branch === operatorBranch);
 
-  const filteredMembers = cursusMembers.filter(m => {
+  const applyFilters = (pool: Member[]) => pool.filter(m => {
     if (filterLevel !== 'all' && m.pastoralCursus !== filterLevel) return false;
     if (searchTerm) {
       const q = searchTerm.toLowerCase();
@@ -90,9 +55,12 @@ export default function CursusView({ activeBranch, simulatedRole, members = [], 
     }
     return true;
   });
+  const filteredMembers = applyFilters(cursusMembers); // liste : branche de l'utilisateur
+  const treeMembers = applyFilters(cursusBase); // organigramme : les 2 branches
+  const statsMembers = viewMode === 'tree' ? treeMembers : filteredMembers;
 
-  const maleCount = filteredMembers.filter(m => m.gender === 'H').length;
-  const femaleCount = filteredMembers.filter(m => m.gender === 'F').length;
+  const maleCount = statsMembers.filter(m => m.gender === 'H').length;
+  const femaleCount = statsMembers.filter(m => m.gender === 'F').length;
 
   const confirmPromotion = () => {
     if (!promoting) return;
@@ -177,23 +145,70 @@ export default function CursusView({ activeBranch, simulatedRole, members = [], 
       </div>
 
       {viewMode === 'tree' ? (
-        /* Organigramme mentor→filleul : racines = pas de mentor, ou mentor hors du pool filtré. */
-        <div className="bg-white p-6 rounded-[2rem] border border-bc-border shadow-sm divide-y divide-bc-border overflow-x-auto">
-          {filteredMembers.filter(m => !m.mentorId || !filteredMembers.some(c => c.id === m.mentorId)).length === 0 ? (
+        /* Organigramme par niveaux du cursus (§) : Pasteur Titulaire en haut → Appelé en bas,
+           toute l'organisation (2 branches), la branche de l'utilisateur mise en avant. */
+        <div className="bg-white p-6 rounded-[2rem] border border-bc-border shadow-sm overflow-x-auto">
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-1 mb-6 text-[10px] font-bold text-bc-text-secondary">
+            <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-full bg-bc-cerulean" /> Bloom Church</span>
+            <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-full bg-bc-fushia" /> Bloom Light</span>
+            <span className="font-medium italic">Votre branche ({operatorBranch === 'church' ? 'Bloom Church' : 'Bloom Light'}) est mise en avant.</span>
+          </div>
+          {treeMembers.length === 0 ? (
             <p className="text-[11px] italic text-bc-text-secondary p-3">Aucun membre trouvé pour ces filtres.</p>
           ) : (
-            filteredMembers
-              .filter(m => !m.mentorId || !filteredMembers.some(c => c.id === m.mentorId))
-              .map(root => (
-                <div key={root.id} className="flex justify-center py-4 first:pt-0 last:pb-0">
-                  <CursusTreeNode
-                    member={root}
-                    pool={filteredMembers}
-                    canManage={canManage}
-                    onPromote={setPromoting}
-                  />
-                </div>
-              ))
+            <div className="relative">
+              {/* Colonne vertébrale de l'organigramme */}
+              <div className="absolute left-1/2 top-2 bottom-2 w-px bg-bc-border -translate-x-1/2" />
+              <div className="space-y-7 relative">
+                {[...CURSUS_ORDER.slice(1)].reverse().map(level => {
+                  const rows = treeMembers.filter(m => m.pastoralCursus === level);
+                  return (
+                    <div key={level}>
+                      <div className="flex items-center justify-center mb-2.5">
+                        <span className="relative z-10 text-[10px] font-black uppercase tracking-widest text-bc-text bg-bc-canvas border border-bc-border px-3 py-1 rounded-full">
+                          {level}
+                          <span className="text-bc-text-secondary font-bold ml-1.5">{rows.length}</span>
+                        </span>
+                      </div>
+                      {rows.length === 0 ? (
+                        <p className="relative z-10 text-center text-[10px] italic text-bc-text-secondary bg-white w-fit mx-auto px-2">Aucun membre à ce niveau.</p>
+                      ) : (
+                        <div className="relative z-10 flex flex-wrap justify-center gap-2">
+                          {rows.map(m => {
+                            const mine = m.branch === operatorBranch;
+                            const mentor = members.find(x => x.id === m.mentorId);
+                            return (
+                              <div
+                                key={m.id}
+                                className={`flex items-center gap-2 py-1.5 px-3 rounded-2xl border bg-white shadow-sm transition-opacity ${mine ? 'border-bc-green ring-1 ring-bc-green/30' : 'border-bc-border opacity-50'}`}
+                              >
+                                <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${m.branch === 'church' ? 'bg-bc-cerulean' : 'bg-bc-fushia'}`} />
+                                <Avatar src={m.avatarUrl} initials={`${m.firstName[0]}${m.lastName[0]}`} size="sm" className="w-7 h-7 bg-bc-border/40 text-bc-text-secondary text-[10px] uppercase" />
+                                <div className="leading-tight">
+                                  <span className={`block font-bold text-bc-text ${mine ? 'text-xs' : 'text-[11px]'}`}>{m.firstName} {m.lastName}</span>
+                                  <span className="block text-[9px] text-bc-text-secondary">
+                                    {m.branch === 'church' ? 'Bloom Church' : 'Bloom Light'}{mentor ? ` · Mentor : ${mentor.firstName} ${mentor.lastName}` : ''}
+                                  </span>
+                                </div>
+                                {canManage && !isTop(m.pastoralCursus) && (
+                                  <button
+                                    onClick={() => setPromoting(m)}
+                                    className="p-1 text-bc-text-secondary hover:text-bc-green transition-colors active-scale"
+                                    title={`Promouvoir → ${nextCursus(m.pastoralCursus)}`}
+                                  >
+                                    <ArrowUpCircle size={16} />
+                                  </button>
+                                )}
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
           )}
         </div>
       ) : (

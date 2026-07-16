@@ -234,9 +234,11 @@ export const TEST_PROFILES: Member[] = [
   testProfile(10, 'Capitaine de Bus', 'Capitaine', { departments: { dept_bloom_bus: 'Capitaine de Bus' }, bloomBusId: 'bus_yop_maroc' }),
   testProfile(11, 'Responsable de Zone', 'Zone', { departments: { dept_bloom_bus: 'Responsable de Zone' }, bloomBusId: 'bus_coc_angre' }),
   testProfile(12, 'Responsable de Commune', 'Commune', { departments: { dept_bloom_bus: 'Responsable de Commune' }, bloomBusId: 'bus_coc_angre' }),
-  testProfile(13, 'ADN', 'ADN', { departments: { dept_adn: 'Membre' } }),
+  // ADN/GDC en 'Adjoint' (pas 'Membre') : le RBAC serveur exige une fonction d'encadrement
+  // pour écrire des reports — testRole est purement UI, resolveRoles lit departments.
+  testProfile(13, 'ADN', 'ADN', { departments: { dept_adn: 'Adjoint' } }),
   testProfile(14, 'Portier', 'Portier', { departments: { dept_ushers: 'Membre' } }),
-  testProfile(15, 'GDC', 'GDC', { departments: { dept_gdc: 'Membre' } }),
+  testProfile(15, 'GDC', 'GDC', { departments: { dept_gdc: 'Adjoint' } }),
   testProfile(16, 'Intégration', 'Integration', { departments: { dept_integration: 'Membre' } }),
   testProfile(17, 'Membre', 'Membre'),
   testProfile(18, 'Nouveau', 'Nouveau', { level: 'Nouveau', hasPassedToBossForm: false }),
@@ -486,16 +488,16 @@ const addWeeksISO = (iso: string, weeks: number) => {
   const [y, m, d] = iso.split('-').map(Number);
   return new Date(Date.UTC(y, m - 1, d + weeks * 7)).toISOString().slice(0, 10);
 };
-const sundayCulte = (idBase: string, title: string, time: string, branch: 'church' | 'light', weeks = 6): Event[] =>
+const sundayCulte = (idBase: string, title: string, time: string, endTime: string, branch: 'church' | 'light', weeks = 6): Event[] =>
   Array.from({ length: weeks }, (_, i) => ({
-    id: `${idBase}_${i}`, title, type: 'Culte', date: addWeeksISO('2026-07-12', i), time,
+    id: `${idBase}_${i}`, title, type: 'Culte', date: addWeeksISO('2026-07-12', i), time, endTime,
     branch, scope: branch, recurrence: 'weekly' as const, closed: false,
   }));
 
 export const INITIAL_EVENTS: Event[] = [
-  ...sundayCulte('evt_culte_bc1', '1er culte Bloom Church', '07:00', 'church'),
-  ...sundayCulte('evt_culte_bl', 'Culte Bloom Light', '10:00', 'light'),
-  ...sundayCulte('evt_culte_bc2', '2e culte Bloom Church', '13:00', 'church'),
+  ...sundayCulte('evt_culte_bc1', '1er culte Bloom Church', '07:00', '09:30', 'church'),
+  ...sundayCulte('evt_culte_bl', 'Culte Bloom Light', '10:00', '12:30', 'light'),
+  ...sundayCulte('evt_culte_bc2', '2e culte Bloom Church', '13:00', '15:30', 'church'),
   { id: 'evt_1', title: 'Dimanche - 1er Culte de Gloire', type: 'dimanche_1er', date: '2026-06-21', branch: 'church', closed: true },
   { id: 'evt_2', title: 'Dimanche - 2e Culte de Célébration', type: 'dimanche_2e', date: '2026-06-21', branch: 'church', closed: true },
   { id: 'evt_3', title: 'Dimanche - Culte Unique Light', type: 'dimanche_unique', date: '2026-06-21', branch: 'light', closed: true },
@@ -696,6 +698,8 @@ export const VIEW_PERMISSIONS: PermissionMatrix = {
   // D2 — aligné sur CAN_ACCESS_INTEGRATION (NouveauxView) : la Console Intégration est réservée
   // au département Intégration + la ligne pastorale. Coach/Leader/ADN/Portier/GDC ne doivent pas voir l'onglet.
   'view_integration': allow(...STAFF, 'Intégration'),
+  'view_adn': allow(...STAFF, 'ADN'),
+  'view_rapportculte': allow(...STAFF, 'GDC'),
   'view_bloombus': allow(...STAFF, 'Responsable', 'Adjoint', 'Coach', 'Capitaine de Bus', 'Responsable de Zone', 'Responsable de Commune', 'Membre', 'Nouveau'),
   'view_events': allow(...STAFF, 'Responsable', 'Adjoint', 'ADN', 'Portier', 'GDC'),
   // P4.2 (résiduel) : un équipier de projet peut être de n'importe quel profil

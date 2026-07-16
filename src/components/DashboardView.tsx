@@ -7,7 +7,7 @@ import { motion } from 'motion/react';
 import MiniCalendar from './MiniCalendar';
 import { HealthSmiley } from './ui/HealthSmiley';
 import {
-  isRed, activeMemberIds, activeMemberWindow, activeBusIds, moissonBySource, pendingFollowUps,
+  isRed, activeMemberIds, activeBusIds, moissonBySource, pendingFollowUps,
   periodHealthLevels, projectProgress, periodRange, Period, PeriodInput,
   weeklyBaptismCounts, weeklyActiveCounts, weeklyMoissonCounts, weeklyGrowthSeries,
   ojTotal, weeklyOjCounts,
@@ -108,8 +108,14 @@ export default function DashboardView({ activeBranch, simulatedRole, members = [
   const waitingCount = branchMembers.filter(m => m.integrationState === 'En attente').length;
   const redCount = branchMembers.filter(m => isRed(m)).length;
   const pendingReceptionsCount = branchMembers.filter(m => m.integrationState === 'En attente' && m.receptionValidated === false).length;
-  // Actif = a servi ≥ 1 fois sur 1 mois + 1 semaine glissants — fenêtre fixe, indépendante du sélecteur.
-  const activeCount = activeMemberIds(branchReports, activeMemberWindow()).size;
+  // Actif = a servi ≥ 1 fois sur la période du sélecteur.
+  const activeCount = activeMemberIds(branchReports, effectivePeriod).size;
+  // Agenda Proche : les 3 prochains événements réels non clôturés de la branche.
+  const todayIso = new Date().toISOString().split('T')[0];
+  const upcomingEvents = branchEvents
+    .filter(e => !e.closed && e.date >= todayIso)
+    .sort((a, b) => a.date.localeCompare(b.date) || (a.time ?? '').localeCompare(b.time ?? ''))
+    .slice(0, 3);
   const activeBusCount = activeBusIds(branchReports, effectivePeriod).size;
   const totalBusLines = useBusLines().length;
   const moisson = moissonBySource(branchReports, effectivePeriod);
@@ -184,7 +190,7 @@ export default function DashboardView({ activeBranch, simulatedRole, members = [
   }
 
   // Croissance & Participants — données réelles (nouveaux enregistrés + actifs par semaine).
-  const growthData = weeklyGrowthSeries(branchMembers, branchReports, 8);
+  const growthData = weeklyGrowthSeries(branchMembers, branchReports, effectivePeriod);
 
   const containerVariants = {
     hidden: { opacity: 0 },
@@ -257,8 +263,8 @@ export default function DashboardView({ activeBranch, simulatedRole, members = [
               <span className="text-[9px] font-bold uppercase tracking-wider">Actifs</span>
             </div>
             <div className="text-xl font-ui font-extrabold text-bc-text tracking-tight">{activeCount}</div>
-            <Spark data={weeklyActiveCounts(branchReports, 8)} color="var(--color-bc-green)" />
-            <p className="text-[9px] text-bc-text-secondary mt-1">Ont servi (1 mois + 1 sem.)</p>
+            <Spark data={weeklyActiveCounts(branchReports, effectivePeriod)} color="var(--color-bc-green)" />
+            <p className="text-[9px] text-bc-text-secondary mt-1">Ont servi sur la période</p>
           </div>
 
           <div className="bg-white p-4 rounded-2xl border border-bc-border shadow-soft hover:shadow-md transition-shadow">
@@ -266,7 +272,7 @@ export default function DashboardView({ activeBranch, simulatedRole, members = [
               <span className="text-[9px] font-bold uppercase tracking-wider">Baptisés</span>
             </div>
             <div className="text-xl font-ui font-extrabold text-bc-text tracking-tight">{periodBaptised.length}</div>
-            <Spark data={weeklyBaptismCounts(branchMembers, 8)} color="var(--color-bc-success)" />
+            <Spark data={weeklyBaptismCounts(branchMembers, effectivePeriod)} color="var(--color-bc-success)" />
             <p className="text-[9px] text-bc-text-secondary mt-1">Sur la période · {baptisedViaDept} Dépt · {periodBaptised.length - baptisedViaDept} Fiche</p>
           </div>
 
@@ -290,7 +296,7 @@ export default function DashboardView({ activeBranch, simulatedRole, members = [
               <span className="text-[9px] font-bold uppercase tracking-wider">Moisson</span>
             </div>
             <div className="text-xl font-ui font-extrabold text-bc-text tracking-tight">{moisson.adn + moisson.bus}</div>
-            <Spark data={weeklyMoissonCounts(branchReports, 8)} color="var(--color-bc-gold)" />
+            <Spark data={weeklyMoissonCounts(branchReports, effectivePeriod)} color="var(--color-bc-gold)" />
             <p className="text-[9px] text-bc-text-secondary mt-1">Intégrés · {moisson.adn} ADN · {moisson.bus} Bus</p>
           </div>
 
@@ -300,7 +306,7 @@ export default function DashboardView({ activeBranch, simulatedRole, members = [
               <span className="text-[9px] font-bold uppercase tracking-wider">OJ « Oui à Jésus »</span>
             </div>
             <div className="text-xl font-ui font-extrabold text-bc-text tracking-tight">{oj}</div>
-            <Spark data={weeklyOjCounts(branchReports, 8)} color="var(--color-bc-cerulean)" />
+            <Spark data={weeklyOjCounts(branchReports, effectivePeriod)} color="var(--color-bc-cerulean)" />
             <p className="text-[9px] text-bc-text-secondary mt-1">Sur la période · rapports ADN</p>
           </div>
 
@@ -433,16 +439,31 @@ export default function DashboardView({ activeBranch, simulatedRole, members = [
         <div>
           <h3 className="font-ui font-bold text-bc-text mb-4 tracking-tight">Agenda Proche</h3>
           <div className="space-y-3">
-            <div className="flex gap-4 p-3 hover:bg-bc-canvas rounded-2xl transition-colors cursor-pointer border border-transparent hover:border-bc-border">
-              <div className="w-12 h-12 rounded-xl bg-bc-canvas flex flex-col items-center justify-center shrink-0 text-bc-text">
-                <span className="text-[10px] font-bold uppercase">Dim</span>
-                <span className="text-sm font-black">24</span>
-              </div>
-              <div className="flex flex-col justify-center">
-                <p className="text-xs font-bold text-bc-text">Culte Dominical 1</p>
-                <p className="text-[10px] text-bc-text-secondary mt-0.5">08:00 - Bloom Church</p>
-              </div>
-            </div>
+            {upcomingEvents.length === 0 ? (
+              <p className="text-xs text-bc-text-secondary italic">Aucun événement à venir.</p>
+            ) : (
+              upcomingEvents.map((ev) => (
+                <button
+                  key={ev.id}
+                  type="button"
+                  onClick={() => setActiveTab?.('events')}
+                  className="w-full text-left flex gap-4 p-3 hover:bg-bc-canvas rounded-2xl transition-colors cursor-pointer border border-transparent hover:border-bc-border"
+                >
+                  <div className="w-12 h-12 rounded-xl bg-bc-canvas flex flex-col items-center justify-center shrink-0 text-bc-text">
+                    <span className="text-[10px] font-bold uppercase">
+                      {new Date(`${ev.date}T12:00:00`).toLocaleDateString('fr-FR', { weekday: 'short' }).replace('.', '')}
+                    </span>
+                    <span className="text-sm font-black">{Number(ev.date.slice(8, 10))}</span>
+                  </div>
+                  <div className="flex flex-col justify-center min-w-0">
+                    <p className="text-xs font-bold text-bc-text truncate">{ev.title}</p>
+                    <p className="text-[10px] text-bc-text-secondary mt-0.5">
+                      {ev.time ?? ''}{ev.endTime ? `–${ev.endTime}` : ''} · {ev.branch === 'church' ? 'Bloom Church' : 'Bloom Light'}
+                    </p>
+                  </div>
+                </button>
+              ))
+            )}
           </div>
         </div>
 

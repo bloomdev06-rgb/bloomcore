@@ -42,6 +42,20 @@ export function weekLabel(id: string): string {
   return `Semaine du ${monday.toLocaleDateString('fr-FR', opts)} au ${sunday.toLocaleDateString('fr-FR', opts)}`;
 }
 
+// Ids de semaine (lundis) couverts par [from, to], du plus ancien au plus récent.
+// Cap : 'custom' sans bornes part de epoch — jamais plus de `cap` semaines.
+export function mondaysInRange(from: Date, to: Date, cap = 26): string[] {
+  const out: string[] = [];
+  const first = mondayOf(from);
+  let m = mondayOf(to);
+  while (m >= first && out.length < cap) {
+    out.unshift(fmt(m));
+    m = new Date(m);
+    m.setDate(m.getDate() - 7);
+  }
+  return out;
+}
+
 // Semaine S = celle de `now` (en cours, pas encore terminée → jamais saisissable).
 // S-1/S-2 = les deux seules semaines ouvertes à la saisie ; au-delà, verrouillé.
 export function reportingWindow(now: Date = new Date()): { current: string; s1: string; s2: string } {
