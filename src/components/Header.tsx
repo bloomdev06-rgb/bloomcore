@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Bell, Search, RefreshCw, Layers, CheckCircle, ShieldAlert, Heart, Calendar, Menu, X } from 'lucide-react';
 import { Branch, AppNotification, Member } from '../types';
+import { MULTI_BRANCH_ROLES, GLOBAL_VIEW_ROLES } from '../data/scope';
 import { ThemeToggle } from './ui/theme-toggle';
 import { Avatar } from './ui/Avatar';
 import { Badge } from './ui/Badge';
@@ -43,6 +44,9 @@ export default function Header({
   
   const unreadNotifs = notifications.filter(n => !n.read);
   const isChurch = activeBranch === 'church';
+  // Cloisonnement par branche — cf. src/data/scope.ts (PROFILS-INTERFACES).
+  const canSwitchBranch = MULTI_BRANCH_ROLES.includes(simulatedRole);
+  const canGlobalView = GLOBAL_VIEW_ROLES.includes(simulatedRole);
   const operatorInitials = operator ? `${operator.firstName[0]}${operator.lastName[0]}` : 'AG';
   const operatorName = operator ? `${operator.firstName} ${operator.lastName}` : 'Affeny Grah';
 
@@ -104,9 +108,19 @@ export default function Header({
       </div>
 
       <div className="flex items-center gap-1.5 sm:gap-4 justify-end min-w-0">
-        {/* Mobile menu toggle could go here, omitting for now to keep clean */}
-        
+        {/* Cloisonnement (PROFILS-INTERFACES) : le commutateur n'existe que pour la ligne
+            pastorale/staff + Coach ; les mono-branche voient un badge figé sur LEUR branche. */}
+        {!canSwitchBranch && (
+          <div className="bg-bc-canvas rounded-full px-3 py-1.5 flex items-center space-x-1.5">
+            <span className={`w-2 h-2 rounded-full ${activeBranch === 'light' ? 'bg-bc-fushia' : 'bg-bc-cerulean'}`} />
+            <span className="text-xs font-ui font-bold tracking-wide text-bc-text hidden sm:inline">
+              {activeBranch === 'light' ? 'Bloom Light' : 'Bloom Church'}
+            </span>
+          </div>
+        )}
+
         {/* Branch Switcher (Multi-branch commuter) */}
+        {canSwitchBranch && (
         <div
           data-branch={activeBranch}
           className={`bg-bc-canvas rounded-full p-1 flex items-center space-x-1 relative color-sweep ${isSweepActive ? 'color-sweep-active' : ''} ${
@@ -151,6 +165,7 @@ export default function Header({
             <span className={`w-2 h-2 rounded-full ${activeBranch === 'light' ? 'bg-white' : 'bg-bc-text-secondary'}`} />
             <span className="hidden sm:inline">Bloom Light</span>
           </button>
+          {canGlobalView && (
           <button
             id="branch-switch-global-btn"
             onClick={() => handleBranchSwitch('global')}
@@ -170,7 +185,9 @@ export default function Header({
             <span className={`w-2 h-2 rounded-full ${activeBranch === 'global' ? 'bg-white' : 'bg-bc-text-secondary'}`} />
             <span className="hidden sm:inline">Global</span>
           </button>
+          )}
         </div>
+        )}
 
         {/* Theme Toggle */}
         <div className="flex items-center">

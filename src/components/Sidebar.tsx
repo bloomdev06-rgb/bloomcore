@@ -5,7 +5,7 @@ import {
   LayoutDashboard, Users, Grid, LayoutList, Bus, Calendar,
   Activity, Heart, GraduationCap, Shield, UserCog, Settings,
   FormInput, History, X, UserPlus, ChevronDown, FileText, Droplet,
-  UserCheck, ClipboardList, Plus
+  UserCheck, ClipboardList, Plus, DoorOpen
 } from 'lucide-react';
 import { useMediaQuery } from '../hooks/useMediaQuery';
 import { useDepartments, useMinistries, canView as canViewTab } from '../data';
@@ -86,6 +86,7 @@ export default function Sidebar({
     { id: 'bloombus', label: 'Bloom Bus', icon: Bus },
     { id: 'events', label: 'Cultes & Événements', icon: Calendar },
     { id: 'rapportculte', label: 'Rapport de culte', icon: ClipboardList },
+    { id: 'denombrement', label: 'Dénombrement', icon: DoorOpen },
     { id: 'projects', label: 'Projets', icon: Activity },
     { id: 'cursus', label: 'Cursus Pastoral', icon: Heart },
     { id: 'formations', label: 'Formations', icon: GraduationCap },

@@ -2,6 +2,8 @@ import React, { useState, useEffect, lazy, Suspense } from 'react';
 import { load, save, seeds, useDepartments, useMinistries, useBusLines, useAdmins, deriveTimeBasedNotifications, apiBootstrap, apiPut, clearAuthToken, enableSync, canView } from './data';
 import { resolveMemberRole } from './data/roles';
 import { MEMBERS_TAB_DEPT_ONLY_ROLES } from './data/scope';
+import { isLegacySeedEventId } from './data/events';
+import { MULTI_BRANCH_ROLES, GLOBAL_VIEW_ROLES } from './data/scope';
 import { downscaleImage } from './lib/image';
 
 import {
@@ -42,6 +44,7 @@ const ProjectsView = lazy(() => import('./components/ProjectsView'));
 const CursusView = lazy(() => import('./components/CursusView'));
 const AdnView = lazy(() => import('./components/AdnView'));
 const CulteReportView = lazy(() => import('./components/CulteReportView'));
+const DenombrementView = lazy(() => import('./components/DenombrementView'));
 const ProfileView = lazy(() => import('./components/ProfileView'));
 import AuthView from './components/AuthView';
 import CreateDepartmentModal from './components/CreateDepartmentModal';
@@ -59,7 +62,8 @@ export default function App() {
 
   // Persistence States
   const [members, setMembers] = useState<Member[]>(() => load('bc_members', seeds.members));
-  const [events, setEvents] = useState<Event[]>(() => load('bc_events', seeds.events));
+  // Lot 4 : purge des anciens events seed d'un localStorage existant (le serveur fait pareil au boot).
+  const [events, setEvents] = useState<Event[]>(() => load('bc_events', seeds.events).filter((e: Event) => !isLegacySeedEventId(e.id)));
   const [reports, setReports] = useState<Report[]>(() => load('bc_reports', seeds.reports));
   const [audits, setAudits] = useState<AuditLog[]>(() => load('bc_audits', seeds.audits));
   const [notifications, setNotifications] = useState<AppNotification[]>(() => load('bc_notifications', seeds.notifications));
@@ -105,6 +109,7 @@ export default function App() {
   useEffect(() => { save('bc_loggedInMemberId', loggedInMemberId); }, [loggedInMemberId]);
   // CHARTE-GRAPHIQUE.md §10 — cascade [data-branch] sur la racine, pas seulement le switcher.
   useEffect(() => { document.documentElement.setAttribute('data-branch', activeBranch); }, [activeBranch]);
+
 
   // Backend bootstrap: replace localStorage/seed state with the API's data if
   // it's reachable. Never blocks or throws — apiBootstrap() resolves null when
@@ -472,6 +477,18 @@ export default function App() {
 
   // P4.19 — membre connecté (remplace les anciens hardcodes mem_1).
   const operator = members.find(m => m.id === loggedInMemberId) ?? members[0];
+  // Cloisonnement par branche (PROFILS-INTERFACES) : un profil mono-branche est verrouillé
+  // sur SA branche ; « Global » réservé au staff. Pasteurs/admins/ministres/coachs gardent
+  // le commutateur — règle du cahier, inchangée. Miroir UI du garde-fou Header.
+  useEffect(() => {
+    if (!operator) return;
+    if (!MULTI_BRANCH_ROLES.includes(simulatedRole) && operator.branch && activeBranch !== operator.branch) {
+      setActiveBranch(operator.branch);
+    } else if (!GLOBAL_VIEW_ROLES.includes(simulatedRole) && activeBranch === 'global') {
+      setActiveBranch(operator.branch ?? 'church');
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [simulatedRole, activeBranch, operator?.id]);
   // §6.2 — une notification ciblée (escalade J+7) n'est visible que du Ministre visé ;
   // Admin/Super Admin gardent une vue d'ensemble (même principe que le journal d'audit).
   const visibleNotifications = notifications.filter(n =>
@@ -536,6 +553,18 @@ export default function App() {
             permissionMatrix={permissionMatrix}
             onAddMember={handleAddMember}
             onUpdateMember={handleUpdateMember}
+            onAddReport={handleAddReport}
+            onUpdateReport={handleUpdateReport}
+          />
+        );
+      case 'denombrement':
+        return (
+          <DenombrementView
+            events={events}
+            reports={reports}
+            operator={operator}
+            activeBranch={activeBranch}
+            simulatedRole={simulatedRole}
             onAddReport={handleAddReport}
             onUpdateReport={handleUpdateReport}
           />
@@ -608,7 +637,7 @@ export default function App() {
       case 'formations':
         return <FormationsView activeBranch={activeBranch} simulatedRole={simulatedRole} members={members} operator={operator} permissionMatrix={permissionMatrix} />;
       case 'programs':
-        return <ProgrammesView members={members} onUpdateMember={handleUpdateMember} onAddAuditLog={handleAddAuditLog} activeBranch={activeBranch} simulatedRole={simulatedRole} operator={operator} permissionMatrix={permissionMatrix} />;
+        return <ProgrammesView members={members} onUpdateMember={handleUpdateMember} onAddAuditLog={handleAddAuditLog} activeBranch={activeBranch} simulatedRole={simulatedRole} operator={operator} permissionMatrix={permissionMatrix} forms={forms} reports={reports} audits={audits} onAddReport={handleAddReport} />;
       case 'reports':
         return <ReportsView reports={reports} activeBranch={activeBranch} simulatedRole={simulatedRole} members={members} events={events} />;
       case 'permissions':

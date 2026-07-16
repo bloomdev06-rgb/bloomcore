@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { ClipboardList, CheckCircle, AlertTriangle, Trash2, Plus } from 'lucide-react';
 import { Member, Report, Event, Branch } from '../types';
 import { toast } from './ui/Toast';
+import { gdcTemplateFor, GdcTemplate } from '../data/gdcTemplates';
 
 // Onglet « Rapport de culte » (FORMULAIRES.md §12, modèle onglet Intégration) : la GDC remplit
 // le rapport complet en 4 blocs pour chaque culte/événement déroulé. Même schéma de `content`
@@ -45,17 +46,26 @@ export default function CulteReportView({ events, reports, operator, activeBranc
   const todayIso = new Date().toISOString().split('T')[0];
   // Les cultes/événements déroulés de la branche, les plus récents d'abord.
   const pastEvents = events
-    .filter((e) => (activeBranch === 'global' || e.branch === activeBranch) && e.date <= todayIso)
+    .filter((e) => !e.cancelled && (activeBranch === 'global' || e.branch === activeBranch) && e.date <= todayIso)
     .sort((a, b) => b.date.localeCompare(a.date) || (b.time ?? '').localeCompare(a.time ?? ''));
 
   const reportOf = (eventId: string) => reports.find((r) => r.reportType === 'rapport_culte' && r.eventId === eventId);
   const statusOf = (eventId: string): 'complet' | 'comptages' | 'a_remplir' => {
     const r = reportOf(eventId);
     if (!r) return 'a_remplir';
-    return r.content?.predicateur || r.content?.theme ? 'complet' : 'comptages';
+    const filled = r.content?.predicateur || r.content?.theme
+      || (r.content?.gdcValues && Object.values(r.content.gdcValues).some((v: any) => v !== '' && v != null));
+    return filled ? 'complet' : 'comptages';
   };
 
+  // Lien ADN → GDC : le comptage officiel de l'événement pré-remplit le bloc EFFECTIFS.
+  const adnOf = (eventId: string) => reports.find((r) => r.reportType === 'rapport_adn' && r.eventId === eventId)?.content;
+
   const [selectedEventId, setSelectedEventId] = useState('');
+  // Fiche spécifique (Super Sunday / Bloom Sunday / Speak Out + variantes Light) : valeurs à plat.
+  const [gdcValues, setGdcValues] = useState<Record<string, string>>({});
+  const selectedEvent = events.find((x) => x.id === selectedEventId);
+  const selectedTemplate: GdcTemplate | null = selectedEvent ? gdcTemplateFor(selectedEvent) : null;
   // Bloc 1 — infos générales
   const [predicateur, setPredicateur] = useState('');
   const [theme, setTheme] = useState('');
@@ -76,6 +86,24 @@ export default function CulteReportView({ events, reports, operator, activeBranc
   const selectEvent = (id: string) => {
     setSelectedEventId(id);
     const c = reportOf(id)?.content ?? {};
+    const ev = events.find((x) => x.id === id);
+    const template = ev ? gdcTemplateFor(ev) : null;
+    const adn = adnOf(id);
+    if (template) {
+      // Fiche spécifique : valeurs existantes, sinon pré-remplissage (date + EFFECTIFS depuis l'ADN).
+      setGdcValues({
+        date: ev?.date ?? '',
+        ...(adn ? {
+          oj: String(Number(adn.ojHommes ?? 0) + Number(adn.ojFemmes ?? 0)),
+          totalNouveaux: String(Number(adn.nouveauxHommes ?? 0) + Number(adn.nouveauxFemmes ?? 0)),
+          effF: String(Number(adn.nouveauxFemmes ?? 0)),
+          effG: String(Number(adn.nouveauxHommes ?? 0)),
+        } : {}),
+        ...(c.gdcValues ?? {}),
+      });
+    } else {
+      setGdcValues({});
+    }
     setPredicateur(c.predicateur ?? '');
     setTheme(c.theme ?? '');
     setOfficiant(c.officiant ?? '');
@@ -85,7 +113,8 @@ export default function CulteReportView({ events, reports, operator, activeBranc
     setIncidents(Array.isArray(c.incidents) ? c.incidents : []);
     setAdultes(Number(c.attendeesAdultes ?? 0));
     setEnfants(Number(c.attendeesEnfants ?? 0));
-    setDecisions(Number(c.nouvellesDecisions ?? 0));
+    // Lien ADN → GDC (fiche générale) : nouvelles décisions pré-remplies depuis le comptage OJ.
+    setDecisions(Number(c.nouvellesDecisions ?? (adn ? Number(adn.ojHommes ?? 0) + Number(adn.ojFemmes ?? 0) : 0)));
     setNotes(c.notes ?? '');
   };
 
@@ -93,13 +122,15 @@ export default function CulteReportView({ events, reports, operator, activeBranc
     e.preventDefault();
     if (!selectedEventId || !operator) return;
     const ev = events.find((x) => x.id === selectedEventId);
-    const content = {
-      predicateur, theme, officiant,
-      ferveur, louange, deroulementAppel: appel,
-      incidents,
-      attendeesAdultes: adultes, attendeesEnfants: enfants, nouvellesDecisions: decisions,
-      notes,
-    };
+    const content = selectedTemplate
+      ? { gdcTemplateId: selectedTemplate.id, gdcValues }
+      : {
+          predicateur, theme, officiant,
+          ferveur, louange, deroulementAppel: appel,
+          incidents,
+          attendeesAdultes: adultes, attendeesEnfants: enfants, nouvellesDecisions: decisions,
+          notes,
+        };
     const existing = reportOf(selectedEventId);
     if (existing) {
       onUpdateReport({ ...existing, content: { ...existing.content, ...content } });
@@ -170,6 +201,49 @@ export default function CulteReportView({ events, reports, operator, activeBranc
         <div className="bg-white p-6 rounded-[2rem] border border-bc-border shadow-sm lg:col-span-7">
           {!selectedEventId ? (
             <p className="text-xs text-bc-text-secondary italic text-center py-16">Sélectionnez un culte/événement à gauche pour remplir son rapport.</p>
+          ) : selectedTemplate ? (
+            /* Fiche spécifique dédiée à l'événement et à sa branche (Super/Bloom Sunday, Speak Out, variantes Light) */
+            <form onSubmit={handleSubmit} className="space-y-5">
+              <div className="flex items-center justify-between">
+                <h3 className="text-sm font-ui font-extrabold text-bc-text">{selectedTemplate.title}</h3>
+                {adnOf(selectedEventId) && (
+                  <span className="text-[9px] font-bold px-2 py-0.5 rounded-full bg-bc-green/10 text-bc-green border border-bc-green/30">EFFECTIFS pré-remplis depuis le rapport ADN</span>
+                )}
+              </div>
+              {selectedTemplate.sections.map((section) => (
+                <div key={section.title}>
+                  <h4 className="text-xs font-ui font-bold text-bc-text uppercase tracking-wider mb-2">{section.title}</h4>
+                  <div className={section.fields.length > 3 ? 'grid grid-cols-1 sm:grid-cols-2 gap-3' : 'grid grid-cols-1 sm:grid-cols-3 gap-3'}>
+                    {section.fields.map((field) => (
+                      <div key={field.key} className={field.type === 'textarea' ? 'sm:col-span-full' : ''}>
+                        <label className={labelCls}>{field.label}</label>
+                        {field.type === 'textarea' ? (
+                          <textarea
+                            id={`gdc-${field.key}`}
+                            value={gdcValues[field.key] ?? ''}
+                            onChange={(e) => setGdcValues((prev) => ({ ...prev, [field.key]: e.target.value }))}
+                            className="w-full p-3 border border-bc-border rounded-xl text-xs font-medium h-20 bg-bc-canvas focus:bg-white focus:outline-none resize-none"
+                          />
+                        ) : (
+                          <input
+                            id={`gdc-${field.key}`}
+                            type={field.type ?? 'text'}
+                            value={gdcValues[field.key] ?? ''}
+                            onChange={(e) => setGdcValues((prev) => ({ ...prev, [field.key]: e.target.value }))}
+                            className={inputCls}
+                          />
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ))}
+              <div className="flex justify-end pt-3 border-t border-bc-border">
+                <button id="culte-report-submit" type="submit" className="flex items-center gap-2 px-5 py-2 bg-bc-green text-white rounded-full text-xs font-ui font-bold hover:opacity-90 active-scale">
+                  <CheckCircle size={13} /> {reportOf(selectedEventId) ? 'Mettre à jour le rapport' : 'Enregistrer le rapport'}
+                </button>
+              </div>
+            </form>
           ) : (
             <form onSubmit={handleSubmit} className="space-y-5">
               {/* 1. Infos générales */}

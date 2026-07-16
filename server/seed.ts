@@ -3,6 +3,7 @@
 // never disagree about "what's in the demo data".
 import { getCollection, setCollection, getKv, setKv, db } from './db.ts';
 import { hashPassword } from './auth.ts';
+import { isLegacySeedEventId } from '../src/data/events.ts';
 import {
   INITIAL_MEMBERS,
   INITIAL_EVENTS,
@@ -130,6 +131,19 @@ export function ensureSeeded(): void {
 
   reconcileSeedMembers();
   reconcileLot3();
+  reconcileLot4();
+}
+
+// Lot 4 — remplacement des événements : purge des anciens events seed (evt_1..5, evt_culte_*)
+// des bases existantes ; les nouveaux canoniques (evt4_*, ids déterministes par date) sont
+// insérés par reconcileMissingById à chaque boot, l'horizon avance tout seul.
+function reconcileLot4(): void {
+  const events = getCollection('events');
+  const kept = (events as any[]).filter((e) => !isLegacySeedEventId(e.id));
+  if (kept.length !== events.length) {
+    setCollection('events', kept);
+    console.log(`[seed] lot 4 : ${events.length - kept.length} ancien(s) événement(s) seed purgé(s).`);
+  }
 }
 
 // Lot 3 — réconciliation ciblée d'une base déjà peuplée (idempotente, à chaque boot) :

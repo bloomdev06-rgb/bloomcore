@@ -4,6 +4,11 @@
 import { Member, BloomBusEntity, Department, Ministry } from '../types';
 
 export const FULL_SCOPE_ROLES = ['Super Admin', 'Admin', 'Pasteur Principal', 'Pasteur'];
+// PROFILS-INTERFACES : seuls la ligne pastorale/staff et le Coach (bi-branche) ont le
+// commutateur de branche ; tous les autres profils sont verrouillés sur Member.branch.
+export const MULTI_BRANCH_ROLES = ['Super Admin', 'Admin', 'Pasteur Principal', 'Pasteur', 'Ministre', 'Coach'];
+// La vue « Global » (consolidation des 2 branches) est réservée au staff.
+export const GLOBAL_VIEW_ROLES = ['Super Admin', 'Admin', 'Pasteur Principal', 'Pasteur', 'Ministre'];
 // ponytail: proxy via shared department, not a real mentor/filleul link — upgrade
 // to a dedicated relation once that model exists.
 const DEPARTMENT_PROXY_ROLES = ['Responsable', 'Adjoint', 'Coach', 'Leader'];

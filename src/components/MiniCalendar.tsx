@@ -7,7 +7,8 @@ const BRANCH_LABEL: Record<string, string> = { church: 'Bloom Church', light: 'B
 
 export default function MiniCalendar({ events = [] }: { events?: Event[] }) {
   // Événements réels mappés à la forme du calendrier (plus de données factices).
-  const EVENTS = events.map((e) => ({
+  // Les occurrences annulées n'apparaissent pas dans l'agenda.
+  const EVENTS = events.filter((e) => !e.cancelled).map((e) => ({
     date: e.date,
     title: e.title,
     location: BRANCH_LABEL[e.branch] ?? e.branch,

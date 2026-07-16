@@ -144,4 +144,24 @@ assert.deepEqual(
   'liste admins invisible au simple membre (S2)',
 );
 
+// Lot 4 — cloisonnement lecture des events par branche : un simple membre (church) ne
+// reçoit pas les événements light ; global/both passent ; le Pasteur reçoit tout.
+{
+  const evSet = [
+    { id: 'e_c', title: 'C', type: 'Culte', date: '2026-07-19', branch: 'church', closed: false },
+    { id: 'e_l', title: 'L', type: 'Culte', date: '2026-07-19', branch: 'light', closed: false },
+    { id: 'e_g', title: 'G', type: '80/20', date: '2026-07-17', branch: 'global', scope: 'both', closed: false },
+  ];
+  assert.deepEqual(
+    filterReadable('events', ctxSimple, evSet).map((e: any) => e.id),
+    ['e_c', 'e_g'],
+    'membre mono-branche (church) ne lit pas les events light (lot 4)',
+  );
+  assert.equal(
+    filterReadable('events', buildContext('m2')!, evSet).length,
+    3,
+    'Pasteur (multi-branche) lit les events des 2 branches (lot 4)',
+  );
+}
+
 console.log('rbac.check OK');

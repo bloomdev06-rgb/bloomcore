@@ -43,11 +43,12 @@ export function adnByEvent(
     if (e.date <= todayIso && inPeriod(e.date)) rowFor(e.id, e.title, e.date);
   }
 
-  // Comptages officiels rapport_adn, rattachés à leur événement.
+  // Comptages officiels rapport_adn, rattachés à leur événement. Un eventId orphelin
+  // (événement purgé/remplacé) retombe dans « Autre » plutôt que d'afficher un id brut.
   for (const r of reports) {
     if (r.reportType !== 'rapport_adn' || !inPeriod(r.date)) continue;
     const ev = r.eventId ? eventById.get(r.eventId) : undefined;
-    const row = rowFor(r.eventId ?? 'autre', ev?.title ?? (r.eventId ? r.eventId : 'Autre'), ev?.date);
+    const row = rowFor(ev ? r.eventId! : 'autre', ev?.title ?? 'Autre', ev?.date);
     row.countNouveaux += Number(r.content?.nouveauxHommes ?? 0) + Number(r.content?.nouveauxFemmes ?? 0);
     row.countOj += Number(r.content?.ojHommes ?? 0) + Number(r.content?.ojFemmes ?? 0);
   }

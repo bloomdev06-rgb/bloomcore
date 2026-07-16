@@ -113,7 +113,7 @@ export default function DashboardView({ activeBranch, simulatedRole, members = [
   // Agenda Proche : les 3 prochains événements réels non clôturés de la branche.
   const todayIso = new Date().toISOString().split('T')[0];
   const upcomingEvents = branchEvents
-    .filter(e => !e.closed && e.date >= todayIso)
+    .filter(e => !e.closed && !e.cancelled && e.date >= todayIso)
     .sort((a, b) => a.date.localeCompare(b.date) || (a.time ?? '').localeCompare(b.time ?? ''))
     .slice(0, 3);
   const activeBusCount = activeBusIds(branchReports, effectivePeriod).size;

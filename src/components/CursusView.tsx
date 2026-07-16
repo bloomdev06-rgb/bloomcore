@@ -261,7 +261,14 @@ export default function CursusView({ activeBranch, simulatedRole, members = [], 
                       <Avatar src={m.avatarUrl} initials={`${m.firstName[0]}${m.lastName[0]}`} size="sm" className="w-10 h-10 bg-bc-border/40 text-bc-text-secondary text-xs uppercase" />
                       <div>
                         <h4 className="text-sm font-bold text-bc-text">{m.firstName} {m.lastName}</h4>
-                        <p className="text-xs text-bc-text-secondary">{m.pastoralCursus} • {m.branch === 'church' ? 'Bloom Church' : 'Bloom Light'}</p>
+                        <p className="text-xs text-bc-text-secondary">
+                          {m.pastoralCursus} • {m.branch === 'church' ? 'Bloom Church' : 'Bloom Light'}
+                          {(() => {
+                            const mentor = members.find(x => x.id === m.mentorId);
+                            const filleuls = cursusMembers.filter(c => c.mentorId === m.id).length;
+                            return `${mentor ? ` • Confié à ${mentor.firstName} ${mentor.lastName}` : ''}${filleuls ? ` • ${filleuls} filleul(s)` : ''}`;
+                          })()}
+                        </p>
                       </div>
                     </div>
                     <div className="flex items-center gap-2">
@@ -270,11 +277,14 @@ export default function CursusView({ activeBranch, simulatedRole, members = [], 
                           value={m.mentorId ?? ''}
                           onClick={(e) => e.stopPropagation()}
                           onChange={(e) => onUpdateMember({ ...m, mentorId: e.target.value || undefined })}
-                          className="text-[10px] border border-bc-border rounded-full px-2 py-1.5 bg-white max-w-[140px]"
+                          className="text-[10px] border border-bc-border rounded-full px-2 py-1.5 bg-white max-w-[160px]"
+                          title={`Confié à un ${nextCursus(m.pastoralCursus) ?? '—'} (niveau directement supérieur)`}
                         >
                           <option value="">Aucun mentor</option>
-                          {cursusMembers.filter(c => c.id !== m.id).map(c => (
-                            <option key={c.id} value={c.id}>{c.firstName} {c.lastName}</option>
+                          {/* §15 — chaque membre du cursus est confié au NIVEAU DIRECTEMENT SUPÉRIEUR :
+                              Appelé → Serviteur → Gagneur d'âme → … → Pasteur Titulaire. */}
+                          {cursusMembers.filter(c => c.id !== m.id && c.pastoralCursus === nextCursus(m.pastoralCursus)).map(c => (
+                            <option key={c.id} value={c.id}>{c.firstName} {c.lastName} ({c.pastoralCursus})</option>
                           ))}
                         </select>
                       )}

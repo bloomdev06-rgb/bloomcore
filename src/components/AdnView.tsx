@@ -8,6 +8,7 @@ import { Period, PeriodInput } from '../data/kpi';
 import { Avatar } from './ui/Avatar';
 import { toast } from './ui/Toast';
 import Member360View from './Member360View';
+import { Modal } from './ui/Modal';
 
 const genId = (prefix: string) => `${prefix}_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
 
@@ -33,7 +34,7 @@ function recentEvents(events: Event[], activeBranch: Branch, now = new Date()): 
   const today = now.toISOString().split('T')[0];
   const floor = new Date(now.getTime() - 30 * 86_400_000).toISOString().split('T')[0];
   return events
-    .filter((e) => (activeBranch === 'global' || e.branch === activeBranch) && e.date >= floor && e.date <= today)
+    .filter((e) => !e.cancelled && (activeBranch === 'global' || e.branch === activeBranch) && e.date >= floor && e.date <= today)
     .sort((a, b) => b.date.localeCompare(a.date) || (b.time ?? '').localeCompare(a.time ?? ''));
 }
 
@@ -190,6 +191,8 @@ export default function AdnView({
     : period;
   const [expandedRow, setExpandedRow] = useState<string | null>(null);
   const [selected360, setSelected360] = useState<Member | null>(null);
+  // Détail d'un rapport de comptage ADN (clic sur les chiffres du dashboard).
+  const [detailReport, setDetailReport] = useState<Report | null>(null);
 
   const branchMembers = members.filter((m) => activeBranch === 'global' || m.branch === activeBranch);
   const branchReports = reports.filter((r) => activeBranch === 'global' || r.targetBranch === activeBranch);
@@ -525,7 +528,21 @@ export default function AdnView({
                           <td className="py-2.5 pr-3 text-bc-text-secondary">
                             {row.date ? new Date(`${row.date}T12:00:00`).toLocaleDateString('fr-FR') : '—'}
                           </td>
-                          <td className="py-2.5 pr-3 text-right font-bold tabular-nums">{row.countNouveaux}</td>
+                          <td className="py-2.5 pr-3 text-right font-bold tabular-nums">
+                            {(() => {
+                              const rep = branchReports.find((r) => r.reportType === 'rapport_adn' && (r.eventId ?? 'autre') === row.key);
+                              return rep ? (
+                                <button
+                                  type="button"
+                                  onClick={(e) => { e.stopPropagation(); setDetailReport(rep); }}
+                                  className="underline decoration-dotted underline-offset-2 hover:text-bc-green"
+                                  title="Voir le détail du rapport ADN"
+                                >
+                                  {row.countNouveaux}
+                                </button>
+                              ) : row.countNouveaux;
+                            })()}
+                          </td>
                           <td className="py-2.5 pr-3 text-right font-bold tabular-nums">{row.countOj}</td>
                           <td className="py-2.5 text-right tabular-nums">
                             {row.ficheNouveaux + row.ficheOj}
@@ -567,6 +584,40 @@ export default function AdnView({
             <Users size={11} /> « Comptage » = rapport ADN officiel de l'événement ; « Fiches » = fiches d'accueil individuelles. Cliquer une ligne pour voir les Nouveaux, un nom pour ouvrir sa fiche.
           </p>
         </div>
+      )}
+
+      {/* Détail d'un rapport de comptage ADN */}
+      {detailReport && (
+        <Modal open={true} onClose={() => setDetailReport(null)} title="Détail du comptage ADN" maxWidth="max-w-md">
+          <div className="space-y-3 text-xs">
+            <div className="p-3 rounded-xl bg-bc-canvas border border-bc-border">
+              <span className="block text-[10px] font-bold uppercase text-bc-text-secondary">Événement</span>
+              <span className="font-bold text-bc-text">
+                {events.find((e) => e.id === detailReport.eventId)?.title ?? 'Autre (hors culte/événement)'}
+              </span>
+              <span className="block text-[10px] text-bc-text-secondary mt-0.5">
+                Rapport du {new Date(`${detailReport.date}T12:00:00`).toLocaleDateString('fr-FR')} — {detailReport.authorName} ({detailReport.authorRole})
+              </span>
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              {([
+                ['Nouveaux Hommes', detailReport.content?.nouveauxHommes],
+                ['Nouveaux Femmes', detailReport.content?.nouveauxFemmes],
+                ['OJ Hommes', detailReport.content?.ojHommes],
+                ['OJ Femmes', detailReport.content?.ojFemmes],
+              ] as const).map(([label, value]) => (
+                <div key={label} className="p-3 rounded-xl border border-bc-border text-center">
+                  <span className="block text-xl font-black text-bc-text tabular-nums">{Number(value ?? 0)}</span>
+                  <span className="block text-[10px] font-bold text-bc-text-secondary">{label}</span>
+                </div>
+              ))}
+            </div>
+            <div className="flex justify-between p-3 rounded-xl bg-bc-green/10 border border-bc-green/30 font-bold text-bc-text">
+              <span>Total Nouveaux : {Number(detailReport.content?.nouveauxHommes ?? 0) + Number(detailReport.content?.nouveauxFemmes ?? 0)}</span>
+              <span>Total OJ : {Number(detailReport.content?.ojHommes ?? 0) + Number(detailReport.content?.ojFemmes ?? 0)}</span>
+            </div>
+          </div>
+        </Modal>
       )}
 
       {/* Fiche 360 d'un Nouveau — mêmes infos qu'un membre, récupérables pour la suite */}

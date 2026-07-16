@@ -1,4 +1,5 @@
 import { Member, Department, Ministry, BloomBusEntity, AuditLog, AppNotification, Event, Report, PermissionMatrix, Project, Activity, AppSettings, FormDef, Field, AdminAccount } from './types';
+import { buildCanonicalEvents } from './data/events';
 
 // Comptes Admin seed. Convention d'id `adm_<memberId>` (voir types.ts AdminAccount) :
 // le serveur en dérive les rôles Admin/Super Admin. Seul Affeny Grah (mem_1) existe
@@ -482,28 +483,10 @@ export const INITIAL_MEMBERS: Member[] = [
   ...TEST_PROFILES,
 ];
 
-// Cultes récurrents du dimanche — cohérents avec le formulaire (type/heure/récurrence/portée).
-// Quelques occurrences hebdomadaires générées d'avance depuis un dimanche connu (2026-07-12).
-const addWeeksISO = (iso: string, weeks: number) => {
-  const [y, m, d] = iso.split('-').map(Number);
-  return new Date(Date.UTC(y, m - 1, d + weeks * 7)).toISOString().slice(0, 10);
-};
-const sundayCulte = (idBase: string, title: string, time: string, endTime: string, branch: 'church' | 'light', weeks = 6): Event[] =>
-  Array.from({ length: weeks }, (_, i) => ({
-    id: `${idBase}_${i}`, title, type: 'Culte', date: addWeeksISO('2026-07-12', i), time, endTime,
-    branch, scope: branch, recurrence: 'weekly' as const, closed: false,
-  }));
-
-export const INITIAL_EVENTS: Event[] = [
-  ...sundayCulte('evt_culte_bc1', '1er culte Bloom Church', '07:00', '09:30', 'church'),
-  ...sundayCulte('evt_culte_bl', 'Culte Bloom Light', '10:00', '12:30', 'light'),
-  ...sundayCulte('evt_culte_bc2', '2e culte Bloom Church', '13:00', '15:30', 'church'),
-  { id: 'evt_1', title: 'Dimanche - 1er Culte de Gloire', type: 'dimanche_1er', date: '2026-06-21', branch: 'church', closed: true },
-  { id: 'evt_2', title: 'Dimanche - 2e Culte de Célébration', type: 'dimanche_2e', date: '2026-06-21', branch: 'church', closed: true },
-  { id: 'evt_3', title: 'Dimanche - Culte Unique Light', type: 'dimanche_unique', date: '2026-06-21', branch: 'light', closed: true },
-  { id: 'evt_4', title: 'Soirée Spéciale INside Church', type: 'special_inside', date: '2026-06-24', branch: 'church', closed: false },
-  { id: 'evt_5', title: 'Dimanche - Culte de Moisson Divine', type: 'dimanche_unique', date: '2026-06-28', branch: 'light', closed: false }
-];
+// Événements canoniques (lot 4) : cultes du dimanche à nom dynamique (Bloom/Super Sunday,
+// Talk Show, Light Sunday/Show), 80/20 du vendredi, Inside du 1er samedi — générés avec des
+// ids déterministes par date, l'horizon avance à chaque chargement/boot (reconcileMissingById).
+export const INITIAL_EVENTS: Event[] = buildCanonicalEvents();
 
 export const INITIAL_REPORTS: Report[] = [
   {
@@ -700,6 +683,7 @@ export const VIEW_PERMISSIONS: PermissionMatrix = {
   'view_integration': allow(...STAFF, 'Intégration'),
   'view_adn': allow(...STAFF, 'ADN'),
   'view_rapportculte': allow(...STAFF, 'GDC'),
+  'view_denombrement': allow(...STAFF, 'Portier'),
   'view_bloombus': allow(...STAFF, 'Responsable', 'Adjoint', 'Coach', 'Capitaine de Bus', 'Responsable de Zone', 'Responsable de Commune', 'Membre', 'Nouveau'),
   'view_events': allow(...STAFF, 'Responsable', 'Adjoint', 'ADN', 'Portier', 'GDC'),
   // P4.2 (résiduel) : un équipier de projet peut être de n'importe quel profil

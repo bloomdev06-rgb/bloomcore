@@ -12,6 +12,7 @@ import {
   TrendingUp,
   Trash2,
   CalendarDays,
+  ClipboardList,
 } from "lucide-react";
 import { LineChart, Line, XAxis, YAxis, Tooltip, Legend } from "recharts";
 import { Member, Branch, BloomBusEntity, Report, Event, FormDef } from "../types";
@@ -206,6 +207,8 @@ export default function BloomBusView({
   const [observation, setObservation] = useState("");
   const [selectedWeek, setSelectedWeek] = useState<string>("");
   const [fillPopover, setFillPopover] = useState<string | null>(null);
+  // Rapport d'activité ouvert en détail (liste « Rapports d'activité »).
+  const [lifeDetail, setLifeDetail] = useState<Report | null>(null);
 
   const now = new Date();
   const { s1, s2 } = reportingWindow(now);
@@ -429,6 +432,11 @@ export default function BloomBusView({
       }));
   })();
   const CULTE_COLORS = ["bg-bc-green", "bg-bc-cerulean", "bg-bc-fushia"];
+
+  // Rapports d'activité (rapport_bloom_bus_life) du périmètre affiché, les plus récents d'abord.
+  const lifeReports = branchReports
+    .filter((r) => r.reportType === "rapport_bloom_bus_life" && busIds.includes(r.content?.busId))
+    .sort((a, b) => (b.content?.activityDay ?? b.date).localeCompare(a.content?.activityDay ?? a.date));
 
   const handleSaveMemberHealth = (e: React.FormEvent) => {
     e.preventDefault();
@@ -919,6 +927,39 @@ export default function BloomBusView({
             </>
           )}
         </div>
+
+        {/* Rapports d'activité remplis dans les bus du périmètre — consultables au clic */}
+        <div className="bg-white p-5 rounded-[2rem] border border-bc-border shadow-sm flex flex-col shrink-0">
+          <h3 className="text-sm font-ui font-bold text-bc-text mb-1 flex items-center gap-2">
+            <ClipboardList size={16} /> Rapports d'activité
+          </h3>
+          <p className="text-[10px] text-bc-text-secondary mb-3">Toutes les activités déclarées par les bus du niveau affiché.</p>
+          {lifeReports.length === 0 ? (
+            <p className="text-xs text-bc-text-secondary italic text-center py-4">Aucun rapport d'activité sur ce périmètre.</p>
+          ) : (
+            <div className="space-y-2 max-h-72 overflow-y-auto pr-1">
+              {lifeReports.map((r) => {
+                const bus = seedBus.find((b: { id: string }) => b.id === r.content?.busId);
+                return (
+                  <button
+                    key={r.id}
+                    type="button"
+                    onClick={() => setLifeDetail(r)}
+                    className="w-full text-left p-3 rounded-2xl border border-bc-border hover:border-bc-green bg-white transition-colors flex items-center justify-between gap-2 active-scale"
+                  >
+                    <div className="min-w-0">
+                      <p className="text-xs font-bold text-bc-text truncate">{r.content?.activityName || "Rapport d'activité"}</p>
+                      <p className="text-[10px] text-bc-text-secondary truncate">
+                        {(bus as any)?.name ?? r.content?.busId} · {new Date(`${r.content?.activityDay ?? r.date}T12:00:00`).toLocaleDateString('fr-FR')} · {r.authorName}
+                      </p>
+                    </div>
+                    <span className="shrink-0 text-[10px] font-bold text-bc-green tabular-nums">{Number(r.content?.soulsWon ?? 0)} âme(s)</span>
+                  </button>
+                );
+              })}
+            </div>
+          )}
+        </div>
         </>
         )}
 
@@ -1103,6 +1144,53 @@ export default function BloomBusView({
           </div>
         </div>
       </div>
+
+      {/* Détail d'un rapport d'activité — supporte le schéma courant et l'ancien (seed). */}
+      {lifeDetail && (
+        <Modal open={true} onClose={() => setLifeDetail(null)} title={lifeDetail.content?.activityName || "Rapport d'activité"} maxWidth="max-w-md">
+          <div className="space-y-3 text-xs">
+            <div className="p-3 rounded-xl bg-bc-canvas border border-bc-border">
+              <span className="block text-[10px] font-bold uppercase text-bc-text-secondary">Bus</span>
+              <span className="font-bold text-bc-text">{(seedBus.find((b: { id: string }) => b.id === lifeDetail.content?.busId) as any)?.name ?? lifeDetail.content?.busId}</span>
+              <span className="block text-[10px] text-bc-text-secondary mt-0.5">
+                {new Date(`${lifeDetail.content?.activityDay ?? lifeDetail.date}T12:00:00`).toLocaleDateString('fr-FR')} — {lifeDetail.authorName} ({lifeDetail.authorRole})
+              </span>
+            </div>
+            {lifeDetail.content?.description && (
+              <div>
+                <span className="block text-[10px] font-bold uppercase text-bc-text-secondary mb-1">Description</span>
+                <p className="text-bc-text">{lifeDetail.content.description}</p>
+              </div>
+            )}
+            {lifeDetail.content?.observation && (
+              <div>
+                <span className="block text-[10px] font-bold uppercase text-bc-text-secondary mb-1">Observation</span>
+                <p className="text-bc-text">{lifeDetail.content.observation}</p>
+              </div>
+            )}
+            <div className="grid grid-cols-2 gap-2">
+              <div className="p-3 rounded-xl border border-bc-border text-center">
+                <span className="block text-xl font-black text-bc-text tabular-nums">{Number(lifeDetail.content?.soulsWon ?? 0)}</span>
+                <span className="block text-[10px] font-bold text-bc-text-secondary">Âmes gagnées</span>
+              </div>
+              <div className="p-3 rounded-xl border border-bc-border text-center">
+                <span className="block text-xl font-black text-bc-text tabular-nums">
+                  {Array.isArray(lifeDetail.content?.presenceList) ? lifeDetail.content.presenceList.length : Number(lifeDetail.content?.mobilised ?? 0)}
+                </span>
+                <span className="block text-[10px] font-bold text-bc-text-secondary">Membres présents</span>
+              </div>
+            </div>
+            {Array.isArray(lifeDetail.content?.presenceList) && lifeDetail.content.presenceList.length > 0 && (
+              <div className="flex flex-wrap gap-1.5">
+                {lifeDetail.content.presenceList.map((id: string) => {
+                  const m = members.find((x) => x.id === id);
+                  return <span key={id} className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-bc-canvas border border-bc-border text-bc-text">{m ? `${m.firstName} ${m.lastName}` : id}</span>;
+                })}
+              </div>
+            )}
+          </div>
+        </Modal>
+      )}
 
       {/* Modals */}
       {showMemberReportModal && (

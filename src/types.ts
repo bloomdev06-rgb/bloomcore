@@ -199,6 +199,10 @@ export interface Event {
   endTime?: string; // Heure de fin 'HH:MM' — events existants en base peuvent ne pas l'avoir : rendu tolérant
   branch: Branch;
   closed: boolean;
+  // Occurrence annulée pour ce jour (les autres occurrences de la série restent planifiées).
+  // Posé à la main (bouton Annuler) ou automatiquement quand un événement ponctuel chevauche
+  // le créneau (le récurrent s'efface par défaut). Exclue des agendas/sélecteurs/stats.
+  cancelled?: boolean;
   scope?: 'church' | 'light' | 'both';
   organizer?: string; // Département organisateur : id de département OU 'church'/'light'/'both'
   projectId?: string; // Projet lié (optionnel)

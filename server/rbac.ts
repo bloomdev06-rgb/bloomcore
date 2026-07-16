@@ -4,7 +4,7 @@
 // pas diverger sur la sémantique des capacités et du scope.
 import { Member, Ministry, PermissionMatrix, Delegation, AdminAccount, Department, BloomBusEntity } from '../src/types.ts';
 import { hasCapability } from '../src/data/permissions.ts';
-import { inMemberScope, canFillReportFor, bloomBusRoleOf } from '../src/data/scope.ts';
+import { inMemberScope, canFillReportFor, bloomBusRoleOf, MULTI_BRANCH_ROLES } from '../src/data/scope.ts';
 import { isBusReportLocked } from '../src/data/reportLock.ts';
 import { getKv } from './db.ts';
 import { GuardError, readCollection, canonical } from './guards.ts';
@@ -315,9 +315,20 @@ export function filterReadable(name: string, ctx: RbacContext, items: any[]): an
       // Données d'encadrement — invisibles au simple membre.
       return hasAny(roles, ABOVE_MEMBER_ROLES) ? items : [];
 
+    case 'events':
+    case 'notifications':
+      // Cloisonnement par branche (PROFILS-INTERFACES) : un profil mono-branche ne reçoit
+      // que les événements/notifications de SA branche (+ global). La ligne pastorale/staff
+      // et le Coach (bi-branche) reçoivent tout — règle du cahier, inchangée.
+      if (!hasAny(roles, MULTI_BRANCH_ROLES) && member.branch) {
+        const b = (x: any) => x.branch ?? x.targetBranch;
+        return items.filter((x) => !b(x) || b(x) === 'global' || b(x) === member.branch || x.scope === 'both');
+      }
+      return items;
+
     default:
-      // events, ministries, departments, activities, forms, settings, notifications,
-      // audits : nécessaires au fonctionnement de l'UI, pas de PII confidentielle ici.
+      // ministries, departments, activities, forms, settings, audits : nécessaires au
+      // fonctionnement de l'UI, entités transverses sans PII confidentielle par branche.
       return items;
   }
 }

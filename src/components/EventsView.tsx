@@ -20,6 +20,8 @@ import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'rec
 import { Modal } from './ui/Modal';
 import { Event, EventRecurrence, Branch, Report, Member, FormDef } from '../types';
 import { useProjects, useDepartments, load, save } from '../data';
+import { eventsOverlap } from '../data/events';
+import { toast } from './ui/Toast';
 
 const RATINGS = [
   { v: 1, label: 'Très mal' },
@@ -121,6 +123,7 @@ export default function EventsView({
   const [eventType, setEventType] = useState<string>(() => (load('bc_event_types', DEFAULT_EVENT_TYPES)[0] ?? 'Culte'));
   const [eventDate, setEventDate] = useState('2026-06-28');
   const [eventTime, setEventTime] = useState('');
+  const [eventEndTime, setEventEndTime] = useState('');
   const [eventScope, setEventScope] = useState<'church' | 'light' | 'both'>('church');
   const [eventOrganizer, setEventOrganizer] = useState('');
   const [eventProject, setEventProject] = useState('');
@@ -223,6 +226,7 @@ export default function EventsView({
       title: eventTitle,
       type: eventType,
       time: eventTime || undefined,
+      endTime: eventEndTime || undefined,
       branch: eventScope === 'both' ? ('global' as const) : eventScope, // 2 branches → 'global'
       closed: false,
       scope: eventScope,
@@ -240,9 +244,21 @@ export default function EventsView({
       });
     }
 
+    // Chevauchement : un événement PONCTUEL qui empiète sur une occurrence récurrente
+    // (même jour/branche, plages horaires qui s'intersectent) annule celle-ci par défaut.
+    if (eventRecurrence === 'none' && eventTime) {
+      const created = { date: eventDate, time: eventTime, endTime: eventEndTime || undefined, branch: base.branch };
+      const clashes = events.filter(ev =>
+        !ev.cancelled && !ev.closed && ev.recurrence && ev.recurrence !== 'none' && eventsOverlap(created, ev),
+      );
+      clashes.forEach(ev => onUpdateEvent?.({ ...ev, cancelled: true }));
+      if (clashes.length) toast.info(`${clashes.length} occurrence(s) récurrente(s) annulée(s) sur ce créneau (chevauchement).`);
+    }
+
     setShowAddEventModal(false);
     setEventTitle('');
     setEventTime('');
+    setEventEndTime('');
     setEventOrganizer('');
     setEventProject('');
     setEventRecurrence('none');
@@ -328,10 +344,15 @@ export default function EventsView({
       }
     };
 
-    onAddReport(portiersReport);
-    // Conciliation avec l'onglet ADN et l'onglet Rapport de culte : un seul rapport
-    // adn/culte par événement (upsert), sinon Moisson/OJ/santé doublent. Les champs
-    // texte déjà remplis (prédicateur, thème…) ne sont pas écrasés par une valeur vide.
+    // Conciliation avec les onglets Dénombrement / ADN / Rapport de culte : un seul
+    // rapport de chaque type par événement (upsert), sinon les stats doublent. Les
+    // champs texte déjà remplis (prédicateur, thème…) ne sont pas écrasés par du vide.
+    const existingPortiers = (reports ?? []).find(r => r.reportType === 'rapport_portiers' && r.eventId === selectedEventId);
+    if (existingPortiers && onUpdateReport) {
+      onUpdateReport({ ...existingPortiers, content: { ...existingPortiers.content, ...portiersReport.content } });
+    } else {
+      onAddReport(portiersReport);
+    }
     const existingAdn = (reports ?? []).find(r => r.reportType === 'rapport_adn' && r.eventId === selectedEventId);
     const existingCulte = (reports ?? []).find(r => r.reportType === 'rapport_culte' && r.eventId === selectedEventId);
     if (existingAdn && onUpdateReport) {
@@ -394,22 +415,34 @@ export default function EventsView({
                   <span className="w-1 h-1 bg-bc-border rounded-full"></span>
                   <span className="uppercase text-[10px] tracking-wider font-bold">{typeLabel(selectedEvent.type)}</span>
                   <span className="w-1 h-1 bg-bc-border rounded-full"></span>
-                  <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${selectedEvent.closed ? 'bg-bc-canvas text-bc-text-secondary' : 'bg-bc-success/10 text-bc-success'}`}>
-                    {selectedEvent.closed ? 'Clôturé' : 'En cours'}
+                  <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${selectedEvent.cancelled ? 'bg-bc-danger/10 text-bc-danger' : selectedEvent.closed ? 'bg-bc-canvas text-bc-text-secondary' : 'bg-bc-success/10 text-bc-success'}`}>
+                    {selectedEvent.cancelled ? 'Annulé' : selectedEvent.closed ? 'Clôturé' : 'En cours'}
                   </span>
                 </div>
               </div>
             </div>
           </div>
-          
-          {!selectedEvent.closed && ['Pasteur', 'Admin', 'Super Admin', 'ADN', 'Portier', 'GDC'].includes(simulatedRole) && (
-            <button
-              onClick={() => setShowCounterModal(true)}
-              className="px-5 py-2.5 bg-bc-green text-white font-bold text-xs rounded-full hover:bg-bc-text transition-colors flex items-center gap-2 shadow-sm active:scale-95"
-            >
-              <CheckCircle size={16} /> Clôturer le Culte
-            </button>
-          )}
+
+          <div className="flex items-center gap-2">
+            {/* Annulation d'une occurrence : ce jour-là l'événement n'a pas lieu, la série continue. */}
+            {!selectedEvent.closed && ['Pasteur', 'Pasteur Principal', 'Admin', 'Super Admin', 'GDC'].includes(simulatedRole) && (
+              <button
+                id="event-cancel-btn"
+                onClick={() => onUpdateEvent?.({ ...selectedEvent, cancelled: !selectedEvent.cancelled })}
+                className={`px-5 py-2.5 font-bold text-xs rounded-full transition-colors flex items-center gap-2 shadow-sm active:scale-95 ${selectedEvent.cancelled ? 'bg-bc-canvas text-bc-text hover:bg-bc-border/40' : 'bg-white border border-bc-danger/40 text-bc-danger hover:bg-bc-danger/10'}`}
+              >
+                <X size={14} /> {selectedEvent.cancelled ? "Rétablir l'occurrence" : "Annuler l'occurrence"}
+              </button>
+            )}
+            {!selectedEvent.closed && !selectedEvent.cancelled && ['Pasteur', 'Admin', 'Super Admin', 'ADN', 'Portier', 'GDC'].includes(simulatedRole) && (
+              <button
+                onClick={() => setShowCounterModal(true)}
+                className="px-5 py-2.5 bg-bc-green text-white font-bold text-xs rounded-full hover:bg-bc-text transition-colors flex items-center gap-2 shadow-sm active:scale-95"
+              >
+                <CheckCircle size={16} /> Clôturer le Culte
+              </button>
+            )}
+          </div>
         </div>
 
         {selectedEvent.closed ? (
@@ -862,6 +895,16 @@ export default function EventsView({
                     className="w-full border border-bc-border rounded-full px-3 py-2 text-xs focus:outline-none focus:border-bc-green"
                   />
                 </div>
+                <div>
+                  <label className="block text-xs font-bold text-bc-text mb-1">Heure de fin</label>
+                  <input
+                    id="event-endtime-input"
+                    type="time"
+                    value={eventEndTime}
+                    onChange={(e) => setEventEndTime(e.target.value)}
+                    className="w-full border border-bc-border rounded-full px-3 py-2 text-xs focus:outline-none focus:border-bc-green"
+                  />
+                </div>
               </div>
 
               <div>
@@ -987,7 +1030,7 @@ function MonthCalendar({ events, onSelect }: { events: Event[]; onSelect: (id: s
           <div key={i} className={`min-h-[64px] rounded-xl p-1 text-left ${d ? 'bg-bc-canvas/40 border border-bc-border' : ''}`}>
             {d && <div className="text-[10px] font-bold text-bc-text-secondary">{d}</div>}
             {d && byDay(d).map(e => (
-              <button key={e.id} onClick={() => onSelect(e.id)} className={`w-full mt-0.5 text-[9px] font-bold rounded px-1 py-0.5 truncate text-left active:scale-95 ${e.closed ? 'bg-bc-border text-bc-text-secondary' : 'bg-bc-green text-white'}`} title={`${e.time ? e.time + ' · ' : ''}${e.title}`}>
+              <button key={e.id} onClick={() => onSelect(e.id)} className={`w-full mt-0.5 text-[9px] font-bold rounded px-1 py-0.5 truncate text-left active:scale-95 ${e.cancelled ? 'bg-bc-danger/10 text-bc-danger line-through' : e.closed ? 'bg-bc-border text-bc-text-secondary' : 'bg-bc-green text-white'}`} title={`${e.time ? e.time + ' · ' : ''}${e.title}${e.cancelled ? ' (annulé)' : ''}`}>
                 {e.time ? `${e.time} ` : ''}{e.title}
               </button>
             ))}
