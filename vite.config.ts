@@ -12,6 +12,9 @@ export default defineConfig(() => {
       },
     },
     server: {
+      // En dev, les photos uploadées vivent sur l'API (:4000) — proxy pour que les URL
+      // relatives /uploads/x rendent aussi depuis le serveur Vite (:3000).
+      proxy: { '/uploads': 'http://localhost:4000' },
       // HMR is disabled in AI Studio via DISABLE_HMR env var.
       // Do not modifyâfile watching is disabled to prevent flickering during agent edits.
       hmr: process.env.DISABLE_HMR !== 'true',

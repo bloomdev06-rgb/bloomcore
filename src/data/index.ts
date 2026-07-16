@@ -51,6 +51,11 @@ export function load<T>(key: string, seed: T): T {
 let syncEnabled = false;
 export function enableSync(): void { syncEnabled = true; }
 
+// Scale : un PUT whole-array par RAFALE de saisie, pas par frappe — debounce trailing
+// de 1,5 s par collection. La valeur poussée au tir est relue du localStorage (la plus
+// fraîche) ; une rafale de N modifications = 1 seul envoi réseau.
+const syncTimers = new Map<string, ReturnType<typeof setTimeout>>();
+
 export function save<T>(key: string, value: T): void {
   // QuotaExceededError (photos base64, logs qui grossissent) ne doit pas faire throw
   // dans un useEffect non gardé (crash en boucle, C2). L'écriture serveur suit quand même.
@@ -60,7 +65,13 @@ export function save<T>(key: string, value: T): void {
     console.error(`[save] échec d'écriture localStorage "${key}" (quota ?)`, e);
   }
   const name = key.replace(/^bc_/, '');
-  if (syncEnabled && SYNCED_NAMES.has(name)) void apiPut(name, value); // fire-and-forget, offline-safe
+  if (syncEnabled && SYNCED_NAMES.has(name)) {
+    clearTimeout(syncTimers.get(name));
+    syncTimers.set(name, setTimeout(() => {
+      syncTimers.delete(name);
+      void apiPut(name, load(key, value)); // fire-and-forget, offline-safe (file de rattrapage)
+    }, 1500));
+  }
 }
 
 // Seeds for the App-owned mutable collections.

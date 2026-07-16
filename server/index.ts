@@ -6,9 +6,12 @@
 // Charge .env EN PREMIER : auth.ts/db.ts lisent process.env au chargement du module.
 import 'dotenv/config';
 import path from 'node:path';
+import fs from 'node:fs';
+import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import express from 'express';
-import { db, getCollection, appendToCollection, getKv, setKv } from './db.ts';
+import compression from 'compression';
+import { db, getCollection, setCollection, appendToCollection, getKv, setKv } from './db.ts';
 import { hashPassword, verifyPassword, signToken, verifyToken, createOneTimeToken, consumeOneTimeToken, upsertCredentials, requireSecret } from './auth.ts';
 import { ensureSeeded } from './seed.ts';
 import { applyWrite, readCollection, GuardError } from './guards.ts';
@@ -19,6 +22,9 @@ import { startScheduler } from './scheduler.ts';
 ensureSeeded();
 
 const app = express();
+// Compression gzip de tout (assets + JSON API) : le bootstrap ~450 Ko tombe à ~60 Ko —
+// facteur dominant sur mobile/3G.
+app.use(compression());
 // rawBody conservé pour la vérification HMAC du webhook École Bloom.
 app.use(express.json({ limit: '10mb', verify: (req, _res, buf) => { (req as any).rawBody = buf; } })); // avatar photos are base64 data URIs
 
@@ -377,10 +383,71 @@ function processAcademyEvent(payload: any): void {
 // Sert le frontend buildé (vite build → dist/) sur le même process/port que l'API,
 // pour un déploiement mono-service (Dockerfile). En dev, dist/ n'existe pas encore
 // (Vite sert son propre serveur) : express.static ignore silencieusement l'absence.
+// Cache : les assets Vite sont hashés → immutables 1 an (zéro requête aux visites
+// suivantes) ; index.html en no-cache → toujours frais après un déploiement (c'est LA
+// correction racine des pages blanches post-deploy, lazyRetry côté client en filet).
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DIST_DIR = path.join(__dirname, '../dist');
-app.use(express.static(DIST_DIR));
+
+// ---- Photos hors JSON (scale) ----
+// Les photos vivaient en base64 DANS le JSON des membres : re-téléchargées à chaque
+// bootstrap, re-poussées à chaque sync — ingérable en croissance. Elles deviennent des
+// fichiers sur le volume persistant (à côté de la DB : /data/uploads en prod), servis
+// immutables (nom = hash du contenu).
+const UPLOAD_DIR = path.join(
+  process.env.BLOOMCORE_DB ? path.dirname(process.env.BLOOMCORE_DB) : __dirname,
+  'uploads',
+);
+fs.mkdirSync(UPLOAD_DIR, { recursive: true });
+app.use('/uploads', express.static(UPLOAD_DIR, { immutable: true, maxAge: '1y' }));
+
+const DATA_URL_RE = /^data:image\/(png|jpe?g|webp);base64,(.+)$/;
+function storeImage(dataUrl: string): string | null {
+  const m = dataUrl.match(DATA_URL_RE);
+  if (!m) return null;
+  const buf = Buffer.from(m[2], 'base64');
+  if (buf.length > 2 * 1024 * 1024) return null; // 2 Mo max (les photos sont downscalées côté client)
+  const name = `${createHash('sha1').update(buf).digest('hex')}.${m[1] === 'jpeg' ? 'jpg' : m[1]}`;
+  const file = path.join(UPLOAD_DIR, name);
+  if (!fs.existsSync(file)) fs.writeFileSync(file, buf);
+  return `/uploads/${name}`;
+}
+
+app.post('/api/v1/uploads', requireAuth, (req, res) => {
+  const { data } = req.body ?? {};
+  if (typeof data !== 'string') return res.status(400).json({ error: 'dataURL image attendue' });
+  const url = storeImage(data);
+  if (!url) return res.status(400).json({ error: 'image invalide ou trop lourde (max 2 Mo, png/jpeg/webp)' });
+  res.json({ url });
+});
+
+// Migration idempotente au boot : les avatars base64 déjà en base deviennent des fichiers.
+{
+  const members = getCollection('members');
+  let migrated = 0;
+  for (const m of members as any[]) {
+    if (typeof m.avatarUrl === 'string' && m.avatarUrl.startsWith('data:image/')) {
+      const url = storeImage(m.avatarUrl);
+      if (url) { m.avatarUrl = url; migrated++; }
+    }
+  }
+  if (migrated) {
+    setCollection('members', members);
+    console.log(`[uploads] ${migrated} photo(s) base64 migrée(s) vers ${UPLOAD_DIR}.`);
+  }
+}
+app.use(express.static(DIST_DIR, {
+  index: false,
+  setHeaders: (res, filePath) => {
+    if (filePath.includes(`${path.sep}assets${path.sep}`)) {
+      res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+    } else {
+      res.setHeader('Cache-Control', 'no-cache');
+    }
+  },
+}));
 app.get(/^(?!\/api\/).*/, (_req, res) => {
+  res.setHeader('Cache-Control', 'no-cache');
   res.sendFile(path.join(DIST_DIR, 'index.html'), (err) => {
     if (err) res.status(404).end();
   });

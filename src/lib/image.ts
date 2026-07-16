@@ -24,3 +24,11 @@ export function downscaleImage(file: File, max = 200): Promise<string> {
     reader.readAsDataURL(file);
   });
 }
+
+// Downscale puis téléversement : en ligne → URL de fichier (/uploads/<hash>) légère dans le
+// JSON ; hors-ligne → dataURL conservé (offline-first), migré côté serveur au prochain boot.
+export async function downscaleAndUpload(file: File, max = 200): Promise<string> {
+  const { apiUpload } = await import('../data/api');
+  const dataUrl = await downscaleImage(file, max);
+  return (await apiUpload(dataUrl)) ?? dataUrl;
+}

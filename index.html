@@ -1,13 +1,17 @@
 <!doctype html>
-<html lang="en">
+<html lang="fr">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>My Google AI Studio App</title>
+    <title>BloomCore — Community Platform</title>
+    <meta name="theme-color" content="#0B7A55" />
+    <link rel="icon" href="/icon.svg" type="image/svg+xml" />
+    <!-- PWA légère : installable sur l'écran d'accueil, volontairement SANS service
+         worker (un SW recréerait le problème des versions figées après déploiement). -->
+    <link rel="manifest" href="/manifest.webmanifest" />
   </head>
   <body>
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>
-

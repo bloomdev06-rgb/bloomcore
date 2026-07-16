@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { UserCheck, ClipboardList, BarChart3, ChevronDown, ChevronRight, Users } from 'lucide-react';
 import { Member, Report, Event, AuditLog, PermissionMatrix, FormDef, Branch } from '../types';
 import { useBusLines, useDepartments } from '../data';
-import { downscaleImage } from '../lib/image';
+import { downscaleAndUpload } from '../lib/image';
 import { adnByEvent } from '../data/adn';
 import { Period, PeriodInput } from '../data/kpi';
 import { Avatar } from './ui/Avatar';
@@ -332,7 +332,7 @@ export default function AdnView({
                     if (!file) return;
                     // Resize + gestion d'erreur (C2/B6) — une photo pleine résolution
                     // faisait exploser le quota localStorage et crasher en boucle.
-                    downscaleImage(file).then(setQuickPhotoUrl).catch((err) => toast.error(err.message));
+                    downscaleAndUpload(file).then(setQuickPhotoUrl).catch((err) => toast.error(err.message));
                   }}
                   className="w-full border border-bc-border rounded-full px-3 py-1.5 text-[10px] bg-white focus:outline-none"
                 />

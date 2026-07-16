@@ -290,6 +290,16 @@ export function filterReadable(name: string, ctx: RbacContext, items: any[]): an
       if (!fullScope && member.branch) {
         out = out.filter((r) => !r.targetBranch || r.targetBranch === 'global' || r.targetBranch === member.branch);
       }
+      // Scale : les rapports de plus de 24 mois restent en base (archives) mais ne sont
+      // plus servis au bootstrap — et par symétrie preservedIds, jamais tombstonés par les
+      // PUT whole-array des clients qui ne les ont pas reçus. 24 mois = 2× la période max
+      // du sélecteur (année) ; le générateur de rapports couvre donc toujours ses bornes.
+      const archiveCutoff = new Date();
+      archiveCutoff.setMonth(archiveCutoff.getMonth() - 24);
+      out = out.filter((r) => {
+        const d = new Date(r.weekOf ?? r.date);
+        return Number.isNaN(d.getTime()) || d >= archiveCutoff; // sans date lisible → jamais archivé
+      });
       return out;
     }
 

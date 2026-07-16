@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { MapPin, UserPlus, Wrench } from "lucide-react";
 import { Member, Branch, CommunityLevel, PastoralCursus, Department, BloomBusEntity, FormDef } from "../types";
-import { downscaleImage } from "../lib/image";
+import { downscaleAndUpload } from "../lib/image";
 import { Avatar } from "./ui/Avatar";
 import { PhotoLightbox } from "./ui/PhotoLightbox";
 import { Modal } from "./ui/Modal";
@@ -180,7 +180,7 @@ export default function MemberFormModal({
 
   const handlePhotoUpload = (file: File | undefined) => {
     if (!file) return;
-    downscaleImage(file).then(setAvatarUrl).catch((e) => alert(e.message));
+    downscaleAndUpload(file).then(setAvatarUrl).catch((e) => alert(e.message));
   };
 
   const handleUseMyPosition = () => {

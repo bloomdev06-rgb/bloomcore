@@ -4,7 +4,6 @@ import { resolveMemberRole } from './data/roles';
 import { MEMBERS_TAB_DEPT_ONLY_ROLES } from './data/scope';
 import { isLegacySeedEventId } from './data/events';
 import { MULTI_BRANCH_ROLES, GLOBAL_VIEW_ROLES } from './data/scope';
-import { downscaleImage } from './lib/image';
 
 import {
   Member,
@@ -24,28 +23,46 @@ import { motion, AnimatePresence } from 'motion/react';
 import Sidebar from './components/Sidebar';
 import Header from './components/Header';
 // Vues chargées à la demande (React.lazy) — seule AuthView (écran avant connexion)
-// reste dans le bundle principal, tout le reste ne charge qu'au clic sur l'onglet.
-const DashboardView = lazy(() => import('./components/DashboardView'));
-const MembersView = lazy(() => import('./components/MembersView'));
-const NouveauxView = lazy(() => import('./components/NouveauxView'));
-const BloomBusView = lazy(() => import('./components/BloomBusView'));
-const EventsView = lazy(() => import('./components/EventsView'));
-const ReportsView = lazy(() => import('./components/ReportsView'));
-const ProgrammesView = lazy(() => import('./components/ProgrammesView'));
-const FormationsView = lazy(() => import('./components/FormationsView'));
-const MinisteresView = lazy(() => import('./components/MinisteresView'));
-const DepartmentsView = lazy(() => import('./components/DepartmentsView'));
-const AccountsView = lazy(() => import('./components/AccountsView'));
-const SettingsView = lazy(() => import('./components/SettingsView'));
-const FormBuilderView = lazy(() => import('./components/FormBuilderView'));
-const PermissionsView = lazy(() => import('./components/PermissionsView'));
-const AuditView = lazy(() => import('./components/AuditView'));
-const ProjectsView = lazy(() => import('./components/ProjectsView'));
-const CursusView = lazy(() => import('./components/CursusView'));
-const AdnView = lazy(() => import('./components/AdnView'));
-const CulteReportView = lazy(() => import('./components/CulteReportView'));
-const DenombrementView = lazy(() => import('./components/DenombrementView'));
-const ProfileView = lazy(() => import('./components/ProfileView'));
+// reste dans le bundle principal.
+// lazyRetry : après un redéploiement, un navigateur qui a l'ancien index.html référence
+// des chunks hashés qui n'existent plus → l'import dynamique échoue → onglet qui ne
+// s'affiche jamais. On recharge alors la page UNE fois (garde sessionStorage) pour
+// récupérer le nouvel index.html ; si ça échoue encore, on laisse remonter l'erreur.
+const VIEW_LOADERS: Array<() => Promise<unknown>> = [];
+function lazyRetry<T extends React.ComponentType<any>>(factory: () => Promise<{ default: T }>) {
+  const loader = () =>
+    factory().catch((err) => {
+      if (!sessionStorage.getItem('bc_chunk_reload')) {
+        sessionStorage.setItem('bc_chunk_reload', '1');
+        window.location.reload();
+        return new Promise<never>(() => {}); // la page recharge, on ne résout jamais
+      }
+      throw err;
+    });
+  VIEW_LOADERS.push(loader);
+  return lazy(loader);
+}
+const DashboardView = lazyRetry(() => import('./components/DashboardView'));
+const MembersView = lazyRetry(() => import('./components/MembersView'));
+const NouveauxView = lazyRetry(() => import('./components/NouveauxView'));
+const BloomBusView = lazyRetry(() => import('./components/BloomBusView'));
+const EventsView = lazyRetry(() => import('./components/EventsView'));
+const ReportsView = lazyRetry(() => import('./components/ReportsView'));
+const ProgrammesView = lazyRetry(() => import('./components/ProgrammesView'));
+const FormationsView = lazyRetry(() => import('./components/FormationsView'));
+const MinisteresView = lazyRetry(() => import('./components/MinisteresView'));
+const DepartmentsView = lazyRetry(() => import('./components/DepartmentsView'));
+const AccountsView = lazyRetry(() => import('./components/AccountsView'));
+const SettingsView = lazyRetry(() => import('./components/SettingsView'));
+const FormBuilderView = lazyRetry(() => import('./components/FormBuilderView'));
+const PermissionsView = lazyRetry(() => import('./components/PermissionsView'));
+const AuditView = lazyRetry(() => import('./components/AuditView'));
+const ProjectsView = lazyRetry(() => import('./components/ProjectsView'));
+const CursusView = lazyRetry(() => import('./components/CursusView'));
+const AdnView = lazyRetry(() => import('./components/AdnView'));
+const CulteReportView = lazyRetry(() => import('./components/CulteReportView'));
+const DenombrementView = lazyRetry(() => import('./components/DenombrementView'));
+const ProfileView = lazyRetry(() => import('./components/ProfileView'));
 import AuthView from './components/AuthView';
 import CreateDepartmentModal from './components/CreateDepartmentModal';
 import { ToastContainer } from './components/ui/Toast';
@@ -109,6 +126,14 @@ export default function App() {
   useEffect(() => { save('bc_loggedInMemberId', loggedInMemberId); }, [loggedInMemberId]);
   // CHARTE-GRAPHIQUE.md §10 — cascade [data-branch] sur la racine, pas seulement le switcher.
   useEffect(() => { document.documentElement.setAttribute('data-branch', activeBranch); }, [activeBranch]);
+
+  // Préchargement des vues en arrière-plan après connexion : le premier clic sur un onglet
+  // ne paie plus le chargement du chunk (transform Vite en dev, aller-réseau en prod).
+  useEffect(() => {
+    if (!loggedInMemberId) return;
+    const idle = (window as unknown as { requestIdleCallback?: (cb: () => void) => void }).requestIdleCallback ?? ((cb: () => void) => setTimeout(cb, 800));
+    idle(() => { VIEW_LOADERS.forEach((l) => { l().catch(() => {}); }); });
+  }, [loggedInMemberId]);
 
 
   // Backend bootstrap: replace localStorage/seed state with the API's data if
@@ -707,13 +732,15 @@ export default function App() {
         {/* Content canvas */}
         <main className="flex-1 overflow-y-auto p-4 md:p-6 lg:p-8 relative no-scrollbar print:overflow-visible print:p-0">
           <div className="max-w-7xl mx-auto min-h-full flex flex-col">
+            {/* Transition volontairement courte : le spring + blur en mode "wait" ajoutait
+                ~1 s perçue à CHAQUE changement d'onglet (sortie, puis chunk, puis entrée). */}
             <AnimatePresence mode="wait">
               <motion.div
                 key={activeTab}
-                initial={{ opacity: 0, y: 15, filter: 'blur(2px)' }}
-                animate={{ opacity: 1, y: 0, filter: 'blur(0px)' }}
-                exit={{ opacity: 0, y: -15, filter: 'blur(2px)' }}
-                transition={{ type: 'spring', stiffness: 380, damping: 30 }}
+                initial={{ opacity: 0, y: 6 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, transition: { duration: 0.06 } }}
+                transition={{ duration: 0.15, ease: 'easeOut' }}
                 className="flex-1 flex flex-col min-h-full"
               >
                 <Suspense fallback={<div className="flex-1 flex items-center justify-center py-24"><Loader2 className="animate-spin text-bc-green" size={28} /></div>}>

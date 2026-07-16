@@ -125,6 +125,26 @@ if (typeof window !== 'undefined') {
   window.addEventListener('online', () => void flushSyncQueue());
 }
 
+// Téléverse une photo (dataURL) → URL de fichier servie par l'API (/uploads/<hash>).
+// null si hors-ligne/serveur absent : l'appelant garde le dataURL (offline-first),
+// la migration au boot serveur convertira au prochain sync.
+export async function apiUpload(dataUrl: string): Promise<string | null> {
+  const token = getAuthToken();
+  if (!token) return null;
+  try {
+    const res = await fetch(`${API_BASE}/uploads`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ data: dataUrl }),
+    });
+    if (!res.ok) return null;
+    const { url } = await res.json();
+    return typeof url === 'string' ? url : null;
+  } catch {
+    return null;
+  }
+}
+
 // Fire-and-forget push of a whole collection/kv value. Requires a token
 // (mutations are auth-gated server-side) — silently a no-op before login.
 // Échec réseau → file de rattrapage (voir flushSyncQueue).

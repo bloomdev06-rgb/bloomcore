@@ -1,0 +1,12 @@
+{
+  "name": "BloomCore — Community Platform",
+  "short_name": "BloomCore",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#F4F5F7",
+  "theme_color": "#0B7A55",
+  "lang": "fr",
+  "icons": [
+    { "src": "/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }
+  ]
+}

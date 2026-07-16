@@ -164,4 +164,13 @@ assert.deepEqual(
   );
 }
 
+// Scale — les rapports de plus de 24 mois ne sont plus servis (archives), les récents
+// et ceux sans date lisible passent.
+{
+  const old = { id: 'r_old', reportType: 'rapport_service', targetBranch: 'church', date: '2020-01-05', confidential: false, content: {} };
+  const recent = { id: 'r_new', reportType: 'rapport_service', targetBranch: 'church', date: '2026-06-29', confidential: false, content: {} };
+  const ids = filterReadable('reports', buildContext('m2')!, [old, recent]).map((r: any) => r.id);
+  assert.deepEqual(ids, ['r_new'], 'rapport de plus de 24 mois archivé (non servi)');
+}
+
 console.log('rbac.check OK');
