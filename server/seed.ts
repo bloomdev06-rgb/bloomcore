@@ -129,6 +129,38 @@ export function ensureSeeded(): void {
   }
 
   reconcileSeedMembers();
+  reconcileLot3();
+}
+
+// Lot 3 — réconciliation ciblée d'une base déjà peuplée (idempotente, à chaque boot) :
+// - Event.endTime des cultes seed : reconcileMissingById n'update pas les events existants,
+//   les cultes d'avant ce champ resteraient sans heure de fin.
+// - Profils de test GDC/ADN : 'Membre' → 'Adjoint' (le RBAC serveur exige une fonction
+//   d'encadrement pour écrire des reports) — profils de test, donc gardé par DEMO_PASSWORD.
+function reconcileLot3(): void {
+  const events = getCollection('events');
+  const seedById = new Map(INITIAL_EVENTS.map((e: any) => [e.id, e]));
+  let touched = 0;
+  for (const e of events as any[]) {
+    const seed = seedById.get(e.id) as any;
+    if (seed?.endTime && e.endTime !== seed.endTime) { e.endTime = seed.endTime; touched++; }
+  }
+  if (touched) {
+    setCollection('events', events);
+    console.log(`[seed] endTime appliqué à ${touched} événement(s) existant(s).`);
+  }
+
+  if (!DEMO_PASSWORD) return;
+  const members = getCollection('members');
+  let fixed = 0;
+  for (const m of members as any[]) {
+    if (m.testRole === 'GDC' && m.departments?.dept_gdc === 'Membre') { m.departments.dept_gdc = 'Adjoint'; fixed++; }
+    if (m.testRole === 'ADN' && m.departments?.dept_adn === 'Membre') { m.departments.dept_adn = 'Adjoint'; fixed++; }
+  }
+  if (fixed) {
+    setCollection('members', members);
+    console.log(`[seed] ${fixed} profil(s) de test GDC/ADN passé(s) Adjoint.`);
+  }
 }
 
 // Ajoute les items seed absents (par id) d'une collection SANS écraser l'existant ni
