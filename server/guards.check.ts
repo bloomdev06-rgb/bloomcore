@@ -84,5 +84,30 @@ assert.throws(
   (e: any) => e instanceof GuardError && e.status === 400,
   'clé __proto__ rejetée',
 );
+// __proto__ imbriquée (pas seulement au premier niveau) — la validation est récursive
+assert.throws(
+  () => applyWrite('members', JSON.parse('[{"id":"m10","content":{"__proto__":{"x":1}}}]')),
+  (e: any) => e instanceof GuardError && e.status === 400,
+  'clé __proto__ imbriquée rejetée',
+);
+
+// --- #12 bornes de taille/profondeur (anti-abus, laisse passer le métier) ---
+// un Member à ~54 champs légitimes passe
+const fatButLegit: any = { id: 'm11' };
+for (let i = 0; i < 54; i++) fatButLegit['champ' + i] = 'ok';
+applyWrite('members', [fatButLegit]); // ne throw pas
+assert.ok(readCollection('members').some((m: any) => m.id === 'm11'), 'item à 54 champs accepté');
+// trop de champs
+const tooManyKeys: any = { id: 'm12' };
+for (let i = 0; i < 101; i++) tooManyKeys['k' + i] = 1;
+assert.throws(() => applyWrite('members', [tooManyKeys]), (e: any) => e instanceof GuardError && e.status === 400, 'trop de champs rejeté');
+// chaîne énorme (blob)
+assert.throws(() => applyWrite('members', [{ id: 'm13', bio: 'x'.repeat(100_001) }]), (e: any) => e instanceof GuardError && e.status === 400, 'chaîne trop longue rejetée');
+// tableau énorme
+assert.throws(() => applyWrite('members', [{ id: 'm14', tags: new Array(5001).fill(1) }]), (e: any) => e instanceof GuardError && e.status === 400, 'tableau trop long rejeté');
+// depth-bomb : 9 niveaux imbriqués > MAX_DEPTH(8)
+let deep: any = 'x';
+for (let i = 0; i < 9; i++) deep = { n: deep };
+assert.throws(() => applyWrite('members', [{ id: 'm15', ...deep }]), (e: any) => e instanceof GuardError && e.status === 400, 'imbrication trop profonde rejetée');
 
 console.log('guards.check OK');

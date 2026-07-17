@@ -34,12 +34,43 @@ export function canonical(v: any): string {
 //   `asOf` omis (appels internes/tests) = comportement LWW historique inchangé.
 // Retourne les nouveaux items (utile aux hooks notif/enrôlement des phases 4-5).
 // Validation structurelle aux frontières de confiance (#12). Le store est un document-store
-// (Report.content est volontairement `any`) : imposer un schéma par champ casserait des features
-// et serait à maintenir sans fin. On rejette en revanche ce qui est structurellement invalide ou
-// dangereux — chaque item DOIT être un objet plat avec un id string, sans clé de pollution de
-// prototype (JSON.parse fait de "__proto__" une propriété propre énumérable → détectable ici).
-// ponytail: whitelist par champ (members/reports/events) = étape suivante si le modèle se resserre.
+// (Report.content est volontairement `any`) : imposer un schéma par CHAMP casserait des features
+// et serait à maintenir sans fin. On ne valide donc pas les noms de champs, on borne la STRUCTURE :
+// un item doit être un objet plat avec un id string, sans clé de pollution de prototype, et sa
+// taille/profondeur reste dans des limites qui laissent passer tout payload métier légitime
+// (Member = 54 champs, `content` = scalaires à plat) mais rejettent l'abus — un client
+// authentifié peut sinon PUT un blob de 100 Mo ou un objet profond de 10 000 niveaux droit dans
+// SQLite. C'est le vrai vecteur de « champs arbitraires stockés verbatim » : la taille, pas le nom.
+// ponytail: bornes (pas de whitelist par champ). Resserrer en schéma par collection seulement si
+// le modèle se fige — voir le raisonnement ci-dessus avant de le faire.
 const DANGEROUS_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
+const MAX_KEYS = 100;        // Member = 54 champs ; large marge
+const MAX_STRING = 100_000;  // notes/prose OK ; les photos passent par /uploads (jamais inlinées)
+const MAX_ARRAY = 5_000;     // aucun tableau interne d'item légitime n'approche ça
+const MAX_DEPTH = 8;         // `content` est peu profond ; 8 = anti depth-bomb sans gêner le métier
+
+// Borne la taille/profondeur d'une valeur JSON déjà désérialisée (donc pas de fonctions/cycles :
+// JSON.parse ne peut en produire). Rejette au premier dépassement.
+function assertBounded(name: string, v: any, depth: number): void {
+  if (depth > MAX_DEPTH) throw new GuardError(400, `${name}: imbrication trop profonde`);
+  if (typeof v === 'string') {
+    if (v.length > MAX_STRING) throw new GuardError(400, `${name}: chaîne trop longue`);
+    return;
+  }
+  if (Array.isArray(v)) {
+    if (v.length > MAX_ARRAY) throw new GuardError(400, `${name}: tableau trop long`);
+    for (const el of v) assertBounded(name, el, depth + 1);
+    return;
+  }
+  if (v !== null && typeof v === 'object') {
+    const keys = Object.keys(v);
+    if (keys.length > MAX_KEYS) throw new GuardError(400, `${name}: trop de champs`);
+    for (const k of keys) {
+      if (DANGEROUS_KEYS.has(k)) throw new GuardError(400, `${name}: clé interdite « ${k} »`);
+      assertBounded(name, v[k], depth + 1);
+    }
+  }
+}
 
 export function validateItems(name: string, incoming: any[]): void {
   if (!Array.isArray(incoming)) throw new GuardError(400, `${name}: tableau attendu`);
@@ -48,9 +79,7 @@ export function validateItems(name: string, incoming: any[]): void {
       throw new GuardError(400, `${name}: item non-objet`);
     }
     if (typeof it.id !== 'string' || !it.id) throw new GuardError(400, `${name}: id string requis`);
-    for (const k of Object.keys(it)) {
-      if (DANGEROUS_KEYS.has(k)) throw new GuardError(400, `${name}: clé interdite « ${k} »`);
-    }
+    assertBounded(name, it, 1); // clés dangereuses + bornes taille/profondeur, récursif
   }
 }
 
