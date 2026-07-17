@@ -173,4 +173,29 @@ assert.deepEqual(
   assert.deepEqual(ids, ['r_new'], 'rapport de plus de 24 mois archivé (non servi)');
 }
 
+// Audit sécurité — #2 journal d'audit réservé à l'encadrement supérieur ;
+// #3 notifications personnelles filtrées par destinataire.
+{
+  const audits = [{ id: 'a1', operatorId: 'mem_sa', actionType: 'PASSWORD_RESET_ISSUED' }];
+  assert.deepEqual(filterReadable('audits', ctxSimple, audits), [], "journal d'audit invisible au simple membre (#2)");
+  assert.equal(filterReadable('audits', ctxResp, audits).length, 0, "journal d'audit invisible au Responsable (hors encadrement supérieur) (#2)");
+  assert.equal(filterReadable('audits', ctxSA, audits).length, 1, 'Super Admin lit le journal d\'audit (#2)');
+
+  const notifs = [
+    { id: 'n_broadcast', title: 'B' },                    // sans cible → tout le monde
+    { id: 'n_mine', targetMemberId: 'm5', title: 'M' },   // destinée à m5 (ctxSimple)
+    { id: 'n_other', targetMemberId: 'm3', title: 'O' },  // destinée à un autre
+  ];
+  assert.deepEqual(
+    filterReadable('notifications', ctxSimple, notifs).map((n: any) => n.id),
+    ['n_broadcast', 'n_mine'],
+    'simple membre : notif personnelle d\'un autre masquée (#3)',
+  );
+  assert.equal(
+    filterReadable('notifications', ctxResp, notifs).length,
+    3,
+    'encadrement voit toutes les notifications pour supervision (#3)',
+  );
+}
+
 console.log('rbac.check OK');

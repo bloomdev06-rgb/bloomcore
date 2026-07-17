@@ -18,6 +18,9 @@ export function requireSecret(name: string, weakDefaults: string[] = []): string
 }
 
 const TOKEN_SECRET = requireSecret('AUTH_SECRET', ['change-me', 'bloomcore-dev-secret-change-in-prod']);
+// Vrai quand aucun secret fort n'a été fourni (repli dev déterministe). Un serveur dans
+// cet état ne doit PAS être joignable depuis le réseau : ses tokens sont forgeables.
+export const usingInsecureSecret = TOKEN_SECRET.startsWith('dev-insecure-');
 const TOKEN_TTL_MS = 12 * 60 * 60 * 1000; // 12h
 
 export function hashPassword(password: string): string {

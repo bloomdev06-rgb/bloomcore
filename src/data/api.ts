@@ -55,6 +55,14 @@ export function clearAuthToken(): void {
   localStorage.removeItem(AUTH_TOKEN_KEY);
 }
 
+// /uploads est désormais authentifié (voir server/index.ts). Les <img> ne portent pas
+// de header → on fait voyager le token en query. dataURL/URL externe : inchangé.
+export function photoSrc(url?: string): string | undefined {
+  if (!url || !url.startsWith('/uploads/')) return url;
+  const token = getAuthToken();
+  return token ? `${url}?token=${encodeURIComponent(token)}` : url;
+}
+
 export async function apiBootstrap(): Promise<Record<string, unknown> | null> {
   // Lecture auth-gated côté serveur : sans token, le serveur répondrait 401 à
   // coup sûr — inutile de faire l'aller-retour réseau (et le bruit console qui

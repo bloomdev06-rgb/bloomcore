@@ -1,5 +1,6 @@
 import type { LucideIcon } from "lucide-react"
 import { cn } from "../../lib/utils"
+import { photoSrc } from "../../data/api"
 
 interface AvatarProps {
   src?: string
@@ -25,7 +26,7 @@ export function Avatar({ src, icon: Icon, initials, size = "md", className }: Av
   )
 
   if (src) {
-    return <img src={src} alt={initials || ""} className={cn(base, "object-cover")} />
+    return <img src={photoSrc(src)} alt={initials || ""} className={cn(base, "object-cover")} />
   }
 
   if (Icon) {

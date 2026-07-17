@@ -12,7 +12,7 @@ import { fileURLToPath } from 'node:url';
 import express from 'express';
 import compression from 'compression';
 import { db, getCollection, setCollection, appendToCollection, getKv, setKv } from './db.ts';
-import { hashPassword, verifyPassword, signToken, verifyToken, createOneTimeToken, consumeOneTimeToken, upsertCredentials, requireSecret } from './auth.ts';
+import { hashPassword, verifyPassword, signToken, verifyToken, createOneTimeToken, consumeOneTimeToken, upsertCredentials, requireSecret, usingInsecureSecret } from './auth.ts';
 import { ensureSeeded } from './seed.ts';
 import { applyWrite, readCollection, GuardError } from './guards.ts';
 import { buildContext, assertCanWrite, filterReadable, preservedIds, RbacContext } from './rbac.ts';
@@ -399,7 +399,19 @@ const UPLOAD_DIR = path.join(
   'uploads',
 );
 fs.mkdirSync(UPLOAD_DIR, { recursive: true });
-app.use('/uploads', express.static(UPLOAD_DIR, { immutable: true, maxAge: '1y' }));
+// Photos derrière authentification : PII (parfois mineurs). Les <img> ne portent pas
+// de header Authorization → le token est aussi accepté en query (?token=). Pas de scope
+// par membre : les fichiers sont dédupliqués par hash de contenu (un même fichier peut
+// appartenir à plusieurs membres), scoper est donc infaisable — toute session valide lit.
+// `immutable` retiré : le cache reste révocable (le token expire en 12h).
+// ponytail: auth-only ; passer à des URLs signées expirantes si un jour exposé au public.
+app.use('/uploads', (req, res, next) => {
+  const header = req.headers.authorization;
+  const token = (header?.startsWith('Bearer ') ? header.slice(7) : null)
+    ?? (typeof req.query.token === 'string' ? req.query.token : null);
+  if (!token || !verifyToken(token)) return res.status(401).json({ error: 'unauthorized' });
+  next();
+}, express.static(UPLOAD_DIR, { maxAge: '1y' }));
 
 const DATA_URL_RE = /^data:image\/(png|jpe?g|webp);base64,(.+)$/;
 function storeImage(dataUrl: string): string | null {
@@ -454,7 +466,15 @@ app.get(/^(?!\/api\/).*/, (_req, res) => {
 });
 
 const PORT = Number(process.env.API_PORT) || 4000;
-app.listen(PORT, () => {
-  console.log(`BloomCore API listening on http://localhost:${PORT}/api/v1`);
+// Sans secret fort, on n'écoute que sur loopback : le dev local passe par le proxy Vite
+// (localhost) donc rien ne casse, mais un déploiement qui a oublié NODE_ENV/AUTH_SECRET
+// devient injoignable de l'extérieur (échec visible) plutôt que de servir des tokens forgeables.
+const HOST = process.env.API_HOST || (usingInsecureSecret ? '127.0.0.1' : '0.0.0.0');
+app.listen(PORT, HOST, () => {
+  const mode = usingInsecureSecret ? 'DEV — secret NON sécurisé (loopback seul)' : 'PROD — secret fort';
+  console.log(`BloomCore API [${mode}] http://${HOST}:${PORT}/api/v1`);
+  if (usingInsecureSecret && HOST !== '127.0.0.1') {
+    console.warn('⚠️  AUTH_SECRET absent/faible mais écoute réseau ouverte — définissez AUTH_SECRET (≥16 c.) ou NODE_ENV=production.');
+  }
 });
 startScheduler();

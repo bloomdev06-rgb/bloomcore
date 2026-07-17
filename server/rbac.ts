@@ -326,18 +326,38 @@ export function filterReadable(name: string, ctx: RbacContext, items: any[]): an
       return hasAny(roles, ABOVE_MEMBER_ROLES) ? items : [];
 
     case 'events':
-    case 'notifications':
       // Cloisonnement par branche (PROFILS-INTERFACES) : un profil mono-branche ne reçoit
-      // que les événements/notifications de SA branche (+ global). La ligne pastorale/staff
-      // et le Coach (bi-branche) reçoivent tout — règle du cahier, inchangée.
+      // que les événements de SA branche (+ global). La ligne pastorale/staff et le Coach
+      // (bi-branche) reçoivent tout — règle du cahier, inchangée.
       if (!hasAny(roles, MULTI_BRANCH_ROLES) && member.branch) {
         const b = (x: any) => x.branch ?? x.targetBranch;
         return items.filter((x) => !b(x) || b(x) === 'global' || b(x) === member.branch || x.scope === 'both');
       }
       return items;
 
+    case 'notifications': {
+      // Même cloisonnement par branche, PLUS confidentialité personnelle : une notification
+      // ciblée (targetMemberId défini) n'est lisible que par son destinataire — l'encadrement
+      // la voit pour la supervision (symétrique de l'émission, ABOVE_MEMBER_ROLES). Sans ce
+      // filtre, toute notif personnelle fuitait à toute la branche.
+      const above = hasAny(roles, ABOVE_MEMBER_ROLES);
+      const branchOk = hasAny(roles, MULTI_BRANCH_ROLES) || !member.branch
+        ? () => true
+        : (x: any) => {
+            const b = x.branch ?? x.targetBranch;
+            return !b || b === 'global' || b === member.branch || x.scope === 'both';
+          };
+      return items.filter((n) =>
+        branchOk(n) && (above || !n.targetMemberId || n.targetMemberId === member.id));
+    }
+
+    case 'audits':
+      // Journal d'audit : PII (noms, operatorId, événements PASSWORD_RESET_ISSUED en clair).
+      // Réservé à l'encadrement supérieur — invisible au simple membre.
+      return hasAny(roles, FULL_SCOPE_ROLES) ? items : [];
+
     default:
-      // ministries, departments, activities, forms, settings, audits : nécessaires au
+      // ministries, departments, activities, forms, settings : nécessaires au
       // fonctionnement de l'UI, entités transverses sans PII confidentielle par branche.
       return items;
   }

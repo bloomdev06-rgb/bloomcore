@@ -1,5 +1,6 @@
 import { createPortal } from "react-dom"
 import { X } from "lucide-react"
+import { photoSrc } from "../../data/api"
 
 interface PhotoLightboxProps {
   src: string
@@ -20,7 +21,7 @@ export function PhotoLightbox({ src, alt, onClose }: PhotoLightboxProps) {
         <X size={22} />
       </button>
       <img
-        src={src}
+        src={photoSrc(src)}
         alt={alt || ""}
         className="max-w-full max-h-full rounded-2xl object-contain shadow-2xl"
         onClick={(e) => e.stopPropagation()}
