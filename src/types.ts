@@ -1,3 +1,6 @@
+export type { ReportType } from '../packages/shared/enums';
+import type { ReportType } from '../packages/shared/enums';
+
 export type Branch = 'church' | 'light' | 'global';
 
 export type CommunityLevel = 'Nouveau' | 'Stagiaire' | 'Boss' | 'Leader' | 'Coach';
@@ -217,18 +220,7 @@ export interface Report {
   targetBranch: Branch;
   date: string;
   weekOf?: string; // Id de semaine calendaire visée (lundi 'YYYY-MM-DD') — cf. src/data/week.ts
-  reportType:
-    | 'rapport_service' 
-    | 'rapport_rsa' 
-    | 'rapport_bloom_bus_member'
-    | 'rapport_bloom_bus_life'
-    | 'rapport_adn'
-    | 'rapport_portiers'
-    | 'rapport_culte'
-    | 'rapport_pastoral'
-    | 'rapport_activite'      // §7.3 — observations + serviteurs
-    | 'rapport_suivi_coach'   // §8 — suivi d'un membre par son Coach
-    | 'rapport_observation';  // §8 — observation typée (avec/sans suivi)
+  reportType: ReportType; // source de vérité : packages/shared/enums.ts (§7.3 activité, §8 suivi/observation)
   eventId?: string; // Optional links to cultes/events
   departmentId?: string; // P1.3 — rattache le rapport à un département (KPIs départementaux/ministère, via Department.ministryId)
   confidential: boolean;
