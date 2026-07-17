@@ -51,6 +51,8 @@ export function attachAllToBus(members: Member[], buses: BloomBusEntity[]): void
 
 const FIRST = ['Awa', 'Koffi', 'Adjoua', 'Yao', 'Aya', 'Kouadio', 'Mariam', 'Ibrahim', 'Fatou', 'Seydou', 'Aicha', 'Moussa', 'Rokia', 'Bakary', 'Nafi', 'Drissa', 'Salif', 'Kadi', 'Oumar', 'Bintou', 'Sekou', 'Ramata', 'Vamara', 'Assita', 'Idrissa', 'Mariama', 'Amadou', 'Djeneba', 'Lassina', 'Fanta'];
 const LAST = ['Koné', 'Traoré', 'Ouattara', 'Diallo', 'Bamba', 'Cissé', 'Touré', 'Coulibaly', 'Fofana', 'Sanogo', 'Kouassi', 'Yao', 'Doumbia', 'Sylla', 'Camara'];
+// Clés de créneau STABLES (content.culte des rapports) — l'UI affiche le nom réel du culte
+// de la semaine via culteSlotLabel (Bloom/Super Sunday…), pas ces clés.
 const CULTES = ['1er culte Bloom Church', '2e culte Bloom Church', 'Culte Bloom Light'];
 
 // Nouveaux Bloom Bus (test) — enrichit la hiérarchie (plusieurs bus/zone, 6 communes/zones).

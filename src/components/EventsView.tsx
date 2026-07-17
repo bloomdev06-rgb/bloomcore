@@ -65,13 +65,10 @@ interface EventsViewProps {
   forms?: FormDef[];
 }
 
-// Anciens types internes (données seed/serveur existantes) → libellé lisible. Les nouveaux
-// types sont des chaînes libres (Culte, Séminaire…) affichées telles quelles.
-const LEGACY_TYPE_LABEL: Record<string, string> = {
-  dimanche_1er: '1er Culte', dimanche_2e: '2e Culte', dimanche_unique: 'Culte Unique',
-  special_inside: 'INside', special_altar: 'Altar', special_nss: 'NSS',
-};
-const typeLabel = (t: string) => LEGACY_TYPE_LABEL[t] ?? t;
+// Les types d'événement sont des chaînes libres (Culte, 80/20, Inside, Séminaire…)
+// affichées telles quelles — les anciens types internes (dimanche_1er…) ont été purgés
+// avec leurs événements au lot 4.
+const typeLabel = (t: string) => t;
 
 // Types d'événement par défaut (extensibles par l'utilisateur, persistés dans bc_event_types).
 const DEFAULT_EVENT_TYPES = ['Culte', 'Culte spécial', 'Séminaire', 'Retraite', 'Programme spécial'];

@@ -134,16 +134,24 @@ export function ensureSeeded(): void {
   reconcileLot4();
 }
 
-// Lot 4 — remplacement des événements : purge des anciens events seed (evt_1..5, evt_culte_*)
-// des bases existantes ; les nouveaux canoniques (evt4_*, ids déterministes par date) sont
-// insérés par reconcileMissingById à chaque boot, l'horizon avance tout seul.
+// Lot 4 — remplacement des événements. Deux purges :
+// - les anciens events seed (evt_1..5, evt_culte_*) : à chaque boot (idempotent) ;
+// - TOUT le reste non canonique (events de test créés à la main : « Conférence »,
+//   « Culte test récurrent d3 »…) : UNE SEULE FOIS (drapeau kv), pour ne pas détruire
+//   les événements que les utilisateurs créeront légitimement après le lot 4.
+// Les canoniques (evt4_*, ids déterministes par date) sont réinsérés par
+// reconcileMissingById à chaque boot, l'horizon avance tout seul.
 function reconcileLot4(): void {
   const events = getCollection('events');
-  const kept = (events as any[]).filter((e) => !isLegacySeedEventId(e.id));
+  const oneShot = !getKv('lot4_events_purged');
+  const kept = (events as any[]).filter((e) =>
+    !isLegacySeedEventId(e.id) && (!oneShot || e.id.startsWith('evt4_')),
+  );
   if (kept.length !== events.length) {
     setCollection('events', kept);
-    console.log(`[seed] lot 4 : ${events.length - kept.length} ancien(s) événement(s) seed purgé(s).`);
+    console.log(`[seed] lot 4 : ${events.length - kept.length} ancien(s) événement(s) purgé(s).`);
   }
+  if (oneShot) setKv('lot4_events_purged', true);
 }
 
 // Lot 3 — réconciliation ciblée d'une base déjà peuplée (idempotente, à chaque boot) :

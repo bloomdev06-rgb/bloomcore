@@ -17,6 +17,7 @@ import {
 import { LineChart, Line, XAxis, YAxis, Tooltip, Legend } from "recharts";
 import { Member, Branch, BloomBusEntity, Report, Event, FormDef } from "../types";
 import { useBusLines, useDepartments, save } from "../data";
+import { CULTE_SLOT_KEYS, culteSlotLabel } from "../data/events";
 import { isBusReportLocked } from "../data/reportLock";
 import { toast } from "./ui/Toast";
 import { busInScope, bloomBusRoleOf, fullBloomBusAccess, canFillReportFor, canRegisterMemberViaBloomBus, FULL_SCOPE_ROLES } from "../data/scope";
@@ -40,7 +41,17 @@ import MemberFormModal from "./MemberFormModal";
 const BUS_HEALTH_KEYS = new Set(["spirituel", "social", "physique", "financier"]);
 const BUS_HEALTH_AXES = HEALTH_AXES.filter((a) => BUS_HEALTH_KEYS.has(a.key));
 
-const CULTE_OPTIONS = ["1er culte Bloom Church", "2e culte Bloom Church", "Culte Bloom Light"] as const;
+// Clés de créneau STABLES stockées dans content.culte (les stats agrègent dessus) ;
+// l'affichage passe par culteSlotLabel(clé, semaine) → nom réel du culte de la semaine
+// (Bloom/Super Sunday, Talk Show, Light Sunday/Show…).
+const CULTE_OPTIONS = CULTE_SLOT_KEYS;
+// Descripteurs neutres pour les agrégats multi-semaines (point mensuel) — un mois mélange
+// plusieurs noms de dimanche, on décrit le créneau, pas un événement.
+const CULTE_SLOT_SHORT: Record<string, string> = {
+  '1er culte Bloom Church': '1ᵉʳ culte · Church',
+  '2e culte Bloom Church': '2ᵉ culte · Church',
+  'Culte Bloom Light': 'Culte · Light',
+};
 
 // Rapports rapport_bloom_bus_member → série temporelle moyenne par critère (un point par date de rapport).
 function healthEvolutionSeries(matchReports: Report[]) {
@@ -920,7 +931,7 @@ export default function BloomBusView({
               <div className="flex flex-wrap gap-x-4 gap-y-1 mt-4">
                 {CULTE_OPTIONS.map((c, i) => (
                   <span key={c} className="flex items-center gap-1.5 text-[10px] text-bc-text-secondary font-medium">
-                    <span className={`w-2 h-2 rounded-full ${CULTE_COLORS[i]}`} /> {c}
+                    <span className={`w-2 h-2 rounded-full ${CULTE_COLORS[i]}`} /> {CULTE_SLOT_SHORT[c] ?? c}
                   </span>
                 ))}
               </div>
@@ -1246,6 +1257,7 @@ export default function BloomBusView({
                 <div>
                   <label className="block text-xs font-bold text-bc-text-secondary mb-1.5">Présence au culte</label>
                   <div className="flex flex-wrap gap-2">
+                    {/* Libellé = nom réel du culte de la semaine sélectionnée (nommage par rang du dimanche). */}
                     {CULTE_OPTIONS.map((c) => (
                       <button
                         type="button"
@@ -1253,7 +1265,7 @@ export default function BloomBusView({
                         onClick={() => setCulte(c)}
                         className={`text-xs font-medium px-3 py-1.5 rounded-full border active-scale ${culte === c ? "bg-bc-green text-white border-bc-green" : "bg-white text-bc-text border-bc-border"}`}
                       >
-                        {c}
+                        {culteSlotLabel(c, selectedWeek || undefined)}
                       </button>
                     ))}
                   </div>

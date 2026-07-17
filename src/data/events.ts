@@ -34,6 +34,22 @@ export function eventsOverlap(a: Pick<Event, 'date' | 'time' | 'endTime' | 'bran
 // ---- Génération du jeu canonique d'événements (seeds) ----
 // Ids déterministes par date → reconcileMissingById insère les occurrences manquantes à
 // chaque boot sans dupliquer, et l'horizon avance tout seul.
+// Créneaux de culte du dimanche — la CLÉ est stable (c'est elle qui est stockée dans
+// content.culte des rapports de suivi, et agrégée par les stats) ; le LIBELLÉ affiché
+// est le nom réel du culte de la semaine concernée (Bloom/Super Sunday, Talk Show,
+// Light Sunday/Show…), conformément au nommage par rang du dimanche.
+export const CULTE_SLOT_KEYS = ['1er culte Bloom Church', '2e culte Bloom Church', 'Culte Bloom Light'] as const;
+
+export function culteSlotLabel(slotKey: string, weekIso?: string): string {
+  if (!weekIso) return slotKey;
+  const [y, m, d] = weekIso.split('-').map(Number);
+  const sunday = new Date(y, m - 1, d + 6); // weekIso = lundi → dimanche de la même semaine
+  const sundayIso = iso(sunday);
+  if (slotKey === 'Culte Bloom Light') return sundayName(sundayIso, 'light');
+  const name = sundayName(sundayIso, 'church');
+  return `${name} — ${slotKey.startsWith('1er') ? '1er' : '2e'} culte`;
+}
+
 // Anciens événements seed (avant lot 4) — purgés des bases/localStorage existants.
 export const isLegacySeedEventId = (id: string) => /^evt_[1-5]$/.test(id) || id.startsWith('evt_culte_');
 

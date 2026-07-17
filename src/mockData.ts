@@ -635,7 +635,7 @@ export const INITIAL_NOTIFICATIONS: AppNotification[] = [
     id: 'not_3',
     timestamp: '2026-06-24T18:00:00-07:00',
     title: 'Nouveau Rapport de Culte soumis',
-    message: 'Jean-Marc Kouamé a validé le rapport complet pour le 1er Culte du Dimanche 21 Juin.',
+    message: 'Jean-Marc Kouamé a validé le rapport complet du Bloom Sunday (1er culte).',
     type: 'success',
     read: true,
     branch: 'church'

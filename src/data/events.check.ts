@@ -47,4 +47,13 @@ assert.ok(inside && inside.branch === 'light' && inside.time === '14:00' && insi
 const f = evs.find((e) => e.id === 'evt4_8020_2026-07-17');
 assert.ok(f && f.branch === 'global' && f.time === '19:00' && f.endTime === '20:30');
 
+// culteSlotLabel : clé stable → nom réel du culte de la semaine (semaine du lundi 13/07
+// → dimanche 19/07 = Super Sunday / Light Show).
+import { culteSlotLabel } from './events.ts';
+assert.equal(culteSlotLabel('1er culte Bloom Church', '2026-07-13'), 'Super Sunday — 1er culte');
+assert.equal(culteSlotLabel('2e culte Bloom Church', '2026-07-13'), 'Super Sunday — 2e culte');
+assert.equal(culteSlotLabel('Culte Bloom Light', '2026-07-13'), 'Light Show');
+assert.equal(culteSlotLabel('Culte Bloom Light', '2026-07-20'), 'Super Sunday'); // dimanche 26/07 = dernier
+assert.equal(culteSlotLabel('1er culte Bloom Church'), '1er culte Bloom Church'); // sans semaine → clé brute
+
 console.log('events.check OK');
