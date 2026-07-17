@@ -5,6 +5,7 @@ import { downscaleAndUpload } from "../lib/image";
 import { Avatar } from "./ui/Avatar";
 import { PhotoLightbox } from "./ui/PhotoLightbox";
 import { Modal } from "./ui/Modal";
+import { toast } from "./ui/Toast";
 import { bloomBusRoleOf } from "../data/scope";
 
 // Système ivoirien : primaire → lycée + niveaux du supérieur.
@@ -184,12 +185,12 @@ export default function MemberFormModal({
 
   const handlePhotoUpload = (file: File | undefined) => {
     if (!file) return;
-    downscaleAndUpload(file).then(setAvatarUrl).catch((e) => alert(e.message));
+    downscaleAndUpload(file).then(setAvatarUrl).catch((e) => toast.error(e.message));
   };
 
   const handleUseMyPosition = () => {
     if (!navigator.geolocation) {
-      alert("La géolocalisation n'est pas disponible sur cet appareil.");
+      toast.error("La géolocalisation n'est pas disponible sur cet appareil.");
       return;
     }
     navigator.geolocation.getCurrentPosition(
@@ -197,7 +198,7 @@ export default function MemberFormModal({
         setLat(pos.coords.latitude.toFixed(6));
         setLng(pos.coords.longitude.toFixed(6));
       },
-      () => alert("Impossible d'obtenir la position GPS de l'appareil."),
+      () => toast.error("Impossible d'obtenir la position GPS de l'appareil."),
     );
   };
 
@@ -238,12 +239,12 @@ export default function MemberFormModal({
     e.preventDefault();
 
     if (!firstName || !lastName || !phone) {
-      alert("Veuillez remplir les champs obligatoires (Prénom, Nom, Téléphone).");
+      toast.error("Veuillez remplir les champs obligatoires (Prénom, Nom, Téléphone).");
       return;
     }
 
     if (existingMembers.some((m) => m.phone === phone && m.id !== member?.id)) {
-      alert("Ce numéro de téléphone est déjà utilisé par un autre membre.");
+      toast.error("Ce numéro de téléphone est déjà utilisé par un autre membre.");
       return;
     }
 

@@ -381,7 +381,7 @@ export default function EventsView({
     setAttendeesEnfants(0);
     setCulteRemarques('');
     setPresentServiteurs([]);
-    alert('Comptages enregistrés et Culte clôturé avec succès !');
+    toast.success('Comptages enregistrés et Culte clôturé avec succès !');
   };
 
   if (selectedEvent) {

@@ -8,6 +8,7 @@ import { HealthSmiley } from './ui/HealthSmiley';
 import { Avatar } from './ui/Avatar';
 import { Modal } from './ui/Modal';
 import { ConfirmDialog } from './ui/ConfirmDialog';
+import { toast } from './ui/Toast';
 
 // P4.10 — mode Plein Soleil : même mécanisme que ThemeToggle (classe + localStorage),
 // dupliqué en plus simple ici faute de 2e usage ailleurs. Effets CSS réels : P5.2.
@@ -172,21 +173,21 @@ export default function ProfileView({ operator, simulatedRole, onUpdateMember, o
   const submitPasswordChange = async (e: React.FormEvent) => {
     e.preventDefault();
     if (pwDraft.next !== pwDraft.confirm) {
-      alert('La confirmation ne correspond pas au nouveau mot de passe.');
+      toast.error('La confirmation ne correspond pas au nouveau mot de passe.');
       return;
     }
     const result = await apiChangePassword(pwDraft.current, pwDraft.next);
     if (!result) {
-      alert('Serveur injoignable — le changement de mot de passe nécessite une connexion.');
+      toast.error('Serveur injoignable — le changement de mot de passe nécessite une connexion.');
       return;
     }
     if (!result.ok) {
-      alert(result.error ?? 'Échec du changement de mot de passe.');
+      toast.error(result.error ?? 'Échec du changement de mot de passe.');
       return;
     }
     setShowPasswordModal(false);
     setPwDraft({ current: '', next: '', confirm: '' });
-    alert('Mot de passe modifié.');
+    toast.success('Mot de passe modifié.');
   };
 
   const healthData = [
