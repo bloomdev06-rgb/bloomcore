@@ -21,7 +21,7 @@ import { CULTE_SLOT_KEYS, culteSlotLabel } from "../data/events";
 import { isBusReportLocked } from "../data/reportLock";
 import { toast } from "./ui/Toast";
 import { busInScope, bloomBusRoleOf, fullBloomBusAccess, canFillReportFor, canRegisterMemberViaBloomBus, FULL_SCOPE_ROLES } from "../data/scope";
-import { moissonTotal, busVisitesTotal, busPresenceCulteTotal, busActivitesTotal, periodHealthLevels, periodRange, Period, PeriodInput } from "../data/kpi";
+import { moissonTotal, busVisitesTotal, busPresenceCulteTotal, busActivitesTotal, periodHealthLevels, periodRange, healthEvolutionSeries, Period, PeriodInput } from "../data/kpi";
 import { reportingWindow, weekId, weekLabel, mondaysInRange } from "../data/week";
 import { memberWeekStatus, membersFillRate } from "../data/completude";
 import ReportStatusBoxes from "./ReportStatusBoxes";
@@ -53,29 +53,6 @@ const CULTE_SLOT_SHORT: Record<string, string> = {
   '2e culte Bloom Church': '2ᵉ culte · Church',
   'Culte Bloom Light': 'Culte · Light',
 };
-
-// Rapports rapport_bloom_bus_member → série temporelle moyenne par critère (un point par date de rapport).
-function healthEvolutionSeries(matchReports: Report[]) {
-  const byDate = new Map<string, { spr: number[]; soc: number[]; fin: number[]; phy: number[] }>();
-  [...matchReports]
-    .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime())
-    .forEach((r) => {
-      if (!byDate.has(r.date)) byDate.set(r.date, { spr: [], soc: [], fin: [], phy: [] });
-      const b = byDate.get(r.date)!;
-      b.spr.push(Number(r.content?.sprVal ?? 0));
-      b.soc.push(Number(r.content?.socVal ?? 0));
-      b.fin.push(Number(r.content?.finVal ?? 0));
-      b.phy.push(Number(r.content?.phyVal ?? 0));
-    });
-  const avg = (arr: number[]) => (arr.length ? Math.round((arr.reduce((s, v) => s + v, 0) / arr.length) * 10) / 10 : 0);
-  return Array.from(byDate.entries()).map(([date, b]) => ({
-    date,
-    Spirituelle: avg(b.spr),
-    Sociale: avg(b.soc),
-    Physique: avg(b.phy),
-    Financière: avg(b.fin),
-  }));
-}
 
 // Échelle de santé : choix parmi 5 niveaux (au lieu d'un curseur).
 const RATINGS = [

@@ -401,3 +401,30 @@ export function projectProgress(p: Project): number {
   if (objs.length === 0) return 0;
   return Math.round((objs.filter((o) => o.done).length / objs.length) * 100);
 }
+
+// Rapports rapport_bloom_bus_member → série temporelle moyenne par critère (un point par
+// date de rapport, trié chronologiquement). Plusieurs rapports le même jour sont moyennés ;
+// une valeur absente compte comme 0 (arrondi au dixième). Extrait de BloomBusView (#9/#10).
+export function healthEvolutionSeries(
+  matchReports: Report[],
+): { date: string; Spirituelle: number; Sociale: number; Physique: number; Financière: number }[] {
+  const byDate = new Map<string, { spr: number[]; soc: number[]; fin: number[]; phy: number[] }>();
+  [...matchReports]
+    .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime())
+    .forEach((r) => {
+      if (!byDate.has(r.date)) byDate.set(r.date, { spr: [], soc: [], fin: [], phy: [] });
+      const b = byDate.get(r.date)!;
+      b.spr.push(Number(r.content?.sprVal ?? 0));
+      b.soc.push(Number(r.content?.socVal ?? 0));
+      b.fin.push(Number(r.content?.finVal ?? 0));
+      b.phy.push(Number(r.content?.phyVal ?? 0));
+    });
+  const avg = (arr: number[]) => (arr.length ? Math.round((arr.reduce((s, v) => s + v, 0) / arr.length) * 10) / 10 : 0);
+  return Array.from(byDate.entries()).map(([date, b]) => ({
+    date,
+    Spirituelle: avg(b.spr),
+    Sociale: avg(b.soc),
+    Physique: avg(b.phy),
+    Financière: avg(b.fin),
+  }));
+}

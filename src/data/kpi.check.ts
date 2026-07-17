@@ -3,7 +3,7 @@ import assert from 'node:assert';
 import {
   periodRange, levelToPercent, dominantHealthLevel, isRed, busMobilisationRate,
   moissonTotal, moissonBySource, busVisitesTotal, busPresenceCulteTotal, busActivitesTotal, activeBusIds, activeMemberIds, Period,
-  pendingFollowUps, periodHealthLevels, periodWindows,
+  pendingFollowUps, periodHealthLevels, periodWindows, healthEvolutionSeries,
 } from './kpi';
 import { Member, Report } from '../types';
 
@@ -155,6 +155,27 @@ assert.deepEqual([...activeMemberIds(deptReports, 'week', nowRed)].sort(), ['mem
   // la dernière fenêtre contient bien now
   const last = periodWindows('month', nowRed).at(-1)!;
   assert.ok(nowRed.getTime() >= last.from && nowRed.getTime() < last.to, 'now dans la dernière fenêtre');
+}
+
+// healthEvolutionSeries (extrait de BloomBusView #9/#10) : tri chronologique, moyenne
+// par date, valeur absente = 0, arrondi au dixième.
+{
+  const mk = (id: string, date: string, c: Record<string, number>): Report =>
+    ({ id, date, reportType: 'rapport_bloom_bus_member', content: c } as unknown as Report);
+  const series = healthEvolutionSeries([
+    mk('r2', '2026-01-10', { sprVal: 4, socVal: 2, finVal: 3, phyVal: 5 }),
+    mk('r1', '2026-01-05', { sprVal: 2, socVal: 4, finVal: 1, phyVal: 3 }),
+    mk('r3', '2026-01-10', { sprVal: 3, socVal: 2, finVal: 3 }), // phyVal absent → 0
+  ]);
+  // trié : 01-05 avant 01-10
+  assert.deepStrictEqual(series.map((p) => p.date), ['2026-01-05', '2026-01-10'], 'série triée chronologiquement');
+  // 01-05 (un seul rapport) = valeurs brutes
+  assert.strictEqual(series[0].Spirituelle, 2);
+  assert.strictEqual(series[0].Financière, 1);
+  // 01-10 : moyenne de 2 rapports — spr (4+3)/2=3.5 ; phy (5+0)/2=2.5 (absent compté 0)
+  assert.strictEqual(series[1].Spirituelle, 3.5, 'moyenne des rapports du même jour');
+  assert.strictEqual(series[1].Physique, 2.5, 'valeur absente comptée 0 dans la moyenne');
+  assert.deepStrictEqual(healthEvolutionSeries([]), [], 'aucun rapport → série vide');
 }
 
 console.log('kpi.check OK');
