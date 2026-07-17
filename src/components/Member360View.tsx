@@ -240,7 +240,7 @@ export default function Member360View({ member, onClose, onEdit, onUpdate, repor
                       <ResponsiveContainer width="100%" height="100%">
                         <LineChart data={healthHistory} margin={{ top: 4, right: 4, left: 4, bottom: 0 }}>
                           <YAxis domain={[1, 5]} hide />
-                          <Tooltip labelFormatter={(d) => d} formatter={(v: number) => [v, c.key]} />
+                          <Tooltip labelFormatter={(d) => d} formatter={(v) => [v, c.key]} />
                           <Line type="monotone" dataKey={c.key} stroke={c.color} strokeWidth={2} dot={{ r: 2 }} />
                         </LineChart>
                       </ResponsiveContainer>

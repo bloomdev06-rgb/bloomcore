@@ -153,6 +153,10 @@ export default function MemberFormModal({
       setBusZone("");
       setSelectedBloomBusId("");
     }
+    // busLines volontairement hors deps : cet effet RÉINITIALISE tout le formulaire, on ne veut
+    // le rejouer qu'à l'ouverture/au changement de membre — pas quand bus_lines se resynchronise
+    // (ça effacerait les saisies en cours). busLines n'est lu que pour semer busZone au montage.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, member, lockDepartmentId, activeBranch]);
 
   // Enregistrement direct Bloom Bus : pré-remplit Commune/Zone/Bus depuis le bus de

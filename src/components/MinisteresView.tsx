@@ -111,6 +111,7 @@ function TuteurSearch({ valueLabel, candidates, onSelect }: {
 
 export default function MinisteresView({ activeBranch, simulatedRole, members, reports = [], operator, departments, onUpdateDepartments, onAddAuditLog }: MinisteresViewProps) {
   const seedMinistries = useMinistries();
+  const allProjects = useProjects(); // hissé au top (react-hooks) : était appelé dans if (selected)
   const isChurch = activeBranch === 'church';
   const canEdit = ['Pasteur', 'Admin', 'Super Admin'].includes(simulatedRole);
   // Les autres profils voient la liste des ministères (et leurs départements) mais ne peuvent pas ouvrir le détail.
@@ -231,7 +232,7 @@ export default function MinisteresView({ activeBranch, simulatedRole, members, r
     const ministryRedCount = ministryMembers.filter(m => isRed(m)).length;
     const ministryGrowthData = weeklyGrowthSeries(ministryMembers, ministryReports, effectivePeriod);
     const ministryActivities = load('bc_activities', activitiesSeed).filter(a => mDeptIds.includes(a.departmentId));
-    const ministryProjects = useProjects().filter(p => p.status === 'En cours' && p.scope === 'ministry' && p.ministryId === selected.id);
+    const ministryProjects = allProjects.filter(p => p.status === 'En cours' && p.scope === 'ministry' && p.ministryId === selected.id);
 
     return (
       <div className="space-y-6 animate-in slide-in-from-right-4 duration-300">

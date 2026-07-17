@@ -109,6 +109,18 @@ interface ProfileViewProps {
 
 export default function ProfileView({ operator, simulatedRole, onUpdateMember, onDeleteMember, onLogout }: ProfileViewProps) {
   const departments = useDepartments();
+  // TOUS les hooks AVANT l'early-return `!operator` (react-hooks/rules-of-hooks) : sinon leur
+  // nombre change d'un rendu à l'autre quand operator passe de undefined à défini (chargement
+  // async des membres) → « rendered fewer hooks than expected », crash. blankDraft est rendu
+  // null-safe pour l'initialiseur du premier rendu où operator peut être absent.
+  const blankDraft = () => ({ email: operator?.email, phone: operator?.phone, profession: operator?.profession, commune: operator?.gps?.commune ?? '', baptismDate: operator?.baptismDate ?? '' });
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(blankDraft);
+  const [showPasswordModal, setShowPasswordModal] = useState(false);
+  const [sessions, setSessions] = useState(currentSession);
+  const [revokingSessionId, setRevokingSessionId] = useState<string | null>(null);
+  const [confirmingSelfDelete, setConfirmingSelfDelete] = useState(false);
+  const [pwDraft, setPwDraft] = useState({ current: '', next: '', confirm: '' });
   // E1 — si aucun membre chargé (serveur renvoyant members: []), operator est undefined :
   // early-return plutôt que de crasher sur operator.firstName / operator.departments.
   if (!operator) {
@@ -125,11 +137,7 @@ export default function ProfileView({ operator, simulatedRole, onUpdateMember, o
   }
   const initials = `${operator.firstName[0] ?? ''}${operator.lastName[0] ?? ''}`.toUpperCase();
 
-  // Self-service editing of own contact info (identity/role/departments stay admin-managed).
-  const [editing, setEditing] = useState(false);
-  const blankDraft = () => ({ email: operator.email, phone: operator.phone, profession: operator.profession, commune: operator.gps?.commune ?? '', baptismDate: operator.baptismDate ?? '' });
-  const [draft, setDraft] = useState(blankDraft);
-
+  // Édition self-service des coordonnées (état/hooks remontés avant l'early-return ci-dessus).
   // An already-recorded baptism (status + date) is the Baptism department's official record → locked.
   const officialBaptism = operator.baptismStatus === 'Baptisé' && !!operator.baptismDate;
 
@@ -159,13 +167,8 @@ export default function ProfileView({ operator, simulatedRole, onUpdateMember, o
   const toggleNotifChannel = (key: keyof NotifChannels) =>
     onUpdateMember({ ...operator, notifChannels: { ...notifChannels, [key]: !notifChannels[key] } });
 
-  // Phase 5 — changement de mot de passe réel via POST /auth/change-password.
-  // Backend injoignable → message hors-ligne, rien n'est modifié.
-  const [showPasswordModal, setShowPasswordModal] = useState(false);
-  const [sessions, setSessions] = useState(currentSession);
-  const [revokingSessionId, setRevokingSessionId] = useState<string | null>(null);
-  const [confirmingSelfDelete, setConfirmingSelfDelete] = useState(false);
-  const [pwDraft, setPwDraft] = useState({ current: '', next: '', confirm: '' });
+  // Phase 5 — changement de mot de passe réel via POST /auth/change-password (état remonté
+  // avant l'early-return). Backend injoignable → message hors-ligne, rien n'est modifié.
   const submitPasswordChange = async (e: React.FormEvent) => {
     e.preventDefault();
     if (pwDraft.next !== pwDraft.confirm) {

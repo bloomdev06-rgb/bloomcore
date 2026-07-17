@@ -28,7 +28,7 @@ export default function MiniCalendar({ events = [] }: { events?: Event[] }) {
   const firstDay = getFirstDayOfMonth(currentDate.getFullYear(), currentDate.getMonth());
   const monthName = currentDate.toLocaleString('fr-FR', { month: 'long', year: 'numeric' });
 
-  const days = [];
+  const days: React.ReactNode[] = [];
   // Adjust for Monday start instead of Sunday
   const emptyDays = firstDay === 0 ? 6 : firstDay - 1;
   

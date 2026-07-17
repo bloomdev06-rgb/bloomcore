@@ -178,7 +178,6 @@ export default function App() {
       // effets de persistance du montage n'écrasent des données serveur plus fraîches.
       enableSync();
     });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loggedInMemberId]);
 
   const handleLogout = () => {
