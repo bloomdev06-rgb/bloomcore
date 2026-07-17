@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Branch, Member, AuditLog, AppNotification, AdminAccount } from '../types';
 import { load, save } from '../data';
+import { DEFAULT_OPERATOR_NAME } from '../data/operator';
 import { INITIAL_ADMINS } from '../mockData';
 import { UserCog, ShieldAlert, History, X, AlertTriangle, Check } from 'lucide-react';
 import { motion } from 'motion/react';
@@ -46,7 +47,7 @@ export default function AccountsView({ activeBranch, simulatedRole, members, aud
     id: `aud_adm_${actionType}_${Date.now()}`,
     timestamp: new Date().toISOString(),
     actionType,
-    operatorName: 'Affeny Grah',
+    operatorName: DEFAULT_OPERATOR_NAME,
     operatorId: 'mem_1',
     details,
   });

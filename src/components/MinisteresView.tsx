@@ -2,12 +2,14 @@ import React, { useState, useEffect } from 'react';
 import { Branch, Ministry, Member, Report, Department, AuditLog } from '../types';
 import { Grid, ChevronRight, Users, Folder, ArrowLeft, BarChart3, GripVertical, Plus, X, Flame, Palette, MonitorSpeaker, HeartHandshake, Rocket, Network, BookOpen, TrendingUp, Sparkles, Clock, AlertCircle, Calendar, FolderKanban, Trash2 } from 'lucide-react';
 import { useMinistries, useProjects, load, save, activitiesSeed } from '../data';
+import { DEFAULT_OPERATOR_NAME } from '../data/operator';
 import {
   activeMemberIds, dominantHealthLevel, isRed, moissonBySource, ojTotal,
   pendingFollowUps, periodRange, projectProgress, Period, PeriodInput, weeklyActiveCounts, weeklyBaptismCounts,
   weeklyGrowthSeries, weeklyMoissonCounts, weeklyOjCounts,
 } from '../data/kpi';
 import { HealthSmiley } from './ui/HealthSmiley';
+import { PeriodSelector } from './ui/PeriodSelector';
 import { Modal } from './ui/Modal';
 import { ConfirmDialog } from './ui/ConfirmDialog';
 import { motion } from 'motion/react';
@@ -147,7 +149,7 @@ export default function MinisteresView({ activeBranch, simulatedRole, members, r
       id: `aud_min_del_${Date.now()}`,
       timestamp: new Date().toISOString(),
       actionType: 'MINISTRY_DELETED',
-      operatorName: 'Affeny Grah',
+      operatorName: DEFAULT_OPERATOR_NAME,
       operatorId: 'mem_1',
       details: `Suppression du ministère "${ministry.name}".`,
       branch: activeBranch !== 'global' ? activeBranch : undefined,
@@ -163,7 +165,7 @@ export default function MinisteresView({ activeBranch, simulatedRole, members, r
       id: `aud_dept_move_${Date.now()}`,
       timestamp: new Date().toISOString(),
       actionType: 'DEPARTMENT_REASSIGNED',
-      operatorName: 'Affeny Grah',
+      operatorName: DEFAULT_OPERATOR_NAME,
       operatorId: 'mem_1',
       details: `Département "${dept?.name ?? deptId}" réaffecté de "${fromMinistry?.name ?? '—'}" à "${toMinistry?.name ?? '—'}".`,
       previousValue: fromMinistry?.name,
@@ -277,28 +279,14 @@ export default function MinisteresView({ activeBranch, simulatedRole, members, r
 
         {/* Sélecteur de période — mêmes options que l'Accueil/Départements, pilote Baptisés/Moisson/OJ ci-dessous */}
         <div className="flex justify-end">
-          <div className="flex items-center gap-2">
-            <select
-              value={period}
-              onChange={(e) => setPeriod(e.target.value as Period)}
-              className="bg-white border border-bc-border text-bc-text rounded-full px-4 py-2 text-xs font-bold focus:outline-none focus:ring-1 focus:ring-bc-green cursor-pointer"
-            >
-              <option value="week">Cette Semaine</option>
-              <option value="month">Ce Mois</option>
-              <option value="quarter">Ce Trimestre</option>
-              <option value="year">Cette Année</option>
-              <option value="custom">Personnalisé</option>
-            </select>
-            {period === 'custom' && (
-              <div className="flex items-center gap-2">
-                <input type="date" value={customFrom} onChange={e => setCustomFrom(e.target.value)}
-                  className="bg-white border border-bc-border text-bc-text rounded-full px-3 py-1.5 text-xs font-bold focus:outline-none focus:ring-1 focus:ring-bc-green cursor-pointer" />
-                <span className="text-bc-text-secondary text-xs">→</span>
-                <input type="date" value={customTo} onChange={e => setCustomTo(e.target.value)}
-                  className="bg-white border border-bc-border text-bc-text rounded-full px-3 py-1.5 text-xs font-bold focus:outline-none focus:ring-1 focus:ring-bc-green cursor-pointer" />
-              </div>
-            )}
-          </div>
+          <PeriodSelector
+            period={period}
+            onPeriodChange={setPeriod}
+            customFrom={customFrom}
+            customTo={customTo}
+            onCustomFromChange={setCustomFrom}
+            onCustomToChange={setCustomTo}
+          />
         </div>
 
         {/* KPI Row — mêmes tuiles que l'Accueil/Départements, scopées aux départements de ce ministère */}
@@ -560,7 +548,7 @@ export default function MinisteresView({ activeBranch, simulatedRole, members, r
                   id: `aud_min_${Date.now()}`,
                   timestamp: new Date().toISOString(),
                   actionType: 'MINISTRY_CREATED',
-                  operatorName: 'Affeny Grah',
+                  operatorName: DEFAULT_OPERATOR_NAME,
                   operatorId: 'mem_1',
                   details: `Création du ministère "${newName.trim()}".`,
                   branch: activeBranch !== 'global' ? activeBranch : undefined,

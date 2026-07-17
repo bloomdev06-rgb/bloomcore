@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { motion } from 'motion/react';
 import { Member, Branch, IntegrationFollowStatus } from '../types';
 import { useDepartments, load, save } from '../data';
+import { DEFAULT_OPERATOR_NAME } from '../data/operator';
 import { Search, Filter, ClipboardCheck, Phone, ChevronRight, Check, Send, ShieldAlert } from 'lucide-react';
 import { Avatar } from './ui/Avatar';
 import { staggerParent, staggerItem } from './ui/motion';
@@ -122,7 +123,7 @@ export default function NouveauxView({ members, onUpdateMember, activeBranch, si
     const report: IntegrationReport = {
       id: `ir_${selected.id}_${Date.now()}`,
       memberId: selected.id,
-      authorName: 'Affeny Grah',
+      authorName: DEFAULT_OPERATOR_NAME,
       date: new Date().toISOString().slice(0, 10),
       status: draftStatus,
       contactEstablished: draftContact,

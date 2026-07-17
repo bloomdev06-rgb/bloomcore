@@ -11,6 +11,7 @@ import { ROLE_HOME_DEPT } from '../data/scope';
 import { motion } from 'motion/react';
 import { AreaChart, Area, XAxis, Tooltip, ResponsiveContainer } from 'recharts';
 import { ResponsiveChart } from './ui/ResponsiveChart';
+import { PeriodSelector } from './ui/PeriodSelector';
 import { staggerParent, staggerItem } from './ui/motion';
 import { Avatar } from './ui/Avatar';
 import { Modal } from './ui/Modal';
@@ -409,28 +410,14 @@ export default function DepartmentsView({ activeBranch, simulatedRole, members =
                   )}
                   {/* Sélecteur de période — mêmes options que l'Accueil, pilote Baptisés/Moisson/OJ ci-dessous */}
                   <div className="flex justify-end">
-                    <div className="flex items-center gap-2">
-                      <select
-                        value={period}
-                        onChange={(e) => setPeriod(e.target.value as Period)}
-                        className="bg-white border border-bc-border text-bc-text rounded-full px-4 py-2 text-xs font-bold focus:outline-none focus:ring-1 focus:ring-bc-green cursor-pointer"
-                      >
-                        <option value="week">Cette Semaine</option>
-                        <option value="month">Ce Mois</option>
-                        <option value="quarter">Ce Trimestre</option>
-                        <option value="year">Cette Année</option>
-                        <option value="custom">Personnalisé</option>
-                      </select>
-                      {period === 'custom' && (
-                        <div className="flex items-center gap-2">
-                          <input type="date" value={customFrom} onChange={e => setCustomFrom(e.target.value)}
-                            className="bg-white border border-bc-border text-bc-text rounded-full px-3 py-1.5 text-xs font-bold focus:outline-none focus:ring-1 focus:ring-bc-green cursor-pointer" />
-                          <span className="text-bc-text-secondary text-xs">→</span>
-                          <input type="date" value={customTo} onChange={e => setCustomTo(e.target.value)}
-                            className="bg-white border border-bc-border text-bc-text rounded-full px-3 py-1.5 text-xs font-bold focus:outline-none focus:ring-1 focus:ring-bc-green cursor-pointer" />
-                        </div>
-                      )}
-                    </div>
+                    <PeriodSelector
+                      period={period}
+                      onPeriodChange={setPeriod}
+                      customFrom={customFrom}
+                      customTo={customTo}
+                      onCustomFromChange={setCustomFrom}
+                      onCustomToChange={setCustomTo}
+                    />
                   </div>
 
                   {/* KPI Row — mêmes tuiles que l'Accueil, scopées au département (pas de tuile Bloom Bus : les

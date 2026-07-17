@@ -26,6 +26,7 @@ import { reportingWindow, weekId, weekLabel, mondaysInRange } from "../data/week
 import { memberWeekStatus, membersFillRate } from "../data/completude";
 import ReportStatusBoxes from "./ReportStatusBoxes";
 import { ResponsiveChart } from "./ui/ResponsiveChart";
+import { PeriodSelector } from "./ui/PeriodSelector";
 import { HEALTH_AXES, Ring } from "./DashboardView";
 import { HealthSmiley } from "./ui/HealthSmiley";
 import { motion } from "motion/react";
@@ -737,28 +738,14 @@ export default function BloomBusView({
             )}
           </div>
           {!isMembre && (
-            <div className="flex items-center gap-2">
-              <select
-                value={period}
-                onChange={(e) => setPeriod(e.target.value as Period)}
-                className="bg-white border border-bc-border text-bc-text rounded-full px-4 py-2 text-xs font-bold focus:outline-none focus:ring-1 focus:ring-bc-green cursor-pointer"
-              >
-                <option value="week">Cette Semaine</option>
-                <option value="month">Ce Mois</option>
-                <option value="quarter">Ce Trimestre</option>
-                <option value="year">Cette Année</option>
-                <option value="custom">Personnalisé</option>
-              </select>
-              {period === "custom" && (
-                <div className="flex items-center gap-2">
-                  <input type="date" value={customFrom} onChange={(e) => setCustomFrom(e.target.value)}
-                    className="bg-white border border-bc-border text-bc-text rounded-full px-3 py-1.5 text-xs font-bold focus:outline-none focus:ring-1 focus:ring-bc-green cursor-pointer" />
-                  <span className="text-bc-text-secondary text-xs">→</span>
-                  <input type="date" value={customTo} onChange={(e) => setCustomTo(e.target.value)}
-                    className="bg-white border border-bc-border text-bc-text rounded-full px-3 py-1.5 text-xs font-bold focus:outline-none focus:ring-1 focus:ring-bc-green cursor-pointer" />
-                </div>
-              )}
-            </div>
+            <PeriodSelector
+              period={period}
+              onPeriodChange={setPeriod}
+              customFrom={customFrom}
+              customTo={customTo}
+              onCustomFromChange={setCustomFrom}
+              onCustomToChange={setCustomTo}
+            />
           )}
         </div>
 

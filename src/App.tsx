@@ -3,6 +3,7 @@ import { load, save, seeds, useDepartments, useMinistries, useBusLines, useAdmin
 import { resolveMemberRole } from './data/roles';
 import { MEMBERS_TAB_DEPT_ONLY_ROLES } from './data/scope';
 import { isLegacySeedEventId } from './data/events';
+import { DEFAULT_OPERATOR_NAME, operatorDisplayName } from './data/operator';
 import { MULTI_BRANCH_ROLES, GLOBAL_VIEW_ROLES } from './data/scope';
 
 import {
@@ -285,7 +286,7 @@ export default function App() {
       id: genId('aud_reg'),
       timestamp: new Date().toISOString(),
       actionType: enriched.level === 'Nouveau' ? 'MEMBER_REGISTERED_ADN' : 'MEMBER_CREATED_MANUAL',
-      operatorName: operator ? `${operator.firstName} ${operator.lastName}` : 'Affeny Grah',
+      operatorName: operatorDisplayName(operator),
       operatorId: operator?.id ?? 'mem_1',
       details: `Création du profil de ${enriched.firstName} ${enriched.lastName} (${enriched.level}).`,
       branch: enriched.branch
@@ -307,7 +308,7 @@ export default function App() {
         id: genId('aud_dup'),
         timestamp: new Date().toISOString(),
         actionType: 'MEMBER_DUPLICATE_FLAGGED',
-        operatorName: operator ? `${operator.firstName} ${operator.lastName}` : 'Affeny Grah',
+        operatorName: operatorDisplayName(operator),
         operatorId: operator?.id ?? 'mem_1',
         details: `${enriched.firstName} ${enriched.lastName} signalé(e) doublon potentiel avec ${dupe.firstName} ${dupe.lastName} (${dupe.id}).`,
         branch: enriched.branch,
@@ -356,7 +357,7 @@ export default function App() {
       id: genId('aud_upd'),
       timestamp: new Date().toISOString(),
       actionType: isPromotion ? 'MEMBER_PROMOTED' : isBranchTransfer ? 'BRANCH_TRANSFER' : isDrachmeChange ? 'MEMBER_DRACHME_FLAGGED' : 'MEMBER_PROFILE_UPDATED',
-      operatorName: operator ? `${operator.firstName} ${operator.lastName}` : 'Affeny Grah',
+      operatorName: operatorDisplayName(operator),
       operatorId: operator?.id ?? 'mem_1',
       details: isPromotion
         ? `Promotion de ${m.firstName} ${m.lastName} : ${before!.pastoralCursus} → ${m.pastoralCursus}.`
@@ -385,7 +386,7 @@ export default function App() {
       id: genId('aud_del'),
       timestamp: new Date().toISOString(),
       actionType: isSelf ? 'MEMBER_SELF_DELETED' : 'MEMBER_DELETED',
-      operatorName: operator ? `${operator.firstName} ${operator.lastName}` : 'Affeny Grah',
+      operatorName: operatorDisplayName(operator),
       operatorId: operator?.id ?? 'mem_1',
       details: `Suppression du profil de ${target.firstName} ${target.lastName}.`,
       branch: target.branch,
@@ -484,7 +485,7 @@ export default function App() {
         id: genId('aud_perm'),
         timestamp: new Date().toISOString(),
         actionType: 'ROLE_PERMISSION_UPDATED',
-        operatorName: 'Affeny Grah',
+        operatorName: DEFAULT_OPERATOR_NAME,
         operatorId: 'mem_1',
         details: `Modification de l'habilitation "${capability}" pour le rôle "${role}".`,
         previousValue: current ? 'true' : 'false',

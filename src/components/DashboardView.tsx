@@ -3,6 +3,7 @@ import { Branch, Member, Event, Report } from '../types';
 import { Users, Bus, TrendingUp, AlertCircle, Clock, X, FolderKanban, Sparkles } from 'lucide-react';
 import { AreaChart, Area, XAxis, Tooltip, ResponsiveContainer } from 'recharts';
 import { ResponsiveChart } from './ui/ResponsiveChart';
+import { PeriodSelector } from './ui/PeriodSelector';
 import { motion } from 'motion/react';
 import MiniCalendar from './MiniCalendar';
 import { HealthSmiley } from './ui/HealthSmiley';
@@ -229,28 +230,15 @@ export default function DashboardView({ activeBranch, simulatedRole, members = [
               </p>
             </div>
             
-            <div className="flex flex-col md:flex-row md:items-center gap-2">
-              <select
-                value={period}
-                onChange={(e) => setPeriod(e.target.value as Period)}
-                className="bg-white/10 border border-white/20 text-white rounded-full px-4 py-2 text-xs font-bold focus:outline-none focus:ring-1 focus:ring-white w-full md:w-auto cursor-pointer"
-              >
-                <option value="week">Cette Semaine</option>
-                <option value="month">Ce Mois</option>
-                <option value="quarter">Ce Trimestre</option>
-                <option value="year">Cette Année</option>
-                <option value="custom">Personnalisé</option>
-              </select>
-              {period === 'custom' && (
-                <div className="flex items-center gap-2">
-                  <input type="date" value={customFrom} onChange={e => setCustomFrom(e.target.value)}
-                    className="bg-white/10 border border-white/20 text-white rounded-full px-3 py-1.5 text-xs font-bold focus:outline-none focus:ring-1 focus:ring-white cursor-pointer [color-scheme:dark]" />
-                  <span className="text-white/60 text-xs">→</span>
-                  <input type="date" value={customTo} onChange={e => setCustomTo(e.target.value)}
-                    className="bg-white/10 border border-white/20 text-white rounded-full px-3 py-1.5 text-xs font-bold focus:outline-none focus:ring-1 focus:ring-white cursor-pointer [color-scheme:dark]" />
-                </div>
-              )}
-            </div>
+            <PeriodSelector
+              variant="dark"
+              period={period}
+              onPeriodChange={setPeriod}
+              customFrom={customFrom}
+              customTo={customTo}
+              onCustomFromChange={setCustomFrom}
+              onCustomToChange={setCustomTo}
+            />
           </div>
           <div className="absolute right-0 top-0 w-64 h-full bg-gradient-to-l from-white/10 to-transparent pointer-events-none" />
         </motion.div>

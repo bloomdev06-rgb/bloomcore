@@ -6,6 +6,7 @@ import { downscaleAndUpload } from '../lib/image';
 import { adnByEvent } from '../data/adn';
 import { Period, PeriodInput } from '../data/kpi';
 import { Avatar } from './ui/Avatar';
+import { PeriodSelector } from './ui/PeriodSelector';
 import { toast } from './ui/Toast';
 import Member360View from './Member360View';
 import { Modal } from './ui/Modal';
@@ -478,21 +479,14 @@ export default function AdnView({
             <h3 className="text-base font-ui font-bold text-bc-text flex items-center gap-2">
               <BarChart3 size={18} /> Nouveaux & OJ par culte / événement
             </h3>
-            <div className="flex items-center gap-2 flex-wrap">
-              <select id="adn-period-select" value={period} onChange={(e) => setPeriod(e.target.value as Period)} className="border border-bc-border rounded-full text-xs py-2 px-3 bg-white focus:outline-none">
-                <option value="week">Cette Semaine</option>
-                <option value="month">Ce Mois</option>
-                <option value="quarter">Ce Trimestre</option>
-                <option value="year">Cette Année</option>
-                <option value="custom">Personnalisé</option>
-              </select>
-              {period === 'custom' && (
-                <>
-                  <input type="date" value={customFrom} onChange={(e) => setCustomFrom(e.target.value)} className="border border-bc-border rounded-full text-xs py-1.5 px-3 bg-white" />
-                  <input type="date" value={customTo} onChange={(e) => setCustomTo(e.target.value)} className="border border-bc-border rounded-full text-xs py-1.5 px-3 bg-white" />
-                </>
-              )}
-            </div>
+            <PeriodSelector
+              period={period}
+              onPeriodChange={setPeriod}
+              customFrom={customFrom}
+              customTo={customTo}
+              onCustomFromChange={setCustomFrom}
+              onCustomToChange={setCustomTo}
+            />
           </div>
 
           {rows.length === 0 ? (

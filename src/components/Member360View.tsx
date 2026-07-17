@@ -2,6 +2,7 @@ import React, { useState, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { Member, Branch, Report, AuditLog, PermissionMatrix, Delegation, FormDef } from '../types';
 import { useDepartments, useBusLines, useProjects, load, hasCapability } from '../data';
+import { DEFAULT_OPERATOR_NAME } from '../data/operator';
 import { isRed } from '../data/kpi';
 import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend } from 'recharts';
 import { X, Edit, Phone, Mail, Compass, ShieldAlert, Activity, User, Briefcase, Calendar, MapPin, Database, ArrowRight, Clock, CheckCircle2, Coins } from 'lucide-react';
@@ -86,7 +87,7 @@ export default function Member360View({ member, onClose, onEdit, onUpdate, repor
     onAddReport?.({
       id: `rep_coach_${Date.now()}`,
       authorId: 'mem_1',
-      authorName: 'Affeny Grah', // ponytail: opérateur figé tant que l'auth n'est pas là, cf. DepartmentsView
+      authorName: DEFAULT_OPERATOR_NAME, // ponytail: opérateur figé tant que l'auth n'est pas là
       authorRole: simulatedRole,
       targetBranch: member.branch,
       date: new Date().toISOString().split('T')[0],

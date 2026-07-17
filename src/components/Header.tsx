@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Bell, Search, RefreshCw, Layers, CheckCircle, ShieldAlert, Heart, Calendar, Menu, X } from 'lucide-react';
 import { Branch, AppNotification, Member } from '../types';
+import { operatorDisplayName } from '../data/operator';
 import { MULTI_BRANCH_ROLES, GLOBAL_VIEW_ROLES } from '../data/scope';
 import { ThemeToggle } from './ui/theme-toggle';
 import { Avatar } from './ui/Avatar';
@@ -48,7 +49,7 @@ export default function Header({
   const canSwitchBranch = MULTI_BRANCH_ROLES.includes(simulatedRole);
   const canGlobalView = GLOBAL_VIEW_ROLES.includes(simulatedRole);
   const operatorInitials = operator ? `${operator.firstName[0]}${operator.lastName[0]}` : 'AG';
-  const operatorName = operator ? `${operator.firstName} ${operator.lastName}` : 'Affeny Grah';
+  const operatorName = operatorDisplayName(operator);
 
   const renderNotifList = (list: AppNotification[]) => list.length === 0 ? (
     <div className="p-6 text-center text-xs text-bc-text-secondary">Aucune notification.</div>
