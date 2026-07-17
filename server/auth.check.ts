@@ -1,7 +1,7 @@
 // Vérifications auth — exécuter : npx tsx server/auth.check.ts
 import assert from 'node:assert';
 process.env.BLOOMCORE_DB = ':memory:';
-const { hashPassword, verifyPassword, signToken, verifyToken, createOneTimeToken, consumeOneTimeToken, upsertCredentials } = await import('./auth.ts');
+const { hashPassword, verifyPassword, signToken, verifyToken, createOneTimeToken, consumeOneTimeToken, upsertCredentials, resolveBindHost } = await import('./auth.ts');
 const { db } = await import('./db.ts');
 
 // --- hash / verify ---
@@ -42,5 +42,13 @@ assert.equal(verifyToken(tokV0), 'mem_rev', 'token émis à la version courante 
 upsertCredentials('mem_rev', 'p1');                 // UPDATE → version 1
 assert.equal(verifyToken(tokV0), null, 'token pré-changement révoqué (#11)');
 assert.equal(verifyToken(signToken('mem_rev')), 'mem_rev', 'token réémis après changement = valide');
+
+// resolveBindHost : secret fort → dual-stack '::' (jamais '0.0.0.0' IPv4-seul, sinon le
+// healthcheck `wget localhost`→::1 est refusé) ; secret faible → loopback IPv4 ; override gagne.
+assert.strictEqual(resolveBindHost(false), '::', 'secret fort → dual-stack');
+assert.strictEqual(resolveBindHost(true), '127.0.0.1', 'secret faible → loopback');
+assert.notStrictEqual(resolveBindHost(false), '0.0.0.0', 'jamais IPv4-seul en prod');
+assert.strictEqual(resolveBindHost(false, '10.0.0.5'), '10.0.0.5', 'API_HOST override');
+assert.strictEqual(resolveBindHost(true, '0.0.0.0'), '0.0.0.0', 'override gagne même en insecure');
 
 console.log('auth.check OK');

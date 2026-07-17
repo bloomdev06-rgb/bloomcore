@@ -12,7 +12,7 @@ import { fileURLToPath } from 'node:url';
 import express from 'express';
 import compression from 'compression';
 import { db, getCollection, setCollection, appendToCollection, getKv, setKv } from './db.ts';
-import { hashPassword, verifyPassword, signToken, verifyToken, createOneTimeToken, consumeOneTimeToken, upsertCredentials, requireSecret, usingInsecureSecret } from './auth.ts';
+import { hashPassword, verifyPassword, signToken, verifyToken, createOneTimeToken, consumeOneTimeToken, upsertCredentials, requireSecret, usingInsecureSecret, resolveBindHost } from './auth.ts';
 import { ensureSeeded } from './seed.ts';
 import { applyWrite, readCollection, GuardError } from './guards.ts';
 import { buildContext, assertCanWrite, filterReadable, preservedIds, RbacContext } from './rbac.ts';
@@ -488,10 +488,11 @@ const PORT = Number(process.env.API_PORT) || 4000;
 // Sans secret fort, on n'écoute que sur loopback : le dev local passe par le proxy Vite
 // (localhost) donc rien ne casse, mais un déploiement qui a oublié NODE_ENV/AUTH_SECRET
 // devient injoignable de l'extérieur (échec visible) plutôt que de servir des tokens forgeables.
-const HOST = process.env.API_HOST || (usingInsecureSecret ? '127.0.0.1' : '0.0.0.0');
+const HOST = resolveBindHost(usingInsecureSecret, process.env.API_HOST);
 app.listen(PORT, HOST, () => {
   const mode = usingInsecureSecret ? 'DEV — secret NON sécurisé (loopback seul)' : 'PROD — secret fort';
-  console.log(`BloomCore API [${mode}] http://${HOST}:${PORT}/api/v1`);
+  const shown = HOST === '::' ? 'localhost' : HOST;
+  console.log(`BloomCore API [${mode}] http://${shown}:${PORT}/api/v1`);
   if (usingInsecureSecret && HOST !== '127.0.0.1') {
     console.warn('⚠️  AUTH_SECRET absent/faible mais écoute réseau ouverte — définissez AUTH_SECRET (≥16 c.) ou NODE_ENV=production.');
   }

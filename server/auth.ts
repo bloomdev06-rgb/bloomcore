@@ -21,6 +21,15 @@ const TOKEN_SECRET = requireSecret('AUTH_SECRET', ['change-me', 'bloomcore-dev-s
 // Vrai quand aucun secret fort n'a été fourni (repli dev déterministe). Un serveur dans
 // cet état ne doit PAS être joignable depuis le réseau : ses tokens sont forgeables.
 export const usingInsecureSecret = TOKEN_SECRET.startsWith('dev-insecure-');
+
+// Adresse d'écoute. Secret fort → '::' (dual-stack : accepte IPv4 ET IPv6, y compris
+// ::1). NE PAS utiliser '0.0.0.0' : il n'écoute qu'en IPv4, or le healthcheck Docker fait
+// `wget localhost` qui résout ::1 en premier sur Alpine → « connection refused » alors que
+// le serveur tourne. Secret faible → loopback IPv4 seul (injoignable du réseau = échec
+// visible d'un déploiement qui a oublié AUTH_SECRET, plutôt que des tokens forgeables exposés).
+export function resolveBindHost(insecure: boolean, override?: string): string {
+  return override || (insecure ? '127.0.0.1' : '::');
+}
 const TOKEN_TTL_MS = 12 * 60 * 60 * 1000; // 12h
 
 export function hashPassword(password: string): string {
