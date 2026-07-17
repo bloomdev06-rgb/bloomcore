@@ -35,4 +35,12 @@ const row = db.prepare('SELECT password_hash FROM credentials WHERE member_id = 
 assert.ok(verifyPassword('second', row.password_hash), 'upsert remplace le hash');
 assert.ok(!verifyPassword('premier', row.password_hash), 'ancien mot de passe invalide');
 
+// #11 — révocation des tokens au changement de mot de passe via pwd_version.
+upsertCredentials('mem_rev', 'p0');                 // INSERT → version 0
+const tokV0 = signToken('mem_rev');
+assert.equal(verifyToken(tokV0), 'mem_rev', 'token émis à la version courante = valide');
+upsertCredentials('mem_rev', 'p1');                 // UPDATE → version 1
+assert.equal(verifyToken(tokV0), null, 'token pré-changement révoqué (#11)');
+assert.equal(verifyToken(signToken('mem_rev')), 'mem_rev', 'token réémis après changement = valide');
+
 console.log('auth.check OK');

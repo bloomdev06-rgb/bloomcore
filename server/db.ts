@@ -28,7 +28,8 @@ db.exec(`
   );
   CREATE TABLE IF NOT EXISTS credentials (
     member_id TEXT PRIMARY KEY,
-    password_hash TEXT NOT NULL
+    password_hash TEXT NOT NULL,
+    pwd_version INTEGER NOT NULL DEFAULT 0
   );
   CREATE TABLE IF NOT EXISTS tokens (
     token TEXT PRIMARY KEY,
@@ -63,6 +64,12 @@ db.exec(`
   );
   CREATE INDEX IF NOT EXISTS idx_outbox_status ON outbox(status);
 `);
+
+// Migration idempotente : pwd_version pour révoquer les tokens au changement de mot de passe (#11).
+// ALTER échoue si la colonne existe → on la teste via PRAGMA d'abord.
+if (!(db.prepare('PRAGMA table_info(credentials)').all() as { name: string }[]).some((c) => c.name === 'pwd_version')) {
+  db.exec('ALTER TABLE credentials ADD COLUMN pwd_version INTEGER NOT NULL DEFAULT 0');
+}
 
 // Whole-array collections: the frontend always replaces the full array on
 // save (never per-item patches), so the API mirrors that instead of exposing

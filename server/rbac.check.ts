@@ -82,6 +82,14 @@ assert.ok(afterMerge.find((m: any) => m.id === 'mem_sa' && !m.deletedAt), 'mem_s
 // Délégation : simple membre avec délégation toId obtient la capacité.
 applyWrite('delegations', [{ id: 'del1', from: 'm4', to: 'M5', toId: 'm5', scope: 'd1', right: 'view_members' }]);
 assertCanWrite('members', buildContext('m5')!, []); // capacité via délégation, aucun item touché
+// #5 écriture fail-closed : m5 a la capacité view_members (déléguée, non scopée dans ce chemin)
+// mais AUCUN rôle de périmètre → il ne peut éditer que sa propre fiche, pas celle d'autrui.
+assert.throws(
+  () => assertCanWrite('members', buildContext('m5')!, [{ id: 'm6', firstName: 'Hack' }]),
+  (e: any) => e instanceof GuardError && e.status === 403,
+  'écriture scope-less sur autrui rejetée (#5)',
+);
+assertCanWrite('members', buildContext('m5')!, [{ ...simple, profession: 'edit-self' }]); // sa fiche → OK
 
 // Interdiction de déléguer le rapport spirituel Bloom Bus.
 const ctxRespB = buildContext('m4')!;

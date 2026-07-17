@@ -43,6 +43,22 @@ app.use((req, res, next) => {
   res.setHeader('X-Content-Type-Options', 'nosniff');
   res.setHeader('X-Frame-Options', 'DENY');
   res.setHeader('Referrer-Policy', 'no-referrer');
+  // CSP : hôtes externes réellement utilisés — tuiles OpenStreetMap (Leaflet), Google Fonts,
+  // et 'unsafe-inline' pour les styles inline runtime (Motion/Recharts/Leaflet). Le reste est
+  // verrouillé à 'self'. En dev le SPA est servi par Vite (pas par ce serveur) → pas d'impact.
+  res.setHeader('Content-Security-Policy', [
+    "default-src 'self'",
+    "img-src 'self' data: https://*.tile.openstreetmap.org",
+    "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
+    "font-src 'self' https://fonts.gstatic.com",
+    "script-src 'self'",
+    "connect-src 'self'",
+    "object-src 'none'",
+    "base-uri 'self'",
+    "frame-ancestors 'none'",
+  ].join('; '));
+  // HSTS : seulement en prod (derrière le TLS de Coolify) — inutile/nuisible en HTTP local.
+  if (IS_PROD) res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
   if (req.method === 'OPTIONS') return res.sendStatus(204);
   next();
 });
@@ -191,7 +207,10 @@ app.post('/api/v1/auth/change-password', requireAuth, (req, res) => {
     return res.status(401).json({ error: 'mot de passe actuel incorrect' });
   }
   upsertCredentials(memberId, String(next));
-  res.json({ ok: true });
+  // pwd_version vient d'être incrémentée → l'ancien token de CE client est aussi invalidé.
+  // On lui en émet un frais (pv à jour) pour que sa session survive ; les autres appareils
+  // (tokens à l'ancienne pv) sont déconnectés — c'est l'effet recherché.
+  res.json({ ok: true, token: signToken(memberId) });
 });
 
 app.post('/api/v1/auth/admin-reset', requireAuth, (req, res) => {

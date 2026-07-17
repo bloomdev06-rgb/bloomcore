@@ -131,7 +131,10 @@ export function assertCanWrite(name: string, ctx: RbacContext, incoming: any[]):
     case 'members': {
       if (!hasCapAnyRole(ctx, 'view_members')) throw new GuardError(403, 'members: capacité view_members requise');
       if (hasAny(roles, FULL_SCOPE_ROLES)) return;
-      const scopeRole = SCOPE_ROLE_ORDER.find(([r]) => roles.includes(r))?.[1] ?? 'Membre';
+      // Symétrique de la lecture (filterReadable, fail-closed) : sans rôle de périmètre
+      // déterminé, un opérateur n'écrit QUE sur sa propre fiche. Sinon inMemberScope ferait
+      // du fail-open sur 'Membre' (scope.ts) → écriture sur n'importe quel membre.
+      const scopeEntry = SCOPE_ROLE_ORDER.find(([r]) => roles.includes(r));
       const departments = readCollection('departments') as Department[];
       const ministries = readCollection('ministries') as Ministry[];
       // Bus lines LIVES (pas le seed figé) : un bus créé/déplacé change les zones/communes
@@ -139,8 +142,11 @@ export function assertCanWrite(name: string, ctx: RbacContext, incoming: any[]):
       const busLines = readCollection('bus_lines') as BloomBusEntity[];
       // Écritures ET suppressions par omission : les deux doivent rester dans le périmètre.
       for (const target of [...touchedItems(name, incoming), ...removedItems(name, incoming, ctx)]) {
-        if (!inMemberScope(member, target as Member, scopeRole, busLines, departments, ministries)) {
-          throw new GuardError(403, `members: ${target.id} hors de votre périmètre (${scopeRole})`);
+        const inScope = scopeEntry
+          ? inMemberScope(member, target as Member, scopeEntry[1], busLines, departments, ministries)
+          : String((target as Member).id) === String(member.id);
+        if (!inScope) {
+          throw new GuardError(403, `members: ${target.id} hors de votre périmètre (${scopeEntry?.[1] ?? 'Membre'})`);
         }
       }
       // C1 — défense en profondeur : un opérateur non full-scope ne peut pas s'AUTO-promouvoir

@@ -245,5 +245,9 @@ export async function apiComplete(token: string, password: string): Promise<Logi
 export async function apiChangePassword(current: string, next: string): Promise<{ ok: boolean; error?: string } | null> {
   const data = await postJson('/auth/change-password', { current, next }, getAuthToken());
   if (!data) return null; // backend injoignable
-  return data.status === 200 ? { ok: true } : { ok: false, error: data.error };
+  if (data.status !== 200) return { ok: false, error: data.error };
+  // Le serveur ré-émet un token (pv à jour) : sans ça, l'ancien token — désormais révoqué —
+  // ferait échouer la requête suivante. On le stocke pour garder la session courante.
+  if (typeof data.token === 'string') localStorage.setItem(AUTH_TOKEN_KEY, data.token);
+  return { ok: true };
 }

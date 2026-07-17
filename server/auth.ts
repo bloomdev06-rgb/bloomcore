@@ -38,10 +38,19 @@ export function verifyPassword(password: string, stored: string): boolean {
 }
 
 export function signToken(memberId: string): string {
-  const payload = JSON.stringify({ sub: memberId, exp: Date.now() + TOKEN_TTL_MS });
+  const payload = JSON.stringify({ sub: memberId, pv: passwordVersion(memberId), exp: Date.now() + TOKEN_TTL_MS });
   const body = Buffer.from(payload).toString('base64url');
   const sig = createHmac('sha256', TOKEN_SECRET).update(body).digest('base64url');
   return `${body}.${sig}`;
+}
+
+// Version du mot de passe d'un membre (0 si aucun credential). Incrémentée à chaque
+// changement de mot de passe → invalide tous les tokens émis avant (voir verifyToken).
+export function passwordVersion(memberId: string): number {
+  const row = db.prepare('SELECT pwd_version FROM credentials WHERE member_id = ?').get(memberId) as
+    | { pwd_version: number }
+    | undefined;
+  return row?.pwd_version ?? 0;
 }
 
 // --- Tokens à usage unique (activation 48h / réinitialisation 1h) ---
@@ -71,8 +80,11 @@ export function consumeOneTimeToken(token: string): { memberId: string; purpose:
 }
 
 export function upsertCredentials(memberId: string, password: string): void {
+  // Changement de mot de passe (UPDATE) → pwd_version++ : révoque tous les tokens antérieurs.
+  // Première définition (INSERT à l'activation) → version 0, aucune session à invalider.
   db.prepare(
-    'INSERT INTO credentials (member_id, password_hash) VALUES (?, ?) ON CONFLICT(member_id) DO UPDATE SET password_hash = excluded.password_hash',
+    `INSERT INTO credentials (member_id, password_hash, pwd_version) VALUES (?, ?, 0)
+     ON CONFLICT(member_id) DO UPDATE SET password_hash = excluded.password_hash, pwd_version = pwd_version + 1`,
   ).run(memberId, hashPassword(password));
 }
 
@@ -84,8 +96,12 @@ export function verifyToken(token: string): string | null {
   const expBuf = Buffer.from(expected);
   if (sigBuf.length !== expBuf.length || !timingSafeEqual(sigBuf, expBuf)) return null;
   try {
-    const { sub, exp } = JSON.parse(Buffer.from(body, 'base64url').toString());
+    const { sub, pv, exp } = JSON.parse(Buffer.from(body, 'base64url').toString());
     if (Date.now() > exp) return null;
+    // Révocation au changement de mot de passe (#11) : un token émis avant le dernier
+    // changement porte une pv obsolète. ponytail: 1 lecture DB par requête, OK à cette
+    // échelle (SQLite synchrone) ; mettre en cache si le débit l'exige un jour.
+    if ((pv ?? 0) !== passwordVersion(sub as string)) return null;
     return sub as string;
   } catch {
     return null;
