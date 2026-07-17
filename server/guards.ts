@@ -2,6 +2,7 @@
 // des charges, appliqués côté serveur sans changer le contrat frontend
 // (PUT whole-array). Appelé par PUT /:name et POST /sync/batch.
 import { getCollection, appendToCollection, mergeCollection } from './db.ts';
+import { parseReportPayload } from '../packages/shared/schemas/report.ts';
 
 export class GuardError extends Error {
   status: number;
@@ -137,6 +138,20 @@ export function applyWrite(
       continue;
     }
     toWrite.push({ ...s, deletedAt: now, updatedAt: now });
+  }
+
+  // M2 (archi-cible §4 « Validation : Zod ») — enforcement des payloads de rapport, mais
+  // UNIQUEMENT sur les rapports nouveaux ou modifiés (et non en conflit) : un rapport legacy
+  // renvoyé tel quel par la sync whole-array n'est jamais re-validé, donc rien ne casse. Un
+  // rapport entrant invalide rejette tout le lot AVANT écriture (fail-loud : c'est un bug client).
+  if (name === 'reports') {
+    for (const it of incoming) {
+      if (conflicts.includes(String(it.id))) continue; // ne sera pas écrit
+      const old = storedById.get(String(it.id));
+      if (old && canonical(old) === canonical(it)) continue; // inchangé → jamais re-validé
+      const check = parseReportPayload(it.reportType, it.content);
+      if (!check.ok) throw new GuardError(400, `reports[${it.id}] ${it.reportType} — ${check.error}`);
+    }
   }
 
   mergeCollection(name, toWrite);
