@@ -33,6 +33,27 @@ export function canonical(v: any): string {
 //   ressusciter un tombstone. Signalé au client via `conflicts` (ids rejetés) ;
 //   `asOf` omis (appels internes/tests) = comportement LWW historique inchangé.
 // Retourne les nouveaux items (utile aux hooks notif/enrôlement des phases 4-5).
+// Validation structurelle aux frontières de confiance (#12). Le store est un document-store
+// (Report.content est volontairement `any`) : imposer un schéma par champ casserait des features
+// et serait à maintenir sans fin. On rejette en revanche ce qui est structurellement invalide ou
+// dangereux — chaque item DOIT être un objet plat avec un id string, sans clé de pollution de
+// prototype (JSON.parse fait de "__proto__" une propriété propre énumérable → détectable ici).
+// ponytail: whitelist par champ (members/reports/events) = étape suivante si le modèle se resserre.
+const DANGEROUS_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
+
+export function validateItems(name: string, incoming: any[]): void {
+  if (!Array.isArray(incoming)) throw new GuardError(400, `${name}: tableau attendu`);
+  for (const it of incoming) {
+    if (it === null || typeof it !== 'object' || Array.isArray(it)) {
+      throw new GuardError(400, `${name}: item non-objet`);
+    }
+    if (typeof it.id !== 'string' || !it.id) throw new GuardError(400, `${name}: id string requis`);
+    for (const k of Object.keys(it)) {
+      if (DANGEROUS_KEYS.has(k)) throw new GuardError(400, `${name}: clé interdite « ${k} »`);
+    }
+  }
+}
+
 export function applyWrite(
   name: string,
   incoming: any[],
@@ -42,6 +63,7 @@ export function applyWrite(
   // PRÉSERVE (pas de tombstone-by-omission). Vide (défaut) = comportement whole-array LWW.
   preserve: Set<string> = new Set(),
 ): { added: any[]; changed: any[]; conflicts: string[] } {
+  validateItems(name, incoming); // frontière de confiance (#12) — avant toute écriture
   const stored = getCollection(name);
   const storedById = new Map(stored.map((s) => [String(s.id), s]));
   const incomingById = new Map(incoming.map((it) => [String(it.id), it]));

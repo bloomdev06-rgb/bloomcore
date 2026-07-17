@@ -34,12 +34,25 @@ const SYNCED_NAMES = new Set([
 ]);
 
 // --- Persistence helpers (used by App for the mutable collections) ---
+// Cache de parse (#13) : JSON.parse est le vrai coût de load() (getItem n'est qu'un accès
+// mémoire). On mémoïse par clé TANT QUE la chaîne stockée est identique → on saute le parse
+// ET on renvoie une référence STABLE entre rendus. Des références recréées à chaque render
+// ont déjà provoqué des re-souscriptions en boucle (bug Rétention). Robuste à tout writer :
+// on compare la chaîne brute, aucune invalidation à gérer. Résultats en lecture seule (aucun
+// appelant ne les mute — vérifié).
+const parseCache = new Map<string, { raw: string; value: unknown }>();
+
 export function load<T>(key: string, seed: T): T {
   // JSON corrompu (écriture interrompue, quota, édition manuelle) → on retombe sur le
   // seed plutôt que de faire throw dans un initialiseur useState (écran blanc, C1).
   try {
     const raw = localStorage.getItem(key);
-    return raw ? (JSON.parse(raw) as T) : seed;
+    if (raw === null) return seed;
+    const hit = parseCache.get(key);
+    if (hit && hit.raw === raw) return hit.value as T;
+    const value = JSON.parse(raw) as T;
+    parseCache.set(key, { raw, value });
+    return value;
   } catch {
     return seed;
   }
@@ -60,7 +73,11 @@ export function save<T>(key: string, value: T): void {
   // QuotaExceededError (photos base64, logs qui grossissent) ne doit pas faire throw
   // dans un useEffect non gardé (crash en boucle, C2). L'écriture serveur suit quand même.
   try {
-    localStorage.setItem(key, JSON.stringify(value));
+    const serialized = JSON.stringify(value);
+    localStorage.setItem(key, serialized);
+    // Amorce le cache de parse avec la valeur qu'on vient d'écrire → le render qui suit une
+    // édition (edit → save → re-render → load) est un cache-hit à référence stable.
+    parseCache.set(key, { raw: serialized, value });
   } catch (e) {
     console.error(`[save] échec d'écriture localStorage "${key}" (quota ?)`, e);
   }

@@ -71,4 +71,18 @@ const r4 = applyWrite('projects', [], undefined);
 assert.equal(r4.conflicts.length, 0, 'asOf omis : pas de détection de conflit (comportement historique)');
 assert.equal(readCollection('projects').length, 0, 'asOf omis : suppression par omission toujours appliquée (LWW)');
 
+// --- #12 validation structurelle aux frontières ---
+const badItem = (item: any) => () => applyWrite('members', [{ id: 'm1', name: 'Alice' }, item]);
+assert.throws(badItem('pas-un-objet'), (e: any) => e instanceof GuardError && e.status === 400, 'item non-objet rejeté');
+assert.throws(badItem(null), (e: any) => e instanceof GuardError && e.status === 400, 'item null rejeté');
+assert.throws(badItem([1, 2]), (e: any) => e instanceof GuardError && e.status === 400, 'item tableau rejeté');
+assert.throws(badItem({ name: 'sans id' }), (e: any) => e instanceof GuardError && e.status === 400, 'id manquant rejeté');
+assert.throws(badItem({ id: 42 }), (e: any) => e instanceof GuardError && e.status === 400, 'id non-string rejeté');
+// pollution de prototype : JSON.parse fait de "__proto__" une propriété propre énumérable
+assert.throws(
+  () => applyWrite('members', JSON.parse('[{"id":"m9","__proto__":{"admin":true}}]')),
+  (e: any) => e instanceof GuardError && e.status === 400,
+  'clé __proto__ rejetée',
+);
+
 console.log('guards.check OK');

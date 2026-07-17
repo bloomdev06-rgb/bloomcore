@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import {
   Search,
   Filter,
@@ -51,6 +51,8 @@ function downloadCsv(filename: string, rows: string[][]) {
   URL.revokeObjectURL(url);
 }
 
+const PAGE_SIZE = 60; // #13 — nb de fiches montées par page (bouton « Voir plus » au-delà)
+
 interface MembersViewProps {
   members: Member[];
   onUpdateMember: (member: Member) => void;
@@ -92,6 +94,7 @@ export default function MembersView({
   const [filterSchoolLevel, setFilterSchoolLevel] = useState<string>("all");
   const [filterRed, setFilterRed] = useState(false);
   const [viewMode, setViewMode] = useState<"grid" | "list">("grid");
+  const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
   const [selectedMember, setSelectedMember] = useState<Member | null>(null);
   const [showFormModal, setShowFormModal] = useState(false);
   const [showMember360, setShowMember360] = useState(false);
@@ -151,6 +154,14 @@ export default function MembersView({
 
   const menCount = filteredMembers.filter((m) => m.gender === "H").length;
   const womenCount = filteredMembers.filter((m) => m.gender === "F").length;
+
+  // Pagination (#13) : ne monter qu'une page à la fois — rendre 2000 cartes d'un coup rame.
+  // Réinitialisé à chaque changement de filtre/recherche pour repartir du haut de la liste.
+  const visibleMembers = filteredMembers.slice(0, visibleCount);
+  const hasMore = filteredMembers.length > visibleCount;
+  useEffect(() => {
+    setVisibleCount(PAGE_SIZE);
+  }, [searchTerm, filterLevel, filterPastoralCursus, filterDept, filterFunction, filterBaptism, filterSchoolLevel, filterRed, activeBranch]);
 
   const open360View = (member: Member) => {
     setSelectedMember(member);
@@ -388,7 +399,7 @@ export default function MembersView({
               </p>
             </div>
           ) : (
-            filteredMembers.map((member) => (
+            visibleMembers.map((member) => (
               <motion.div
                 key={member.id}
                 variants={staggerItem}
@@ -550,7 +561,7 @@ export default function MembersView({
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-bc-border">
-                  {filteredMembers.map((member) => (
+                  {visibleMembers.map((member) => (
                     <tr
                       key={member.id}
                       className={`hover:bg-bc-canvas transition-colors group cursor-pointer ${
@@ -680,6 +691,17 @@ export default function MembersView({
               </table>
             </div>
           )}
+        </div>
+      )}
+
+      {hasMore && (
+        <div className="flex justify-center mt-6">
+          <button
+            onClick={() => setVisibleCount((n) => n + PAGE_SIZE)}
+            className="px-5 py-2.5 rounded-full bg-white border border-bc-border text-sm font-bold text-bc-text-secondary hover:text-bc-text hover:border-bc-text/30 transition-colors active:scale-95"
+          >
+            Voir plus ({filteredMembers.length - visibleCount} restant{filteredMembers.length - visibleCount > 1 ? "s" : ""})
+          </button>
         </div>
       )}
 
