@@ -101,8 +101,11 @@ assert.ok(readCollection('members').some((m: any) => m.id === 'm11'), 'item à 5
 const tooManyKeys: any = { id: 'm12' };
 for (let i = 0; i < 101; i++) tooManyKeys['k' + i] = 1;
 assert.throws(() => applyWrite('members', [tooManyKeys]), (e: any) => e instanceof GuardError && e.status === 400, 'trop de champs rejeté');
-// chaîne énorme (blob)
-assert.throws(() => applyWrite('members', [{ id: 'm13', bio: 'x'.repeat(100_001) }]), (e: any) => e instanceof GuardError && e.status === 400, 'chaîne trop longue rejetée');
+// avatar base64 inline (fallback hors-ligne / legacy) sous le plafond image 2 Mo → accepté
+applyWrite('members', [{ id: 'm13b', avatarUrl: 'data:image/jpeg;base64,' + 'A'.repeat(500_000) }]);
+assert.ok(readCollection('members').some((m: any) => m.id === 'm13b'), 'avatar base64 ~0,5 Mo accepté');
+// chaîne énorme (blob au-delà du plafond) rejetée
+assert.throws(() => applyWrite('members', [{ id: 'm13', bio: 'x'.repeat(3_000_001) }]), (e: any) => e instanceof GuardError && e.status === 400, 'chaîne trop longue rejetée');
 // tableau énorme
 assert.throws(() => applyWrite('members', [{ id: 'm14', tags: new Array(5001).fill(1) }]), (e: any) => e instanceof GuardError && e.status === 400, 'tableau trop long rejeté');
 // depth-bomb : 9 niveaux imbriqués > MAX_DEPTH(8)

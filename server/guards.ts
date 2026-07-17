@@ -44,10 +44,15 @@ export function canonical(v: any): string {
 // ponytail: bornes (pas de whitelist par champ). Resserrer en schéma par collection seulement si
 // le modèle se fige — voir le raisonnement ci-dessus avant de le faire.
 const DANGEROUS_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
-const MAX_KEYS = 100;        // Member = 54 champs ; large marge
-const MAX_STRING = 100_000;  // notes/prose OK ; les photos passent par /uploads (jamais inlinées)
-const MAX_ARRAY = 5_000;     // aucun tableau interne d'item légitime n'approche ça
-const MAX_DEPTH = 8;         // `content` est peu profond ; 8 = anti depth-bomb sans gêner le métier
+const MAX_KEYS = 100;          // Member = 54 champs ; large marge
+// Les avatars passent normalement par /uploads (member.avatarUrl = chemin court), MAIS le
+// client hors-ligne retombe sur une dataURL base64 inline (image.ts) synchronisée telle
+// quelle, et des membres legacy en gardent. Le plafond image de l'app est 2 Mo (/api/v1/uploads)
+// → ~2,8 Mo en base64 : la borne doit le laisser passer. Le garde-fou réel du volume total
+// reste express.json({ limit: '10mb' }) ; cette borne n'empêche qu'UN champ pathologique.
+const MAX_STRING = 3_000_000; // ~2,86 Mo : couvre une photo base64 inline de 2 Mo (ceiling app)
+const MAX_ARRAY = 5_000;      // aucun tableau interne d'item légitime n'approche ça
+const MAX_DEPTH = 8;          // `content` est peu profond ; 8 = anti depth-bomb sans gêner le métier
 
 // Borne la taille/profondeur d'une valeur JSON déjà désérialisée (donc pas de fonctions/cycles :
 // JSON.parse ne peut en produire). Rejette au premier dépassement.
