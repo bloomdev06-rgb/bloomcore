@@ -140,6 +140,28 @@ assert.throws(() => assertCanWrite('special_authorizations', ctxMinistre, [saIte
 // Super Admin exempté de l'anti-auto-octroi
 assertCanWrite('special_authorizations', ctxSA, [saItem({ id: 'sa_self', memberId: 'mem_sa', grantedById: 'mem_sa' })]);
 
+// --- M3-report §240/§5 : visibilité des rapports de SUIVI de membre (confidentiels) ---
+// Re-seed les membres du scénario (les tests de scope plus haut ont tombstoné m8 via un PUT scopé).
+applyWrite('members', [superAdmin, pasteur, ministre, resp, simple, baseMember({ id: 'm6', departments: { d1: 'Membre' } }), baseMember({ id: 'm8', departments: { d1: 'Coach' } })]);
+const suivi = { id: 'rep_suivi', reportType: 'rapport_suivi_coach', confidential: true, content: { memberId: 'm6' }, targetBranch: 'church', date: '2026-07-15', authorId: 'm8' };
+const suiviM5 = { ...suivi, id: 'rep_suivi5', content: { memberId: 'm5' } }; // sujet hors périmètre de m4
+const ctxCoach = buildContext('m8')!;
+const seesSuivi = (ctx: any, items: any[]) => filterReadable('reports', ctx, items).some((r: any) => r.id === 'rep_suivi');
+// Coach dont le membre suivi relève du périmètre (partage un département) → voit
+assert.ok(seesSuivi(ctxCoach, [suivi]), 'Coach voit le suivi de son membre (§240)');
+// Responsable non-Coach sans autorisation → ne voit pas
+assert.ok(!seesSuivi(ctxResp, [suivi]), 'Responsable non-Coach ne voit pas le suivi sans autorisation');
+// corps pastoral → voit (règle de confidentialité existante préservée)
+assert.ok(seesSuivi(ctxMinistre, [suivi]), 'corps pastoral voit les rapports confidentiels');
+// exception nominative : SpecialAuthorization à m4 → ouvre le suivi de son périmètre
+applyWrite('special_authorizations', [{ id: 'sa_suivi', memberId: 'm4', capability: 'consulter_rapports_suivi_membre', branchId: 'church', grantedById: 'm3', createdAt: '2026-01-01' }]);
+assert.ok(seesSuivi(ctxResp, [suivi]), 'SpecialAuthorization ouvre le suivi au non-Coach (§5)');
+// bornée au périmètre : un suivi d'un membre HORS scope reste invisible
+assert.ok(!filterReadable('reports', ctxResp, [suiviM5]).some((r: any) => r.id === 'rep_suivi5'), 'autorisation bornée au périmètre (sujet hors scope invisible)');
+// une autorisation portant sur une AUTRE capacité ne donne pas accès (remplace la précédente)
+applyWrite('special_authorizations', [{ id: 'sa_other', memberId: 'm4', capability: 'autre_chose', branchId: 'church', grantedById: 'm3', createdAt: '2026-01-01' }]);
+assert.ok(!seesSuivi(ctxResp, [suivi]), 'autorisation d\'une autre capacité ne donne pas accès');
+
 // S4 — émission de notification vers autrui réservée à l'encadrement.
 assert.throws(
   () => assertCanWrite('notifications', ctxSimple, [{ id: 'n1', targetMemberId: 'm3', title: 'x' }]),

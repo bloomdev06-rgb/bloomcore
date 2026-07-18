@@ -17,6 +17,10 @@ const ABOVE_MEMBER_ROLES = [
   'Capitaine de Bus', 'Responsable de Zone', 'Responsable de Commune',
 ];
 // Ordre de résolution du rôle de scope pour inMemberScope (qui attend UN rôle).
+// §240/§5 — capacité qu'une SpecialAuthorization doit porter pour qu'un non-Coach voie les
+// rapports de suivi des membres de son périmètre (exception nominative Ministre/Pasteur).
+const CAP_VOIR_SUIVI_MEMBRE = 'consulter_rapports_suivi_membre';
+
 const SCOPE_ROLE_ORDER: [string, string][] = [
   ['Ministre', 'Ministre'],
   ['Capitaine de Bus', 'Capitaine de Bus'],
@@ -305,13 +309,37 @@ export function filterReadable(name: string, ctx: RbacContext, items: any[]): an
 
   switch (name) {
     case 'reports': {
-      // §8.3 — miroir exact du filtre client (ReportsView) : le corps pastoral voit
-      // les rapports confidentiels ; un Coach/Responsable seulement si explicitement
-      // partagé. La confidentialité prime même sur Admin/Super Admin.
+      // §8.3 — le corps pastoral voit les rapports confidentiels ; un Coach/Responsable
+      // seulement si explicitement partagé. La confidentialité prime même sur Admin/Super Admin.
       const pastoralCorps = hasAny(roles, ['Pasteur', 'Pasteur Principal', 'Ministre']);
+      // §240/§5 CAHIER — un rapport de SUIVI de membre (rapport_suivi_coach, confidentiel, ciblant
+      // un membre) est visible au Coach dont ce membre relève du périmètre ; et par EXCEPTION
+      // NOMINATIVE à un non-Coach porteur d'une SpecialAuthorization (accordée par Ministre/
+      // Pasteur). Grant ADDITIF — n'élargit qu'aux parties explicitement autorisées, ne masque rien.
+      const isCoach = roles.includes('Coach');
+      const suiviAuths = (readCollection('special_authorizations') as SpecialAuthorization[]).filter(
+        (s) => !s.deletedAt && s.memberId === member.id && s.capability === CAP_VOIR_SUIVI_MEMBRE
+          && (s.branchId == null || s.branchId === member.branch),
+      );
+      let suiviSubjectInScope: (memberId: string) => boolean = () => false;
+      if (isCoach || suiviAuths.length) {
+        const scopeEntry = SCOPE_ROLE_ORDER.find(([r]) => roles.includes(r));
+        if (scopeEntry) {
+          const byId = new Map((readCollection('members') as Member[]).map((m) => [m.id, m]));
+          const departments = readCollection('departments') as Department[];
+          const ministries = readCollection('ministries') as Ministry[];
+          const busLines = readCollection('bus_lines') as BloomBusEntity[];
+          suiviSubjectInScope = (mid) => {
+            const subject = byId.get(mid);
+            return !!subject && inMemberScope(member, subject, scopeEntry[1], busLines, departments, ministries);
+          };
+        }
+      }
       let out = items.filter((r) => {
         if (!r.confidential) return true;
         if (pastoralCorps) return true;
+        if (r.reportType === 'rapport_suivi_coach' && r.content?.memberId
+            && (isCoach || suiviAuths.length) && suiviSubjectInScope(r.content.memberId)) return true;
         return hasAny(roles, ['Coach', 'Responsable']) && !!r.partagerAvecResponsableDept;
       });
       // Hors corps à périmètre global, on ne renvoie que la branche de l'opérateur.
