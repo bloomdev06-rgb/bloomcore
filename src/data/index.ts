@@ -24,6 +24,7 @@ export { apiBootstrap, apiLogin, clearAuthToken, apiPut, apiFetchCollection, ope
 export { labelFor } from '../../packages/shared/migrate';
 export { canView, hasCapability, resolveCapability } from './permissions';
 import { apiPut } from './api';
+import { idbLoadAll, idbSet } from './idb';
 
 // Collection/kv names the backend knows about (server/index.ts's
 // ARRAY_COLLECTIONS ∪ KV_KEYS) — keys outside this set (bc_loggedInMemberId,
@@ -43,11 +44,44 @@ const SYNCED_NAMES = new Set([
 // appelant ne les mute — vérifié).
 const parseCache = new Map<string, { raw: string; value: unknown }>();
 
+// Miroir mémoire SYNCHRONE des collections synced (clé → JSON sérialisé), adossé à
+// IndexedDB. Il existe pour garder load()/save() synchrones (initialiseurs useState =
+// paint instantané) tout en persistant hors du quota localStorage ~5 Mo. Hydraté une
+// fois au boot : main.tsx attend hydrate() avant le render. Seules les collections
+// SYNCED_NAMES passent par IDB ; les petites clés client (theme, token,
+// loggedInMemberId) restent sur localStorage. Si IDB est indispo (mode privé ancien,
+// etc.), idbOk=false → on retombe entièrement sur localStorage (comportement actuel).
+const mirror = new Map<string, string>();
+let idbOk = true;
+function idbBacked(key: string): boolean {
+  return idbOk && SYNCED_NAMES.has(key.replace(/^bc_/, ''));
+}
+
+export async function hydrate(): Promise<void> {
+  try {
+    const all = await idbLoadAll();
+    for (const [k, v] of Object.entries(all)) mirror.set(k, v);
+    // Migration one-time : les utilisateurs existants ont leurs collections en
+    // localStorage. On les bascule vers IDB (si pas déjà présentes) puis on retire la
+    // copie localStorage — c'est tout l'objet du changement : libérer le mur ~5 Mo.
+    for (const name of SYNCED_NAMES) {
+      const key = `bc_${name}`;
+      const ls = localStorage.getItem(key);
+      if (ls === null) continue;
+      if (!mirror.has(key)) { mirror.set(key, ls); await idbSet(key, ls); }
+      localStorage.removeItem(key);
+    }
+  } catch (e) {
+    idbOk = false; // IDB HS → on garde localStorage comme magasin (pas de perte)
+    console.error('[hydrate] IndexedDB indisponible, fallback localStorage', e);
+  }
+}
+
 export function load<T>(key: string, seed: T): T {
   // JSON corrompu (écriture interrompue, quota, édition manuelle) → on retombe sur le
   // seed plutôt que de faire throw dans un initialiseur useState (écran blanc, C1).
   try {
-    const raw = localStorage.getItem(key);
+    const raw = idbBacked(key) ? (mirror.get(key) ?? null) : localStorage.getItem(key);
     if (raw === null) return seed;
     const hit = parseCache.get(key);
     if (hit && hit.raw === raw) return hit.value as T;
@@ -75,12 +109,17 @@ export function save<T>(key: string, value: T): void {
   // dans un useEffect non gardé (crash en boucle, C2). L'écriture serveur suit quand même.
   try {
     const serialized = JSON.stringify(value);
-    localStorage.setItem(key, serialized);
+    if (idbBacked(key)) {
+      mirror.set(key, serialized);
+      void idbSet(key, serialized).catch((e) => console.error(`[save] IDB "${key}"`, e));
+    } else {
+      localStorage.setItem(key, serialized);
+    }
     // Amorce le cache de parse avec la valeur qu'on vient d'écrire → le render qui suit une
     // édition (edit → save → re-render → load) est un cache-hit à référence stable.
     parseCache.set(key, { raw: serialized, value });
   } catch (e) {
-    console.error(`[save] échec d'écriture localStorage "${key}" (quota ?)`, e);
+    console.error(`[save] échec d'écriture "${key}" (quota ?)`, e);
   }
   const name = key.replace(/^bc_/, '');
   if (syncEnabled && SYNCED_NAMES.has(name)) {
