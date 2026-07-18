@@ -114,6 +114,27 @@ assert.throws(
 );
 assertCanWrite('audits', ctxResp, [{ id: 'aud_y', operatorId: 'm4', actionType: 'X' }]); // son propre id → OK
 
+// --- M3 §2.6/§5 : gouvernance des couches de capacités dynamiques ---
+const ctxMinistre = buildContext('m3')!;
+// capability_overrides = matrice dynamique → Super Admin seul
+assertCanWrite('capability_overrides', ctxSA, [{ id: 'co1', subjectType: 'level', subjectValue: 'Leader', branchId: 'church', capability: 'x', enabled: true }]);
+for (const [ctx, who] of [[ctxResp, 'Responsable'], [ctxMinistre, 'Ministre'], [ctxSimple, 'membre']] as const) {
+  assert.throws(
+    () => assertCanWrite('capability_overrides', ctx, [{ id: 'co2', subjectType: 'level', subjectValue: 'Leader', branchId: 'church', capability: 'x', enabled: true }]),
+    (e: any) => e instanceof GuardError && e.status === 403,
+    `capability_overrides refusé au ${who}`,
+  );
+}
+// special_authorizations : accordé par Ministre/Pasteur, PAS un Responsable/membre
+const saItem = (over: any = {}) => ({ id: 'sa1', memberId: 'm6', capability: 'x', grantedById: 'm3', createdAt: '2026-01-01', ...over });
+assertCanWrite('special_authorizations', ctxMinistre, [saItem()]); // Ministre octroie à autrui → OK
+assert.throws(() => assertCanWrite('special_authorizations', ctxResp, [saItem({ grantedById: 'm4' })]), (e: any) => e instanceof GuardError && e.status === 403, 'special_auth refusé au Responsable');
+assert.throws(() => assertCanWrite('special_authorizations', ctxSimple, [saItem({ grantedById: 'm5' })]), (e: any) => e instanceof GuardError && e.status === 403, 'special_auth refusé au membre');
+// anti-escalade : un Ministre ne s'auto-octroie pas
+assert.throws(() => assertCanWrite('special_authorizations', ctxMinistre, [saItem({ memberId: 'm3' })]), (e: any) => e instanceof GuardError && e.status === 403, 'auto-octroi interdit (non Super Admin)');
+// Super Admin exempté de l'anti-auto-octroi
+assertCanWrite('special_authorizations', ctxSA, [saItem({ id: 'sa_self', memberId: 'mem_sa', grantedById: 'mem_sa' })]);
+
 // S4 — émission de notification vers autrui réservée à l'encadrement.
 assert.throws(
   () => assertCanWrite('notifications', ctxSimple, [{ id: 'n1', targetMemberId: 'm3', title: 'x' }]),

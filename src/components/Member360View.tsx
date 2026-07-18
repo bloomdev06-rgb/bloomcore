@@ -1,7 +1,7 @@
 import React, { useState, useRef } from 'react';
 import { createPortal } from 'react-dom';
-import { Member, Branch, Report, AuditLog, PermissionMatrix, Delegation, FormDef } from '../types';
-import { useDepartments, useBusLines, useProjects, load, hasCapability } from '../data';
+import { Member, Branch, Report, AuditLog, PermissionMatrix, Delegation, FormDef, CapabilityOverride, SpecialAuthorization } from '../types';
+import { useDepartments, useBusLines, useProjects, load, resolveCapability } from '../data';
 import { DEFAULT_OPERATOR_NAME } from '../data/operator';
 import { isRed } from '../data/kpi';
 import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend } from 'recharts';
@@ -113,8 +113,10 @@ export default function Member360View({ member, onClose, onEdit, onUpdate, repor
   // délégation active ciblant cet opérateur (cf. hasCapability). Les autres axes
   // (spirituel/social/physique) ne sont pas des capacités déléguables du cahier des charges.
   const delegations = load('bc_delegations', [] as Delegation[]);
-  const canSeeFinances = hasCapability(permissionMatrix, 'consulter_situation_financiere', simulatedRole, operator?.id, delegations);
-  const canSeeAttendance = hasCapability(permissionMatrix, 'consulter_historique_presence', simulatedRole, operator?.id, delegations);
+  const capOverrides = load('bc_capability_overrides', [] as CapabilityOverride[]);
+  const specialAuths = load('bc_special_authorizations', [] as SpecialAuthorization[]);
+  const canSeeFinances = resolveCapability(permissionMatrix, 'consulter_situation_financiere', operator, simulatedRole, delegations, capOverrides, specialAuths);
+  const canSeeAttendance = resolveCapability(permissionMatrix, 'consulter_historique_presence', operator, simulatedRole, delegations, capOverrides, specialAuths);
   const healthData = [
     { subject: 'Spirituel', A: member.healthKPIs.spirituel, fullMark: 5 },
     { subject: 'Social', A: member.healthKPIs.social, fullMark: 5 },

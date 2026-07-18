@@ -66,7 +66,7 @@ app.use((req, res, next) => {
 const ARRAY_COLLECTIONS = new Set([
   'members', 'events', 'reports', 'audits', 'notifications', 'forms',
   'delegations', 'ministries', 'departments', 'certifications', 'admins', 'activities', 'integration_reports',
-  'projects', 'bus_lines',
+  'projects', 'bus_lines', 'capability_overrides', 'special_authorizations',
 ]);
 const KV_KEYS = new Set(['permissions', 'settings']);
 

@@ -14,7 +14,7 @@
     "preview": "vite preview",
     "clean": "rm -rf dist server/*.db",
     "lint": "tsc --noEmit && eslint src",
-    "test": "tsx server/auth.check.ts && tsx server/rbac.check.ts && tsx server/guards.check.ts && tsx server/sync.check.ts && tsx src/data/kpi.check.ts && tsx src/data/reportLock.check.ts && tsx src/data/adn.check.ts && tsx src/data/events.check.ts && tsx src/data/notificationRules.check.ts && tsx src/data/scope.check.ts && tsx src/data/week.check.ts && tsx src/data/completude.check.ts && tsx packages/shared/schemas/report.check.ts"
+    "test": "tsx server/auth.check.ts && tsx server/rbac.check.ts && tsx server/guards.check.ts && tsx server/sync.check.ts && tsx src/data/kpi.check.ts && tsx src/data/reportLock.check.ts && tsx src/data/adn.check.ts && tsx src/data/events.check.ts && tsx src/data/notificationRules.check.ts && tsx src/data/scope.check.ts && tsx src/data/week.check.ts && tsx src/data/completude.check.ts && tsx packages/shared/schemas/report.check.ts && tsx src/data/permissions.check.ts"
   },
   "dependencies": {
     "@tailwindcss/vite": "^4.1.14",

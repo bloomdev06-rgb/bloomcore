@@ -1,5 +1,5 @@
-export type { ReportType } from '../packages/shared/enums';
-import type { ReportType } from '../packages/shared/enums';
+export type { ReportType, CapabilityOverrideSubject } from '../packages/shared/enums';
+import type { ReportType, CapabilityOverrideSubject } from '../packages/shared/enums';
 
 export type Branch = 'church' | 'light' | 'global';
 
@@ -278,6 +278,31 @@ export interface Delegation {
   toId?: string;
   scope: string;
   right: string;
+}
+
+// §2.6 — matrice de permissions DYNAMIQUE : ajuste la capacité d'une CLASSE de membres
+// (par niveau, fonction de département ou cursus), scopée par branche. enabled=true accorde,
+// false révoque, par-dessus la base. Cf. resolveCapability (src/data/permissions.ts).
+export interface CapabilityOverride {
+  id: string;
+  subjectType: CapabilityOverrideSubject; // 'level' | 'function' | 'cursus'
+  subjectValue: string;                   // ex. 'Leader' | 'Responsable' | 'Serviteur'
+  branchId: Branch;
+  capability: string;
+  enabled: boolean;
+  deletedAt?: string;
+}
+
+// §2.6 — exception NOMINATIVE accordée par un Ministre/Pasteur (§5). Ré-accorde une capacité
+// à un membre précis même si sa classe ne l'a pas (ou qu'un override la révoque).
+export interface SpecialAuthorization {
+  id: string;
+  memberId: string;
+  capability: string;
+  branchId?: Branch | null; // null/absent = toutes branches
+  grantedById: string;
+  createdAt: string;
+  deletedAt?: string;
 }
 
 // Compte Admin/Super Admin (AccountsView + RBAC serveur). Convention d'id :

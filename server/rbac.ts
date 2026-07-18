@@ -2,7 +2,7 @@
 // qui n'est qu'un commutateur de démo côté client). Réutilise les modules purs
 // du frontend (permissions.ts, scope.ts) pour que client et serveur ne puissent
 // pas diverger sur la sémantique des capacités et du scope.
-import { Member, Ministry, PermissionMatrix, Delegation, AdminAccount, Department, BloomBusEntity } from '../src/types.ts';
+import { Member, Ministry, PermissionMatrix, Delegation, AdminAccount, Department, BloomBusEntity, SpecialAuthorization } from '../src/types.ts';
 import { hasCapability } from '../src/data/permissions.ts';
 import { inMemberScope, canFillReportFor, bloomBusRoleOf, MULTI_BRANCH_ROLES } from '../src/data/scope.ts';
 import { isBusReportLocked } from '../src/data/reportLock.ts';
@@ -118,6 +118,24 @@ export function assertCanWrite(name: string, ctx: RbacContext, incoming: any[]):
     case 'forms':
       if (!hasAny(roles, ['Admin', 'Super Admin'])) throw new GuardError(403, `${name}: réservé aux Admin`);
       return;
+
+    case 'capability_overrides':
+      // §2.6 — matrice de permissions dynamique : même gouvernance que la matrice statique.
+      if (!roles.includes('Super Admin')) throw new GuardError(403, 'capability_overrides: réservé au Super Admin');
+      return;
+
+    case 'special_authorizations': {
+      // §5 — exception nominative accordée par Ministre/Pasteur. Anti-escalade : personne ne
+      // s'auto-octroie une capacité (un compte compromis ne s'élève pas), sauf Super Admin.
+      const GRANTORS = ['Ministre', 'Pasteur', 'Pasteur Principal', 'Admin', 'Super Admin'];
+      if (!hasAny(roles, GRANTORS)) throw new GuardError(403, 'special_authorizations: réservé aux Ministres et Pasteurs');
+      if (!roles.includes('Super Admin')) {
+        for (const s of touchedItems(name, incoming) as SpecialAuthorization[]) {
+          if (s.memberId === member.id) throw new GuardError(403, 'special_authorizations: auto-octroi interdit');
+        }
+      }
+      return;
+    }
 
     case 'delegations': {
       if (!hasAny(roles, STAFF_ROLES)) throw new GuardError(403, 'delegations: réservé aux Responsables et plus');

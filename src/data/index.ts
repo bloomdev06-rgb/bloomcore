@@ -21,7 +21,7 @@ import {
 } from '../mockData';
 export { deriveTimeBasedNotifications } from './notificationRules';
 export { apiBootstrap, apiLogin, clearAuthToken, apiPut } from './api';
-export { canView, hasCapability } from './permissions';
+export { canView, hasCapability, resolveCapability } from './permissions';
 import { apiPut } from './api';
 
 // Collection/kv names the backend knows about (server/index.ts's
@@ -30,7 +30,7 @@ import { apiPut } from './api';
 const SYNCED_NAMES = new Set([
   'members', 'events', 'reports', 'audits', 'notifications', 'permissions', 'settings', 'forms',
   'delegations', 'ministries', 'departments', 'certifications', 'admins', 'activities', 'integration_reports',
-  'projects', 'bus_lines',
+  'projects', 'bus_lines', 'capability_overrides', 'special_authorizations',
 ]);
 
 // --- Persistence helpers (used by App for the mutable collections) ---

@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { Award, CheckCircle, Plus, Clock, Droplet, Search, ChevronLeft, X } from 'lucide-react';
-import { Member, Branch, AuditLog, PermissionMatrix, Delegation, FormDef, Report, Step } from '../types';
-import { useBusLines, useDepartments, useMinistries, load, hasCapability } from '../data';
+import { Member, Branch, AuditLog, PermissionMatrix, Delegation, FormDef, Report, Step, CapabilityOverride, SpecialAuthorization } from '../types';
+import { useBusLines, useDepartments, useMinistries, load, resolveCapability } from '../data';
 import { inMemberScope } from '../data/scope';
 import { Avatar } from './ui/Avatar';
 import { Modal } from './ui/Modal';
@@ -42,7 +42,7 @@ export default function ProgrammesView({
   const ministries = useMinistries();
   // §11.3 — capacité déléguable : rôle natif OU délégation active ciblant cet opérateur.
   const delegations = load('bc_delegations', [] as Delegation[]);
-  const canValidateBaptism = hasCapability(permissionMatrix, 'modifier_jalons_bapteme_integration', simulatedRole, operator?.id, delegations);
+  const canValidateBaptism = resolveCapability(permissionMatrix, 'modifier_jalons_bapteme_integration', operator, simulatedRole, delegations, load('bc_capability_overrides', [] as CapabilityOverride[]), load('bc_special_authorizations', [] as SpecialAuthorization[]));
 
   // Étapes réelles du parcours (FormBuilder fd_bapteme) — le fallback = les mêmes seedées.
   const steps = forms.find((f) => f.id === 'fd_bapteme')?.steps ?? FALLBACK_STEPS;

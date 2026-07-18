@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { GraduationCap, Award, Plug, Clock, Plus, X, Check } from 'lucide-react';
-import { Member, Branch, PermissionMatrix, Delegation } from '../types';
-import { load, save, hasCapability } from '../data';
+import { Member, Branch, PermissionMatrix, Delegation, CapabilityOverride, SpecialAuthorization } from '../types';
+import { load, save, resolveCapability } from '../data';
 import { motion } from 'motion/react';
 import { staggerParent, staggerItem } from './ui/motion';
 import { Modal } from './ui/Modal';
@@ -25,7 +25,7 @@ const FORMATIONS = [
 export default function FormationsView({ members = [], activeBranch, simulatedRole, operator, permissionMatrix }: FormationsViewProps) {
   // Spec (Onglet 9) : saisie = Responsable du département en charge, rôle natif OU délégation active (§11.3).
   const delegations = load('bc_delegations', [] as Delegation[]);
-  const canCertify = hasCapability(permissionMatrix, 'inscrire_formations_certifications', simulatedRole, operator?.id, delegations);
+  const canCertify = resolveCapability(permissionMatrix, 'inscrire_formations_certifications', operator, simulatedRole, delegations, load('bc_capability_overrides', [] as CapabilityOverride[]), load('bc_special_authorizations', [] as SpecialAuthorization[]));
   const [certs, setCerts] = useState<Certification[]>(() => load('bc_certifications', [] as Certification[]));
   const [adding, setAdding] = useState(false);
   const [memberId, setMemberId] = useState('');

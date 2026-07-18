@@ -23,3 +23,8 @@ export const REPORT_TYPES = [
 ] as const;
 
 export type ReportType = (typeof REPORT_TYPES)[number];
+
+// Axe ciblé par un CapabilityOverride (§2.6) : le niveau communautaire, une fonction de
+// département, ou l'axe cursus pastoral du membre.
+export const CAPABILITY_OVERRIDE_SUBJECTS = ['level', 'function', 'cursus'] as const;
+export type CapabilityOverrideSubject = (typeof CAPABILITY_OVERRIDE_SUBJECTS)[number];
