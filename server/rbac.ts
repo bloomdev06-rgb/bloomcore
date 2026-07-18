@@ -120,8 +120,12 @@ export function assertCanWrite(name: string, ctx: RbacContext, incoming: any[]):
       return;
 
     case 'capability_overrides':
-      // §2.6 — matrice de permissions dynamique : même gouvernance que la matrice statique.
-      if (!roles.includes('Super Admin')) throw new GuardError(403, 'capability_overrides: réservé au Super Admin');
+      // §11.2 CAHIER — matrice de permissions DYNAMIQUE, configurable « par Admin / Pasteur
+      // Principal / Super Admin » (plus large que la matrice statique réservée Super Admin ;
+      // exclut le Pasteur simple).
+      if (!hasAny(roles, ['Admin', 'Pasteur Principal', 'Super Admin'])) {
+        throw new GuardError(403, 'capability_overrides: réservé aux Admin / Pasteur Principal / Super Admin');
+      }
       return;
 
     case 'special_authorizations': {

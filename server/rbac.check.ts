@@ -34,8 +34,8 @@ assert.deepEqual(resolveRoles(simple as any, [], []), ['Membre'], 'simple membre
 
 // --- assertCanWrite via contexte réel (DB :memory:) ---
 setKv('permissions', { view_members: { Responsable: true } });
-applyWrite('members', [superAdmin, pasteur, ministre, resp, simple, baseMember({ id: 'm6', departments: { d1: 'Membre' } })]);
-applyWrite('admins', admins as any);
+applyWrite('members', [superAdmin, pasteur, ministre, resp, simple, baseMember({ id: 'm6', departments: { d1: 'Membre' } }), baseMember({ id: 'm7' })]);
+applyWrite('admins', [...admins, { id: 'adm_m7', name: 'AD', subtitle: '', role: 'Admin' }] as any);
 applyWrite('ministries', ministries as any);
 applyWrite('departments', [{ id: 'd1', name: 'D1', ministryId: 'min1', type: 'normal' }]);
 
@@ -116,11 +116,16 @@ assertCanWrite('audits', ctxResp, [{ id: 'aud_y', operatorId: 'm4', actionType: 
 
 // --- M3 §2.6/§5 : gouvernance des couches de capacités dynamiques ---
 const ctxMinistre = buildContext('m3')!;
-// capability_overrides = matrice dynamique → Super Admin seul
-assertCanWrite('capability_overrides', ctxSA, [{ id: 'co1', subjectType: 'level', subjectValue: 'Leader', branchId: 'church', capability: 'x', enabled: true }]);
-for (const [ctx, who] of [[ctxResp, 'Responsable'], [ctxMinistre, 'Ministre'], [ctxSimple, 'membre']] as const) {
+const ctxAdmin = buildContext('m7')!;
+const ctxPasteur = buildContext('m2')!;
+// capability_overrides = matrice dynamique → §11.2 : Admin / Pasteur Principal / Super Admin
+const co = (id: string) => [{ id, subjectType: 'level', subjectValue: 'Leader', branchId: 'church', capability: 'x', enabled: true }];
+assertCanWrite('capability_overrides', ctxSA, co('co1'));      // Super Admin → OK
+assertCanWrite('capability_overrides', ctxAdmin, co('co1b'));  // Admin → OK (§11.2, plus large que la matrice statique)
+// refusé au Pasteur SIMPLE (non listé), Ministre, Responsable, membre
+for (const [ctx, who] of [[ctxPasteur, 'Pasteur simple'], [ctxResp, 'Responsable'], [ctxMinistre, 'Ministre'], [ctxSimple, 'membre']] as const) {
   assert.throws(
-    () => assertCanWrite('capability_overrides', ctx, [{ id: 'co2', subjectType: 'level', subjectValue: 'Leader', branchId: 'church', capability: 'x', enabled: true }]),
+    () => assertCanWrite('capability_overrides', ctx, co('co2')),
     (e: any) => e instanceof GuardError && e.status === 403,
     `capability_overrides refusé au ${who}`,
   );
