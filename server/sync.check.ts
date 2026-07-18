@@ -49,4 +49,21 @@ assert.equal(r3.errors.length, 1, 'erreur isolée');
 assert.deepEqual(r3.applied, ['op5'], 'les autres ops passent');
 assert.equal((await readCollection('members'))[0].name, 'D');
 
+// --- Contrat delta {upserts, deletes} (route PUT via deltaToWhole → pipeline inchangé) ---
+const { deltaToWhole } = await import('./guards.ts');
+// État de base : 3 events indépendants.
+await applyWrite('events', [{ id: 'e1', t: 'A' }, { id: 'e2', t: 'B' }, { id: 'e3', t: 'C' }]);
+const e2Before = (await readCollection('events')).find((e: any) => e.id === 'e2').updatedAt;
+
+// Delta : upsert e1, delete e3, e2 non mentionné → doit rester INTACT.
+const whole = await deltaToWhole('events', [{ id: 'e1', t: 'A2' }], ['e3']);
+await applyWrite('events', whole);
+const after = await readCollection('events'); // vivants seulement
+
+assert.equal(after.find((e: any) => e.id === 'e1')?.t, 'A2', 'delta: upsert appliqué');
+assert.ok(!after.find((e: any) => e.id === 'e3'), 'delta: delete explicite → tombstoné');
+const e2After = after.find((e: any) => e.id === 'e2');
+assert.ok(e2After, 'delta: item non mentionné NON supprimé (pas de tombstone par omission)');
+assert.equal(e2After.updatedAt, e2Before, 'delta: item inchangé non réécrit (updatedAt préservé)');
+
 console.log('sync.check OK');

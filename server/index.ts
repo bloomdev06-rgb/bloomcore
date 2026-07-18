@@ -16,7 +16,7 @@ import { getCollection, setCollection, appendToCollection, getKv, setKv } from '
 import { hashPassword, verifyPassword, signToken, verifyToken, createOneTimeToken, consumeOneTimeToken, upsertCredentials, requireSecret, usingInsecureSecret, resolveBindHost } from './auth.ts';
 import { ensureSeeded } from './seed.ts';
 import { runBootMigration } from './bootMigrate.ts';
-import { applyWrite, readCollection, GuardError } from './guards.ts';
+import { applyWrite, readCollection, deltaToWhole, GuardError } from './guards.ts';
 import { buildContext, assertCanWrite, filterReadable, preservedIds, RbacContext } from './rbac.ts';
 import { dispatch } from './notify.ts';
 import { addClient, poke } from './stream.ts';
@@ -296,12 +296,22 @@ app.put('/api/v1/:name', requireAuth, async (req, res) => {
   const { name } = req.params;
   try {
     if (ARRAY_COLLECTIONS.has(name)) {
-      if (!Array.isArray(req.body)) return res.status(400).json({ error: 'expected an array' });
-      await assertCanWrite(name, (req as any).rbac, req.body);
+      // Deux formes : tableau complet (legacy) ou delta {upserts, deletes} (wire optimisé, cf.
+      // src/data/api.ts). Le delta est reconstruit en whole-array effectif → réutilise tel quel
+      // le pipeline scope/merge/tombstone, aucune logique de sécurité dupliquée.
+      let body: any[];
+      if (Array.isArray(req.body)) {
+        body = req.body;
+      } else if (req.body && Array.isArray(req.body.upserts) && Array.isArray(req.body.deletes)) {
+        body = await deltaToWhole(name, req.body.upserts, req.body.deletes);
+      } else {
+        return res.status(400).json({ error: 'expected an array or {upserts, deletes}' });
+      }
+      await assertCanWrite(name, (req as any).rbac, body);
       const asOf = typeof req.query.asOf === 'string' ? req.query.asOf : undefined;
       // Préserve les items hors de la portée de lecture de l'opérateur : un client scopé
       // n'a qu'un sous-ensemble, son PUT ne doit pas tombstoner ce qu'il ne voit pas.
-      const { added, conflicts } = await applyWrite(name, req.body, asOf, await preservedIds(name, (req as any).rbac));
+      const { added, conflicts } = await applyWrite(name, body, asOf, await preservedIds(name, (req as any).rbac));
       // Fan-out multicanal des notifications nouvellement créées (in-app déjà
       // réel côté client ; email/SMS/WhatsApp via adapters, simulés sans clés).
       if (name === 'notifications' && added.length) {

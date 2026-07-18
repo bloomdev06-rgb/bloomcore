@@ -38,6 +38,39 @@ function setSyncedAt(name: string, syncedAt: unknown): void {
   }
 }
 
+// --- Sync delta (per-row) ---
+// Snapshot du dernier état SYNCHRONISÉ par collection (id → JSON canonique) pour
+// pousser un delta {upserts, deletes} plutôt que le tableau entier (le PUT whole-array
+// devenait le mur à 4000 membres). En mémoire : semé au bootstrap et après chaque push
+// réussi ; absent → fallback whole-array (sûr). La file offline reste whole-array.
+const lastSynced = new Map<string, Map<string, string>>();
+
+function stableStringify(v: any): string {
+  if (v === null || typeof v !== 'object') return JSON.stringify(v);
+  if (Array.isArray(v)) return `[${v.map(stableStringify).join(',')}]`;
+  return `{${Object.keys(v).sort().map((k) => `${JSON.stringify(k)}:${stableStringify(v[k])}`).join(',')}}`;
+}
+
+function seedSyncSnapshot(name: string, arr: unknown): void {
+  if (Array.isArray(arr)) lastSynced.set(name, new Map(arr.map((it) => [String(it.id), stableStringify(it)])));
+}
+
+// Delta vs dernier sync réussi. null → pas de base → l'appelant pousse le tableau entier.
+function computeDelta(name: string, current: any[]): { upserts: any[]; deletes: string[] } | null {
+  const snap = lastSynced.get(name);
+  if (!snap) return null;
+  const upserts: any[] = [];
+  const curIds = new Set<string>();
+  for (const it of current) {
+    const id = String(it.id);
+    curIds.add(id);
+    if (snap.get(id) !== stableStringify(it)) upserts.push(it);
+  }
+  const deletes: string[] = [];
+  for (const id of snap.keys()) if (!curIds.has(id)) deletes.push(id);
+  return { upserts, deletes };
+}
+
 // Un item en conflit = un autre appareil l'a modifié entre-temps ; ce client
 // périmé n'écrase pas la version serveur (voir applyWrite). L'utilisateur doit
 // le savoir plutôt que de croire son écriture appliquée silencieusement.
@@ -74,8 +107,12 @@ export async function apiBootstrap(): Promise<Record<string, unknown> | null> {
       headers: { Authorization: `Bearer ${token}` },
     });
     if (!res.ok) return null;
+    const data = await res.json();
+    // L'état serveur devient la base des deltas à venir (avant le flush : les écritures
+    // en file seront rejouées en whole-array et re-sèmeront ces collections au succès).
+    for (const [k, v] of Object.entries(data)) seedSyncSnapshot(k, v);
     void flushSyncQueue(); // serveur joignable → rejouer les écritures en file
-    return await res.json();
+    return data;
   } catch {
     return null;
   }
@@ -137,7 +174,8 @@ export async function flushSyncQueue(): Promise<void> {
     const done = new Set([...(applied ?? []), ...(skipped ?? [])]);
     const rest = queue.filter((op) => !done.has(op.opId));
     localStorage.setItem(SYNC_QUEUE_KEY, JSON.stringify(rest));
-    for (const op of queue) if (done.has(op.opId)) setSyncedAt(op.name, syncedAt);
+    // Op appliquée en whole-array → le serveur a cet état ; il devient la base des deltas.
+    for (const op of queue) if (done.has(op.opId)) { setSyncedAt(op.name, syncedAt); seedSyncSnapshot(op.name, op.value); }
     if (rest.length !== queue.length) signalSyncChanged();
     reportConflicts(conflicts); // rattrapage : op multi-collections, pas de contexte unique
   } catch {
@@ -202,13 +240,17 @@ export async function apiUpload(dataUrl: string): Promise<string | null> {
 export async function apiPut(name: string, value: unknown): Promise<boolean> {
   const token = getAuthToken();
   if (!token) return false;
+  // Delta quand un snapshot existe : on n'envoie que les items changés/supprimés. Sinon
+  // (KV, ou pas de base) → valeur complète. La file offline garde TOUJOURS le whole-array.
+  const delta = Array.isArray(value) ? computeDelta(name, value) : null;
+  if (delta && delta.upserts.length === 0 && delta.deletes.length === 0) return true; // rien à pousser
   try {
     const asOf = getSyncedAt(name);
     const qs = asOf ? `?asOf=${encodeURIComponent(asOf)}` : '';
     const res = await fetch(`${API_BASE}/${name}${qs}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-      body: JSON.stringify(value),
+      body: JSON.stringify(delta ?? value),
     });
     // 401 (token expiré → réussira après re-login) et 5xx (transitoire) → file de rattrapage.
     // 400/403 (rejet permanent : requête invalide ou refus RBAC) NE sont PAS rejoués — les
@@ -217,6 +259,13 @@ export async function apiPut(name: string, value: unknown): Promise<boolean> {
     if (res.ok) {
       const data = await res.json().catch(() => ({}));
       setSyncedAt(name, data.syncedAt);
+      // Conflit → le serveur a gardé sa version pour certains items : on invalide le snapshot
+      // pour forcer un push whole-array au prochain coup (re-tente tout, asOf avancé → converge).
+      // Sinon le serveur a désormais exactement `value` → il devient la base des deltas suivants.
+      if (Array.isArray(value)) {
+        if (Array.isArray(data.conflicts) && data.conflicts.length) lastSynced.delete(name);
+        else seedSyncSnapshot(name, value);
+      }
       reportConflicts(data.conflicts, name);
     }
     return res.ok;

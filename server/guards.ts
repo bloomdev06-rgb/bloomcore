@@ -125,6 +125,10 @@ export async function applyWrite(
 
   for (const it of incoming) {
     const old = storedById.get(String(it.id));
+    // Item identique au stocké → ni réécriture (pas de bump updatedAt) ni conflit. Nécessaire au
+    // delta (le whole-array reconstruit inclut les items inchangés) et globalement plus juste :
+    // un whole-array PUT ne doit pas faire remonter en "conflit" un item qu'il n'a pas touché.
+    if (old && !old.deletedAt && canonical(old) === canonical(it)) continue;
     if (old && asOf && old.updatedAt && old.updatedAt > asOf) {
       conflicts.push(String(it.id)); // le serveur a une version plus récente que ce que ce client a vue
       continue;
@@ -176,4 +180,23 @@ export async function readCollection(name: string, includeDeleted = false): Prom
   const items = await getCollection(name);
   if (name === 'audits' || includeDeleted) return items;
   return items.filter((it) => !it.deletedAt);
+}
+
+// Contrat delta → whole-array effectif : reconstruit, à partir du stocké vivant + {upserts,
+// deletes}, le tableau que le pipeline existant (assertCanWrite + applyWrite) attend. Permet au
+// wire delta (client qui n'envoie que ses changements) de réutiliser TOUTE la logique
+// scope/merge/tombstone sans la dupliquer : les ids supprimés sont omis (→ tombstone par
+// omission), les upserts écrasent, le reste (y compris hors-portée) est conservé tel quel.
+export async function deltaToWhole(name: string, upserts: any[], deletes: string[]): Promise<any[]> {
+  const del = new Set((deletes ?? []).map(String));
+  const upById = new Map((upserts ?? []).map((it) => [String(it.id), it]));
+  const out: any[] = [];
+  for (const s of await readCollection(name)) {
+    const id = String(s.id);
+    if (del.has(id)) continue; // suppression explicite → omise → applyWrite la tombstone
+    out.push(upById.get(id) ?? s);
+    upById.delete(id);
+  }
+  for (const it of upById.values()) out.push(it); // upserts de nouveaux ids (ou résurrections)
+  return out;
 }
