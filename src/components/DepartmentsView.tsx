@@ -159,13 +159,13 @@ export default function DepartmentsView({ activeBranch, simulatedRole, members =
     if (statusConfirm.transition === 'reception') {
       onUpdateMember?.({ ...m, receptionValidated: true });
     } else if (statusConfirm.transition === 'stagiaire') {
-      onUpdateMember?.({ ...m, level: 'Stagiaire' });
+      onUpdateMember?.({ ...m, level: 'stagiaire' });
     } else if (statusConfirm.transition === 'membre') {
       onUpdateMember?.({
         ...m,
-        level: 'Boss',
+        level: 'boss',
         hasPassedToBossForm: true, // §6.2 — le passage Boss lève la fiche membre
-        departments: { ...m.departments, [selectedDept]: 'Membre' },
+        departments: { ...m.departments, [selectedDept]: 'membre' },
       });
     } else if (statusConfirm.transition === 'bloom_bus_validate') {
       onUpdateMember?.({ ...m, deptAttachmentStatus: 'validated' });

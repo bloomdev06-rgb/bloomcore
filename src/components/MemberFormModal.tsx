@@ -92,8 +92,8 @@ export default function MemberFormModal({
   const [baptismViaDepartment, setBaptismViaDepartment] = useState(false);
   const [deptName, setDeptName] = useState("dept_louange");
   const [deptRole, setDeptRole] = useState<
-    "Responsable" | "Adjoint" | "Membre" | "Capitaine de Bus"
-  >("Membre");
+    "responsable" | "adjoint" | "membre" | "capitaine"
+  >("membre");
   const [depts, setDepts] = useState<Member["departments"]>({});
   const [busZone, setBusZone] = useState("");
   const [selectedBloomBusId, setSelectedBloomBusId] = useState("");
@@ -775,13 +775,13 @@ export default function MemberFormModal({
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
               <select
                 value={baptismStatus}
-                onChange={(e) => setBaptismStatus(e.target.value as "Non baptisé" | "Baptisé")}
+                onChange={(e) => setBaptismStatus(e.target.value as "non_baptise" | "baptise")}
                 className="w-full border border-bc-border rounded-full px-3 py-1.5 text-xs bg-white"
               >
                 <option value="non_baptise">Non baptisé</option>
                 <option value="baptise">Baptisé</option>
               </select>
-              {baptismStatus === "Baptisé" && (
+              {baptismStatus === "baptise" && (
                 <>
                   <div>
                     <label className="block text-[10px] font-bold text-bc-text-secondary mb-1">{membreLabel('f18', 'Date de baptême')}</label>

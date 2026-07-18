@@ -16,7 +16,7 @@ export default function MiniCalendar({ events = [] }: { events?: Event[] }) {
     closed: e.closed,
   }));
   const [currentDate, setCurrentDate] = useState(new Date()); // mois courant
-  const [selectedEvent, setSelectedEvent] = useState<any | null>(null);
+  const [selectedDay, setSelectedDay] = useState<string | null>(null);
 
   const nextMonth = () => setCurrentDate(new Date(currentDate.getFullYear(), currentDate.getMonth() + 1, 1));
   const prevMonth = () => setCurrentDate(new Date(currentDate.getFullYear(), currentDate.getMonth() - 1, 1));
@@ -38,15 +38,15 @@ export default function MiniCalendar({ events = [] }: { events?: Event[] }) {
 
   for (let d = 1; d <= daysInMonth; d++) {
     const dateStr = `${currentDate.getFullYear()}-${String(currentDate.getMonth() + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
-    const event = EVENTS.find(e => e.date === dateStr);
-    
+    const dayEvents = EVENTS.filter((e) => e.date === dateStr);
+
     days.push(
       <button
         key={d}
-        onClick={() => event && setSelectedEvent(event)}
+        onClick={() => dayEvents.length && setSelectedDay(dateStr)}
         className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-medium transition-colors active-scale ease-out-spring ${
-          event 
-            ? 'bg-bc-green text-white shadow-md hover:scale-110' 
+          dayEvents.length
+            ? 'bg-bc-green text-white shadow-md hover:scale-110'
             : 'text-bc-text-secondary hover:bg-bc-canvas'
         }`}
       >
@@ -54,6 +54,8 @@ export default function MiniCalendar({ events = [] }: { events?: Event[] }) {
       </button>
     );
   }
+
+  const popoverEvents = selectedDay ? EVENTS.filter((e) => e.date === selectedDay) : [];
 
   return (
     <div className="bg-white rounded-[2rem] border border-bc-border shadow-sm p-5 mb-6">
@@ -81,25 +83,31 @@ export default function MiniCalendar({ events = [] }: { events?: Event[] }) {
       </div>
 
       <AnimatePresence>
-        {selectedEvent && (
-          <motion.div 
+        {selectedDay && popoverEvents.length > 0 && (
+          <motion.div
             initial={{ opacity: 0, y: 10 }}
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: 10 }}
             className="mt-4 p-4 bg-bc-canvas rounded-2xl border border-bc-border relative"
           >
-            <button 
-              onClick={() => setSelectedEvent(null)}
+            <button
+              onClick={() => setSelectedDay(null)}
               className="absolute top-2 right-2 p-1 rounded-full text-bc-text-secondary hover:text-bc-text hover:bg-bc-canvas transition-colors active-scale"
             >
               <X size={14} />
             </button>
             <div className="pr-6">
-              <span className="text-[10px] font-bold uppercase text-bc-green mb-1 block">
-                {new Date(selectedEvent.date).toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long' })}
+              <span className="text-[10px] font-bold uppercase text-bc-green mb-2 block">
+                {new Date(selectedDay).toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long' })}
               </span>
-              <h4 className="font-bold text-bc-text text-sm mb-1">{selectedEvent.title}</h4>
-              <p className="text-xs text-bc-text-secondary">{selectedEvent.location}{selectedEvent.closed ? ' • Clôturé' : ''}</p>
+              <ul className="space-y-2">
+                {popoverEvents.map((ev, i) => (
+                  <li key={i} className={i > 0 ? 'pt-2 border-t border-bc-border' : ''}>
+                    <h4 className="font-bold text-bc-text text-sm">{ev.title}</h4>
+                    <p className="text-xs text-bc-text-secondary">{ev.location}{ev.closed ? ' • Clôturé' : ''}</p>
+                  </li>
+                ))}
+              </ul>
             </div>
           </motion.div>
         )}
