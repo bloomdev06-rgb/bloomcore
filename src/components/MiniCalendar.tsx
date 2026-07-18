@@ -98,7 +98,7 @@ export default function MiniCalendar({ events = [] }: { events?: Event[] }) {
             </button>
             <div className="pr-6">
               <span className="text-[10px] font-bold uppercase text-bc-green mb-2 block">
-                {new Date(selectedDay).toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long' })}
+                {new Date(`${selectedDay}T12:00:00`).toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long' })}
               </span>
               <ul className="space-y-2">
                 {popoverEvents.map((ev, i) => (

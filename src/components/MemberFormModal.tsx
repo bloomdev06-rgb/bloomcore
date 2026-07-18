@@ -124,7 +124,7 @@ export default function MemberFormModal({
       setBaptismViaDepartment(member.baptismViaDepartment ?? false);
       const firstDept = lockDepartmentId || Object.keys(member.departments)[0] || "dept_louange";
       setDeptName(firstDept);
-      setDeptRole((member.departments[firstDept] as any) || "Membre");
+      setDeptRole((member.departments[firstDept] as any) || "membre");
       setDepts({ ...member.departments });
       setBusZone(busLines.find((b) => b.id === member.bloomBusId)?.zone || "");
       setSelectedBloomBusId(member.bloomBusId || "");
@@ -150,7 +150,7 @@ export default function MemberFormModal({
       setBaptismDate("");
       setBaptismViaDepartment(false);
       setDeptName(lockDepartmentId || "dept_louange");
-      setDeptRole("Membre");
+      setDeptRole("membre");
       setDepts({});
       setBusZone("");
       setSelectedBloomBusId("");
@@ -254,7 +254,7 @@ export default function MemberFormModal({
 
     const updatedDepartments: Member["departments"] =
       directBloomBusRegistration && busDeptId
-        ? { [busDeptId]: "Membre" as any }
+        ? { [busDeptId]: "membre" as any }
         : lockDepartmentId
           ? { [lockDepartmentId]: deptRole as any }
           : canEditDepartments === false
