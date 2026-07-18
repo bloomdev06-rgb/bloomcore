@@ -391,7 +391,9 @@ export function periodHealthLevels(
     social: axis('socVal'),
     physique: axis('phyVal'),
     financier: axis('finVal'),
-    presenceCulte: dominantLevel(rows.map((r) => (r.content?.culte ? 1 : 0))),
+    // content.culte = créneau de culte fréquenté (présence) → 5 si présent, 1 sinon
+    // (échelle 1-5 du smiley ; auparavant 1/0 rendait toute présence en 😡).
+    presenceCulte: dominantLevel(rows.map((r) => (r.content?.culte ? 5 : 1))),
   };
 }
 

@@ -1,5 +1,6 @@
 import React, { useState, useEffect, lazy, Suspense } from 'react';
 import { load, save, seeds, useDepartments, useMinistries, useBusLines, useAdmins, deriveTimeBasedNotifications, apiBootstrap, apiPut, clearAuthToken, enableSync, canView, openNotificationStream, apiFetchCollection, labelFor } from './data';
+import { reportName } from './data/reportNames';
 import { resolveMemberRole } from './data/roles';
 import { MEMBERS_TAB_DEPT_ONLY_ROLES } from './data/scope';
 import { isLegacySeedEventId } from './data/events';
@@ -445,7 +446,7 @@ export default function App() {
       actionType: 'REPORT_SUBMITTED',
       operatorName: r.authorName,
       operatorId: r.authorId,
-      details: `Soumission d'un rapport de type ${r.reportType} pour la branche ${r.targetBranch}.`,
+      details: `Soumission d'un rapport de type ${reportName(r.reportType)} pour la branche ${r.targetBranch}.`,
       branch: r.targetBranch
     };
     handleAddAuditLog(log);
