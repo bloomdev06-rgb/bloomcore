@@ -12,13 +12,13 @@ import { ReportType } from '../enums';
 
 const count = z.number().int().min(0); // compteurs H/F : entiers ≥ 0
 
-// rapport_adn — { nouveauxHommes, nouveauxFemmes, ojHommes, ojFemmes } (AdnView + EventsView,
-// identiques). Alimente Moisson/OJ : des compteurs invalides corrompent les KPI → à durcir.
+// rapport_adn — { nouveauxH, nouveauxF, ojH, ojF } (M5 §3, convergé depuis nouveauxHommes/…).
+// Alimente Moisson/OJ : des compteurs invalides corrompent les KPI → à durcir.
 export const rapportAdnSchema = z.object({
-  nouveauxHommes: count,
-  nouveauxFemmes: count,
-  ojHommes: count,
-  ojFemmes: count,
+  nouveauxH: count,
+  nouveauxF: count,
+  ojH: count,
+  ojF: count,
 });
 
 // Registre type → schéma. Partiel : on complète au fil des jalons.

@@ -114,13 +114,13 @@ for (let i = 0; i < 9; i++) deep = { n: deep };
 assert.throws(() => applyWrite('members', [{ id: 'm15', ...deep }]), (e: any) => e instanceof GuardError && e.status === 400, 'imbrication trop profonde rejetée');
 
 // --- M2 : enforcement Zod des payloads de rapport sur la sync (nouveaux/modifiés seulement) ---
-const adnOk = { nouveauxHommes: 2, nouveauxFemmes: 3, ojHommes: 1, ojFemmes: 0 };
+const adnOk = { nouveauxH: 2, nouveauxF: 3, ojH: 1, ojF: 0 };
 // rapport adn valide accepté
 applyWrite('reports', [{ id: 'rep1', reportType: 'rapport_adn', content: adnOk }]);
 assert.ok(readCollection('reports').some((r: any) => r.id === 'rep1'), 'rapport adn valide écrit');
 // rapport adn invalide (compteur négatif) → 400, rien écrit
 assert.throws(
-  () => applyWrite('reports', [{ id: 'rep1', reportType: 'rapport_adn', content: adnOk }, { id: 'rep2', reportType: 'rapport_adn', content: { ...adnOk, ojHommes: -5 } }]),
+  () => applyWrite('reports', [{ id: 'rep1', reportType: 'rapport_adn', content: adnOk }, { id: 'rep2', reportType: 'rapport_adn', content: { ...adnOk, ojH: -5 } }]),
   (e: any) => e instanceof GuardError && e.status === 400,
   'nouveau rapport adn invalide rejeté',
 );
@@ -128,12 +128,12 @@ assert.ok(!readCollection('reports').some((r: any) => r.id === 'rep2'), 'rapport
 // LEGACY-SAFE : un rapport déjà stocké mais invalide, renvoyé INCHANGÉ, ne bloque pas la sync.
 // On l'injecte directement en base (contourne applyWrite) pour simuler du legacy pré-validation.
 const { mergeCollection } = await import('./db.ts');
-mergeCollection('reports', [{ id: 'legacy1', reportType: 'rapport_adn', content: { nouveauxHommes: -99 }, updatedAt: '2020-01-01' }]);
-applyWrite('reports', [{ id: 'rep1', reportType: 'rapport_adn', content: adnOk }, { id: 'legacy1', reportType: 'rapport_adn', content: { nouveauxHommes: -99 }, updatedAt: '2020-01-01' }]);
+mergeCollection('reports', [{ id: 'legacy1', reportType: 'rapport_adn', content: { nouveauxH: -99 }, updatedAt: '2020-01-01' }]);
+applyWrite('reports', [{ id: 'rep1', reportType: 'rapport_adn', content: adnOk }, { id: 'legacy1', reportType: 'rapport_adn', content: { nouveauxH: -99 }, updatedAt: '2020-01-01' }]);
 assert.ok(readCollection('reports').some((r: any) => r.id === 'legacy1'), 'rapport legacy invalide inchangé toléré');
 // mais si on MODIFIE ce legacy avec un payload toujours invalide → rejeté
 assert.throws(
-  () => applyWrite('reports', [{ id: 'legacy1', reportType: 'rapport_adn', content: { nouveauxHommes: -1, nouveauxFemmes: 0, ojHommes: 0, ojFemmes: 0 } }]),
+  () => applyWrite('reports', [{ id: 'legacy1', reportType: 'rapport_adn', content: { nouveauxH: -1, nouveauxF: 0, ojH: 0, ojF: 0 } }]),
   (e: any) => e instanceof GuardError && e.status === 400,
   'modification de legacy vers payload invalide rejetée',
 );

@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { Award, CheckCircle, Plus, Clock, Droplet, Search, ChevronLeft, X } from 'lucide-react';
 import { Member, Branch, AuditLog, PermissionMatrix, Delegation, FormDef, Report, Step, CapabilityOverride, SpecialAuthorization } from '../types';
-import { useBusLines, useDepartments, useMinistries, load, resolveCapability } from '../data';
+import { useBusLines, useDepartments, useMinistries, load, resolveCapability, labelFor } from '../data';
 import { inMemberScope } from '../data/scope';
 import { Avatar } from './ui/Avatar';
 import { Modal } from './ui/Modal';
@@ -56,9 +56,9 @@ export default function ProgrammesView({
   );
 
   // Candidat = inscrit au parcours (dept Baptême + étape courante), pas encore baptisé.
-  const candidates = scopedMembers.filter(m => m.baptismStatus !== 'Baptisé' && m.currentStepId && m.departments?.dept_bapteme);
-  const enrollable = scopedMembers.filter(m => m.baptismStatus !== 'Baptisé' && !(m.currentStepId && m.departments?.dept_bapteme));
-  const baptised = scopedMembers.filter(m => m.baptismStatus === 'Baptisé');
+  const candidates = scopedMembers.filter(m => m.baptismStatus !== 'baptise' && m.currentStepId && m.departments?.dept_bapteme);
+  const enrollable = scopedMembers.filter(m => m.baptismStatus !== 'baptise' && !(m.currentStepId && m.departments?.dept_bapteme));
+  const baptised = scopedMembers.filter(m => m.baptismStatus === 'baptise');
 
   // Liste des baptisés passés par le département, sur une période (sélecteur).
   const today = new Date();
@@ -102,7 +102,7 @@ export default function ProgrammesView({
     if (next >= steps.length) {
       onUpdateMember({
         ...m,
-        baptismStatus: 'Baptisé',
+        baptismStatus: 'baptise',
         baptismDate: new Date().toISOString().split('T')[0],
         baptismViaDepartment: true, // §9.2 — passé par le process du département
         currentStepId: undefined,
@@ -161,7 +161,7 @@ export default function ProgrammesView({
                         <Avatar src={m.avatarUrl} initials={`${m.firstName[0]}${m.lastName[0]}`} size="sm" className="w-8 h-8 bg-bc-canvas border border-bc-border text-[10px]" />
                         <div>
                           <h5 className="font-ui font-bold text-xs text-bc-text">{m.lastName} {m.firstName}</h5>
-                          <p className="text-[9px] text-bc-text-secondary font-mono">{m.phone}{m.level === 'Nouveau' ? ' · Nouveau' : ''}</p>
+                          <p className="text-[9px] text-bc-text-secondary font-mono">{m.phone}{m.level === 'nouveau' ? ' · Nouveau' : ''}</p>
                         </div>
                       </button>
                       <span className="text-[8px] bg-bc-green/15 text-bc-text px-2 py-0.5 rounded-full font-bold uppercase">
@@ -280,7 +280,7 @@ export default function ProgrammesView({
                       <Avatar src={m.avatarUrl} initials={`${m.firstName[0]}${m.lastName[0]}`} size="sm" className="w-7 h-7 bg-bc-canvas border border-bc-border text-[10px]" />
                       <span className="min-w-0">
                         <span className="block text-xs font-bold text-bc-text truncate">{m.firstName} {m.lastName}</span>
-                        <span className="block text-[9px] text-bc-text-secondary">{m.level}{m.level === 'Nouveau' ? ' (base des nouveaux)' : ''} · {m.phone}</span>
+                        <span className="block text-[9px] text-bc-text-secondary">{labelFor(m.level)}{m.level === 'nouveau' ? ' (base des nouveaux)' : ''} · {m.phone}</span>
                       </span>
                     </span>
                     <Plus size={13} className="text-bc-green shrink-0" />

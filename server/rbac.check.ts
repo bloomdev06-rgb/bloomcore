@@ -8,8 +8,8 @@ const { GuardError } = await import('./guards.ts');
 
 const baseMember = (over: any = {}) => ({
   id: 'm1', firstName: 'A', lastName: 'B', phone: '+225', gender: 'H', birthDate: '2000-01-01',
-  maritalStatus: 'Célibataire', profession: '', branch: 'church', level: 'Stagiaire',
-  pastoralCursus: 'Aucun', baptismStatus: 'Non baptisé', departments: {}, entryDate: '2026-01-01',
+  maritalStatus: 'Célibataire', profession: '', branch: 'church', level: 'stagiaire',
+  pastoralCursus: 'aucun', baptismStatus: 'non_baptise', departments: {}, entryDate: '2026-01-01',
   healthKPIs: { spirituel: 3, social: 3, financier: 3, physique: 3, presenceCulte: 3, presenceService: 3 },
   ...over,
 });
@@ -19,14 +19,14 @@ const superAdmin = baseMember({ id: 'mem_sa' });
 const admins = [{ id: 'adm_mem_sa', name: 'SA', subtitle: '', role: 'Super Admin' as const }];
 assert.ok(resolveRoles(superAdmin as any, admins as any, []).includes('Super Admin'), 'Super Admin via admins');
 
-const pasteur = baseMember({ id: 'm2', pastoralCursus: 'Pasteur Titulaire' });
+const pasteur = baseMember({ id: 'm2', pastoralCursus: 'pasteur_titulaire' });
 assert.ok(resolveRoles(pasteur as any, [], []).includes('Pasteur'), 'Pasteur via cursus');
 
 const ministre = baseMember({ id: 'm3' });
 const ministries = [{ id: 'min1', name: 'M', description: '', tuteurId: 'm3' }];
 assert.ok(resolveRoles(ministre as any, [], ministries as any).includes('Ministre'), 'Ministre via tuteurId');
 
-const resp = baseMember({ id: 'm4', departments: { d1: 'Responsable' } });
+const resp = baseMember({ id: 'm4', departments: { d1: 'responsable' } });
 assert.ok(resolveRoles(resp as any, [], []).includes('Responsable'), 'Responsable via departments');
 
 const simple = baseMember({ id: 'm5' });
@@ -34,7 +34,7 @@ assert.deepEqual(resolveRoles(simple as any, [], []), ['Membre'], 'simple membre
 
 // --- assertCanWrite via contexte réel (DB :memory:) ---
 setKv('permissions', { view_members: { Responsable: true } });
-applyWrite('members', [superAdmin, pasteur, ministre, resp, simple, baseMember({ id: 'm6', departments: { d1: 'Membre' } }), baseMember({ id: 'm7' })]);
+applyWrite('members', [superAdmin, pasteur, ministre, resp, simple, baseMember({ id: 'm6', departments: { d1: 'membre' } }), baseMember({ id: 'm7' })]);
 applyWrite('admins', [...admins, { id: 'adm_m7', name: 'AD', subtitle: '', role: 'Admin' }] as any);
 applyWrite('ministries', ministries as any);
 applyWrite('departments', [{ id: 'd1', name: 'D1', ministryId: 'min1', type: 'normal' }]);
@@ -57,7 +57,7 @@ assertCanWrite('members', ctxSA, []);
 
 // Responsable : capacité OK (matrice), scope département — m6 partage d1, m5 non.
 const ctxResp = buildContext('m4')!;
-const allMembers = [superAdmin, pasteur, ministre, resp, simple, baseMember({ id: 'm6', departments: { d1: 'Membre' } })];
+const allMembers = [superAdmin, pasteur, ministre, resp, simple, baseMember({ id: 'm6', departments: { d1: 'membre' } })];
 // Écriture whole-array (usage réel du client) éditant m6 dans son scope → OK.
 assertCanWrite('members', ctxResp, allMembers.map((m: any) => (m.id === 'm6' ? { ...m, profession: 'edit' } : m)));
 // Éditer un membre hors scope (m5) → rejeté.
@@ -142,7 +142,7 @@ assertCanWrite('special_authorizations', ctxSA, [saItem({ id: 'sa_self', memberI
 
 // --- M3-report §240/§5 : visibilité des rapports de SUIVI de membre (confidentiels) ---
 // Re-seed les membres du scénario (les tests de scope plus haut ont tombstoné m8 via un PUT scopé).
-applyWrite('members', [superAdmin, pasteur, ministre, resp, simple, baseMember({ id: 'm6', departments: { d1: 'Membre' } }), baseMember({ id: 'm8', departments: { d1: 'Coach' } })]);
+applyWrite('members', [superAdmin, pasteur, ministre, resp, simple, baseMember({ id: 'm6', departments: { d1: 'membre' } }), baseMember({ id: 'm8', departments: { d1: 'Coach' } })]);
 const suivi = { id: 'rep_suivi', reportType: 'rapport_suivi_coach', confidential: true, content: { memberId: 'm6' }, targetBranch: 'church', date: '2026-07-15', authorId: 'm8' };
 const suiviM5 = { ...suivi, id: 'rep_suivi5', content: { memberId: 'm5' } }; // sujet hors périmètre de m4
 const ctxCoach = buildContext('m8')!;

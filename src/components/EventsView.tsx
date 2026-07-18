@@ -299,10 +299,10 @@ export default function EventsView({
       eventId: selectedEventId,
       confidential: false,
       content: {
-        nouveauxHommes: newMenADN,
-        nouveauxFemmes: newWomenADN,
-        ojHommes: ojMen,
-        ojFemmes: ojWomen
+        nouveauxH: newMenADN,
+        nouveauxF: newWomenADN,
+        ojH: ojMen,
+        ojF: ojWomen
       }
     };
 
@@ -389,8 +389,8 @@ export default function EventsView({
     const portiers = evReports.find(r => r.reportType === 'rapport_portiers');
     const adn = evReports.find(r => r.reportType === 'rapport_adn');
     const affluence = portiers ? (portiers.content.total ?? (portiers.content.men + portiers.content.women)) : 0;
-    const nouveaux = adn ? (adn.content.nouveauxHommes || 0) + (adn.content.nouveauxFemmes || 0) : 0;
-    const oj = adn ? (adn.content.ojHommes || 0) + (adn.content.ojFemmes || 0) : 0;
+    const nouveaux = adn ? (adn.content.nouveauxH || 0) + (adn.content.nouveauxF || 0) : 0;
+    const oj = adn ? (adn.content.ojH || 0) + (adn.content.ojF || 0) : 0;
     return (
       <div className="space-y-6 animate-in slide-in-from-right-4 duration-300">
         <div className="flex justify-between items-start">
@@ -456,8 +456,8 @@ export default function EventsView({
             {/* Consolidated stats */}
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
               <StatCard label="Affluence (Portiers)" value={affluence} sub={portiers ? `${portiers.content.men} H · ${portiers.content.women} F` : 'aucun rapport'} />
-              <StatCard label="Nouveaux (ADN)" value={nouveaux} sub={adn ? `${adn.content.nouveauxHommes} H · ${adn.content.nouveauxFemmes} F` : 'aucun rapport'} />
-              <StatCard label="OJ « Oui à Jésus »" value={oj} sub={adn ? `${adn.content.ojHommes} H · ${adn.content.ojFemmes} F` : 'aucun rapport'} />
+              <StatCard label="Nouveaux (ADN)" value={nouveaux} sub={adn ? `${adn.content.nouveauxH} H · ${adn.content.nouveauxF} F` : 'aucun rapport'} />
+              <StatCard label="OJ « Oui à Jésus »" value={oj} sub={adn ? `${adn.content.ojH} H · ${adn.content.ojF} F` : 'aucun rapport'} />
               <StatCard label="Rapports rattachés" value={evReports.length} sub="consolidés" />
             </div>
 

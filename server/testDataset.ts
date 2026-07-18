@@ -27,7 +27,7 @@ const weekOffset = (iso: string, n: number) => {
 // Mises à jour de cohérence des comptes test existants (mutation en place).
 export function patchTestProfiles(members: Member[], ministries: Ministry[]): void {
   const t6 = members.find((m) => m.id === 'mem_test_6');
-  if (t6) { t6.departments = { dept_bloom_bus: 'Responsable' as DeptFunction }; t6.gps = { lat: 5.3854, lng: -3.9781, commune: 'Cocody' }; }
+  if (t6) { t6.departments = { dept_bloom_bus: 'responsable' as DeptFunction }; t6.gps = { lat: 5.3854, lng: -3.9781, commune: 'Cocody' }; }
   const t10 = members.find((m) => m.id === 'mem_test_10');
   if (t10) t10.gps = { lat: 5.3436, lng: -4.0722, commune: 'Yopougon' };
   const minExp = ministries.find((m) => m.id === 'min_expansion');
@@ -72,8 +72,8 @@ const CAPTAIN_REUSE: Record<string, string> = { bus_yop_maroc: 'mem_test_10' };
 // Buses « complets » (tous rapports validés) pour tester la complétude à 100 %.
 const COMPLETE_BUS = new Set(['bus_coc_angre', 'stds_bus_coc_2plateaux', 'bus_kou_sogefiha']);
 
-const PASTORAL: PastoralCursus[] = ['Appelé', 'Serviteur', "Gagneur d'âme", 'Assistant Pasteur', 'Pasteur Assistant', 'Pasteur Titulaire'];
-const INTEG_STATE = ['En attente', 'Suivi', 'Intégré'] as const;
+const PASTORAL: PastoralCursus[] = ['appele', 'serviteur', 'gagneur_ame', 'assistant_pasteur', 'pasteur_assistant', 'pasteur_titulaire'];
+const INTEG_STATE = ['en_attente', 'suivi', 'integre'] as const;
 const INTEG_FOLLOW = ['Non suivi', 'En attente', 'En cours', 'À recontacter', 'Intégré', 'Non intégré'] as const;
 
 export interface TestDataset {
@@ -164,7 +164,7 @@ export function buildTestDataset(departments: Department[], existingBusLines: Bl
     if (zoneLead[zone]) continue;
     const b = firstBusOfZone.get(zone)!;
     const m = mkMember(`stds_zone_${b.id}`, {
-      departments: { dept_bloom_bus: 'Responsable de Zone' as DeptFunction }, bloomBusId: b.id, level: 'Leader',
+      departments: { dept_bloom_bus: 'responsable_zone' as DeptFunction }, bloomBusId: b.id, level: 'leader',
       gps: { lat: b.centerLat, lng: b.centerLng, commune: b.commune },
     });
     members.push(m); zoneLead[zone] = m.id;
@@ -176,10 +176,10 @@ export function buildTestDataset(departments: Department[], existingBusLines: Bl
   const ministreCommuneOf: Record<number, string> = { 0: 'Yopougon', 1: 'Marcory' }; // ministres 0 & 1 = resp. commune
   for (let k = 0; k < 4; k++) {
     const commune = ministreCommuneOf[k];
-    const extra: Partial<Member> = { level: 'Coach', pastoralCursus: k === 3 ? 'Serviteur' : 'Aucun' };
+    const extra: Partial<Member> = { level: 'coach', pastoralCursus: k === 3 ? 'serviteur' : 'aucun' };
     if (commune) {
       const b = firstBusOfCommune.get(commune)!;
-      extra.departments = { dept_bloom_bus: 'Responsable de Commune' as DeptFunction };
+      extra.departments = { dept_bloom_bus: 'responsable_commune' as DeptFunction };
       extra.bloomBusId = b.id;
       extra.gps = { lat: b.centerLat, lng: b.centerLng, commune };
     } else {
@@ -197,7 +197,7 @@ export function buildTestDataset(departments: Department[], existingBusLines: Bl
     if (communeLead[commune]) continue;
     const b = firstBusOfCommune.get(commune)!;
     const m = mkMember(`stds_commune_${b.commune.toLowerCase()}`, {
-      departments: { dept_bloom_bus: 'Responsable de Commune' as DeptFunction }, bloomBusId: b.id, level: 'Coach',
+      departments: { dept_bloom_bus: 'responsable_commune' as DeptFunction }, bloomBusId: b.id, level: 'coach',
       gps: { lat: b.centerLat, lng: b.centerLng, commune },
     });
     members.push(m); communeLead[commune] = m.id;
@@ -208,7 +208,7 @@ export function buildTestDataset(departments: Department[], existingBusLines: Bl
     { s2: 'none', s1: 'none' }, { s2: 'none', s1: 'pending' }, { s2: 'pending', s1: 'validated' },
     { s2: 'validated', s1: 'validated' }, { s2: 'validated', s1: 'pending' }, { s2: 'pending', s1: 'none' },
   ] as const;
-  const MEMBER_LEVELS: CommunityLevel[] = ['Stagiaire', 'Boss', 'Leader', 'Coach']; // pas 'Nouveau' (exclu des bus)
+  const MEMBER_LEVELS: CommunityLevel[] = ['stagiaire', 'boss', 'leader', 'coach']; // pas 'Nouveau' (exclu des bus)
 
   for (const bus of allBuses) {
     // Capitaine
@@ -219,7 +219,7 @@ export function buildTestDataset(departments: Department[], existingBusLines: Bl
       capName = c ? `${c.firstName} ${c.lastName}` : 'Capitaine';
     } else {
       const cap = mkMember(`stds_cap_${bus.id}`, {
-        departments: { dept_bloom_bus: 'Capitaine de Bus' as DeptFunction }, bloomBusId: bus.id, level: 'Coach',
+        departments: { dept_bloom_bus: 'capitaine' as DeptFunction }, bloomBusId: bus.id, level: 'coach',
         gps: { lat: jitter(bus.centerLat, 0), lng: jitter(bus.centerLng, 0), commune: bus.commune },
       });
       members.push(cap); capId = cap.id; capName = `${cap.firstName} ${cap.lastName}`;
@@ -227,7 +227,7 @@ export function buildTestDataset(departments: Department[], existingBusLines: Bl
     // 12 membres du bus (distincts, un seul bloomBusId)
     for (let i = 0; i < 12; i++) {
       const m = mkMember(`stds_m_${bus.id}_${i}`, {
-        bloomBusId: bus.id, departments: { dept_bloom_bus: 'Membre' as DeptFunction }, level: MEMBER_LEVELS[i % MEMBER_LEVELS.length],
+        bloomBusId: bus.id, departments: { dept_bloom_bus: 'membre' as DeptFunction }, level: MEMBER_LEVELS[i % MEMBER_LEVELS.length],
         gps: { lat: jitter(bus.centerLat, i + 1), lng: jitter(bus.centerLng, i + 1), commune: bus.commune },
         healthKPIs: { spirituel: 2 + (i % 4), social: 3, financier: 2 + (i % 3), physique: 3, presenceCulte: 2 + (i % 4), presenceService: 3 },
       });
@@ -249,7 +249,7 @@ export function buildTestDataset(departments: Department[], existingBusLines: Bl
   // -------- 3bis) Cursus pastoral (jusqu'à Pasteur) --------
   for (let k = 0; k < PASTORAL.length; k++) {
     members.push(mkMember(`stds_pastoral_${k}`, {
-      pastoralCursus: PASTORAL[k], level: 'Coach', departments: { dept_mres: 'Membre' as DeptFunction },
+      pastoralCursus: PASTORAL[k], level: 'coach', departments: { dept_mres: 'membre' as DeptFunction },
       gps: { lat: 5.36 + k * 0.005, lng: -3.99, commune: 'Cocody' },
     }));
   }
@@ -257,8 +257,8 @@ export function buildTestDataset(departments: Department[], existingBusLines: Bl
   // -------- 4) Nouveaux à divers stades d'intégration --------
   for (let k = 0; k < 15; k++) {
     members.push(mkMember(`stds_nouveau_${k}`, {
-      level: 'Nouveau', hasPassedToBossForm: false, baptismStatus: 'Non baptisé',
-      departments: { dept_adn: 'Membre' as DeptFunction },
+      level: 'nouveau', hasPassedToBossForm: false, baptismStatus: 'non_baptise',
+      departments: { dept_adn: 'membre' as DeptFunction },
       integrationState: INTEG_STATE[k % INTEG_STATE.length],
       integrationFollowStatus: INTEG_FOLLOW[k % INTEG_FOLLOW.length],
       integrationDateRegistered: weekOffset(CUR, -(k % 6)),
@@ -274,7 +274,7 @@ export function buildTestDataset(departments: Department[], existingBusLines: Bl
     if (d.specialFunction === 'bloom_bus') continue;
     for (let j = 0; j < 1 + (di % 2); j++) { // 1 ou 2 par dept
       members.push(mkMember(`stds_dept_${d.id}_${j}`, {
-        departments: { [d.id]: (j === 0 ? 'Membre' : 'Adjoint') as DeptFunction },
+        departments: { [d.id]: (j === 0 ? 'membre' : 'adjoint') as DeptFunction },
         level: MEMBER_LEVELS[(di + j) % MEMBER_LEVELS.length],
         gps: { lat: 5.35 + (di % 7) * 0.008, lng: -4.0 + (di % 5) * 0.008, commune: communes[di % communes.length] },
       }));
@@ -287,7 +287,7 @@ export function buildTestDataset(departments: Department[], existingBusLines: Bl
   for (let i = 0; i < pendingBuses.length; i++) {
     const b = busById.get(pendingBuses[i])!;
     members.push(mkMember(`stds_pending_${i}`, {
-      departments: { dept_bloom_bus: 'Membre' as DeptFunction }, bloomBusId: b.id, level: 'Stagiaire',
+      departments: { dept_bloom_bus: 'membre' as DeptFunction }, bloomBusId: b.id, level: 'stagiaire',
       deptAttachmentStatus: 'pending', deptAttachmentOrigin: 'bloom_bus',
       gps: { lat: jitter(b.centerLat, i), lng: jitter(b.centerLng, i), commune: b.commune },
     }));

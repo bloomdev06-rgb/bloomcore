@@ -102,11 +102,11 @@ export default function AdnView({
       maritalStatus: 'Célibataire',
       profession: 'Étudiant',
       branch: activeBranch === 'global' ? (receptionEvent?.branch === 'light' ? 'light' : 'church') : activeBranch,
-      level: 'Nouveau',
-      pastoralCursus: 'Aucun',
-      departments: { [quickDept]: 'Membre' },
+      level: 'nouveau',
+      pastoralCursus: 'aucun',
+      departments: { [quickDept]: 'membre' },
       entryDate: activityDate,
-      integrationState: 'En attente',
+      integrationState: 'en_attente',
       receptionValidated: false, // §6.2 — awaits Responsable's reception validation
       membershipWish: quickWish,
       integrationDateRegistered: activityDate,
@@ -124,7 +124,7 @@ export default function AdnView({
         commune: quickCommune,
       },
       healthKPIs: { spirituel: 2, social: 2, financier: 2, physique: 3, presenceCulte: 1, presenceService: 1 },
-      baptismStatus: 'Non baptisé',
+      baptismStatus: 'non_baptise',
     };
 
     onAddMember(newNouveau);
@@ -150,17 +150,17 @@ export default function AdnView({
   const selectCountEvent = (id: string) => {
     setCountEventId(id);
     const existing = reports.find((r) => r.reportType === 'rapport_adn' && r.eventId === id);
-    setCountNH(Number(existing?.content?.nouveauxHommes ?? 0));
-    setCountNF(Number(existing?.content?.nouveauxFemmes ?? 0));
-    setCountOJH(Number(existing?.content?.ojHommes ?? 0));
-    setCountOJF(Number(existing?.content?.ojFemmes ?? 0));
+    setCountNH(Number(existing?.content?.nouveauxH ?? 0));
+    setCountNF(Number(existing?.content?.nouveauxF ?? 0));
+    setCountOJH(Number(existing?.content?.ojH ?? 0));
+    setCountOJF(Number(existing?.content?.ojF ?? 0));
   };
 
   const handleSaveCount = (e: React.FormEvent) => {
     e.preventDefault();
     if (!countEventId || !operator) return;
     const ev = events.find((x) => x.id === countEventId);
-    const content = { nouveauxHommes: countNH, nouveauxFemmes: countNF, ojHommes: countOJH, ojFemmes: countOJF };
+    const content = { nouveauxH: countNH, nouveauxF: countNF, ojH: countOJH, ojF: countOJF };
     if (existingAdnReport) {
       // Upsert par eventId — un seul comptage officiel par événement (la clôture EventsView
       // et cet onglet écrivent le même rapport), sinon Moisson/OJ doublent.
@@ -199,7 +199,7 @@ export default function AdnView({
   const branchReports = reports.filter((r) => activeBranch === 'global' || r.targetBranch === activeBranch);
   const rows = adnByEvent(branchMembers, branchReports, events, effectivePeriod);
   const nouveauxOf = (key: string) =>
-    branchMembers.filter((m) => (m.receivedEventId ?? (m.level === 'Nouveau' ? 'autre' : '')) === key
+    branchMembers.filter((m) => (m.receivedEventId ?? (m.level === 'nouveau' ? 'autre' : '')) === key
       || (key === 'autre' && m.receivedEventId === 'autre'));
 
   const inputCls = 'w-full border border-bc-border rounded-full px-3 py-2 text-xs bg-white focus:outline-none focus:border-bc-green';
@@ -595,10 +595,10 @@ export default function AdnView({
             </div>
             <div className="grid grid-cols-2 gap-2">
               {([
-                ['Nouveaux Hommes', detailReport.content?.nouveauxHommes],
-                ['Nouveaux Femmes', detailReport.content?.nouveauxFemmes],
-                ['OJ Hommes', detailReport.content?.ojHommes],
-                ['OJ Femmes', detailReport.content?.ojFemmes],
+                ['Nouveaux Hommes', detailReport.content?.nouveauxH],
+                ['Nouveaux Femmes', detailReport.content?.nouveauxF],
+                ['OJ Hommes', detailReport.content?.ojH],
+                ['OJ Femmes', detailReport.content?.ojF],
               ] as const).map(([label, value]) => (
                 <div key={label} className="p-3 rounded-xl border border-bc-border text-center">
                   <span className="block text-xl font-black text-bc-text tabular-nums">{Number(value ?? 0)}</span>
@@ -607,8 +607,8 @@ export default function AdnView({
               ))}
             </div>
             <div className="flex justify-between p-3 rounded-xl bg-bc-green/10 border border-bc-green/30 font-bold text-bc-text">
-              <span>Total Nouveaux : {Number(detailReport.content?.nouveauxHommes ?? 0) + Number(detailReport.content?.nouveauxFemmes ?? 0)}</span>
-              <span>Total OJ : {Number(detailReport.content?.ojHommes ?? 0) + Number(detailReport.content?.ojFemmes ?? 0)}</span>
+              <span>Total Nouveaux : {Number(detailReport.content?.nouveauxH ?? 0) + Number(detailReport.content?.nouveauxF ?? 0)}</span>
+              <span>Total OJ : {Number(detailReport.content?.ojH ?? 0) + Number(detailReport.content?.ojF ?? 0)}</span>
             </div>
           </div>
         </Modal>

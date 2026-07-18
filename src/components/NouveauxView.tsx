@@ -74,7 +74,7 @@ export default function NouveauxView({ members, onUpdateMember, activeBranch, si
 
   // Pool = registered nouveaux (+ those already processed), branch-scoped.
   const pool = members.filter(m =>
-    (m.level === 'Nouveau' || (m.integrationFollowStatus && m.integrationFollowStatus !== 'Non suivi')) &&
+    (m.level === 'nouveau' || (m.integrationFollowStatus && m.integrationFollowStatus !== 'Non suivi')) &&
     (activeBranch === 'global' || m.branch === activeBranch)
   );
 
@@ -136,9 +136,9 @@ export default function NouveauxView({ members, onUpdateMember, activeBranch, si
     // du statut de suivi détaillé. Seul site d'écriture post-création.
     // ponytail: 'Non intégré' (abandon) reste 'Suivi' — la machine à 3 états de la spec ne modélise pas l'abandon.
     const derivedState: Member['integrationState'] =
-      draftStatus === 'Intégré' ? 'Intégré'
-      : draftStatus === 'Non suivi' || draftStatus === 'En attente' ? 'En attente'
-      : 'Suivi';
+      draftStatus === 'Intégré' ? 'integre'
+      : draftStatus === 'Non suivi' || draftStatus === 'En attente' ? 'en_attente'
+      : 'suivi';
     // D5 — l'horloge "au rouge" ne se réinitialise que sur un contact réel (échange ou visite),
     // pas sur un simple « à recontacter » (tentative sans réponse) → le membre reste signalé.
     const contactedNow = (draftContact || draftVisit) ? { lastContact: report.date } : {};

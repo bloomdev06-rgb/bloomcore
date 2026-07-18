@@ -18,8 +18,8 @@ const busLines: BloomBusEntity[] = [
   { id: 'bus_b', name: 'Bus B', commune: 'Yopougon', zone: 'Zone 2', centerLat: 0, centerLng: 0 },
 ];
 const departments: Department[] = [
-  { id: 'dept_1', name: 'Louange', type: 'service', ministryId: 'min_1', description: '' },
-  { id: 'dept_2', name: 'Accueil', type: 'service', ministryId: 'min_2', description: '' },
+  { id: 'dept_1', name: 'Louange', type: 'normal', ministryId: 'min_1', description: '' },
+  { id: 'dept_2', name: 'Accueil', type: 'normal', ministryId: 'min_2', description: '' },
 ];
 const ministries: Ministry[] = [{ id: 'min_1', name: 'Louange', description: '', tuteurId: 'ministre_1' }];
 
@@ -28,8 +28,8 @@ assert.equal(inMemberScope(mk({ id: 'op' }), mk({ id: 't' }), 'Super Admin', bus
 
 // Ministre — scoped to their ministry's departments
 const ministre = mk({ id: 'ministre_1' });
-assert.equal(inMemberScope(ministre, mk({ departments: { dept_1: 'Membre' } }), 'Ministre', busLines, departments, ministries), true);
-assert.equal(inMemberScope(ministre, mk({ departments: { dept_2: 'Membre' } }), 'Ministre', busLines, departments, ministries), false);
+assert.equal(inMemberScope(ministre, mk({ departments: { dept_1: 'membre' } }), 'Ministre', busLines, departments, ministries), true);
+assert.equal(inMemberScope(ministre, mk({ departments: { dept_2: 'membre' } }), 'Ministre', busLines, departments, ministries), false);
 
 // Capitaine — same bus only
 assert.equal(inMemberScope(mk({ bloomBusId: 'bus_a' }), mk({ bloomBusId: 'bus_a' }), 'Capitaine de Bus', busLines, departments), true);
@@ -44,8 +44,8 @@ assert.equal(inMemberScope(mk({ gps: { lat: 0, lng: 0, commune: 'Cocody' } }), m
 assert.equal(inMemberScope(mk({ gps: { lat: 0, lng: 0, commune: 'Cocody' } }), mk({ gps: { lat: 0, lng: 0, commune: 'Yopougon' } }), 'Responsable de Commune', busLines, departments), false);
 
 // Shared-department proxy roles (Responsable/Adjoint/Coach/Leader)
-assert.equal(inMemberScope(mk({ departments: { dept_1: 'Responsable' } }), mk({ departments: { dept_1: 'Membre' } }), 'Responsable', busLines, departments), true);
-assert.equal(inMemberScope(mk({ departments: { dept_1: 'Responsable' } }), mk({ departments: { dept_2: 'Membre' } }), 'Responsable', busLines, departments), false);
+assert.equal(inMemberScope(mk({ departments: { dept_1: 'responsable' } }), mk({ departments: { dept_1: 'membre' } }), 'Responsable', busLines, departments), true);
+assert.equal(inMemberScope(mk({ departments: { dept_1: 'responsable' } }), mk({ departments: { dept_2: 'membre' } }), 'Responsable', busLines, departments), false);
 
 // Unhandled role fails open
 assert.equal(inMemberScope(mk(), mk(), 'Nouveau', busLines, departments), true);
@@ -55,31 +55,31 @@ assert.equal(inMemberScope(mk({ id: 'same' }), mk({ id: 'same' }), 'Coach', busL
 
 // busInScope (P4.4bis) — le rôle Bloom Bus réel vient de operator.departments[busDept.id],
 // jamais du paramètre `role` (qui ne sert plus qu'à l'exception pasteur/rôles système).
-const busDept: Department = { id: 'dept_bb', name: 'Bloom Bus', type: 'spécial', ministryId: 'min_bb', specialFunction: 'bloom_bus', description: '' };
+const busDept: Department = { id: 'dept_bb', name: 'Bloom Bus', type: 'special', ministryId: 'min_bb', specialFunction: 'bloom_bus', description: '' };
 const allDepts = [...departments, busDept];
 
 // Capitaine de Bus — son bus uniquement
-assert.equal(busInScope(mk({ bloomBusId: 'bus_a', departments: { dept_bb: 'Capitaine de Bus' } }), busLines[0], 'Membre', busLines, allDepts), true);
-assert.equal(busInScope(mk({ bloomBusId: 'bus_a', departments: { dept_bb: 'Capitaine de Bus' } }), busLines[1], 'Membre', busLines, allDepts), false);
+assert.equal(busInScope(mk({ bloomBusId: 'bus_a', departments: { dept_bb: 'capitaine' } }), busLines[0], 'Membre', busLines, allDepts), true);
+assert.equal(busInScope(mk({ bloomBusId: 'bus_a', departments: { dept_bb: 'capitaine' } }), busLines[1], 'Membre', busLines, allDepts), false);
 
 // Membre — son bus uniquement
-assert.equal(busInScope(mk({ bloomBusId: 'bus_a', departments: { dept_bb: 'Membre' } }), busLines[0], 'Membre', busLines, allDepts), true);
-assert.equal(busInScope(mk({ bloomBusId: 'bus_a', departments: { dept_bb: 'Membre' } }), busLines[1], 'Membre', busLines, allDepts), false);
+assert.equal(busInScope(mk({ bloomBusId: 'bus_a', departments: { dept_bb: 'membre' } }), busLines[0], 'Membre', busLines, allDepts), true);
+assert.equal(busInScope(mk({ bloomBusId: 'bus_a', departments: { dept_bb: 'membre' } }), busLines[1], 'Membre', busLines, allDepts), false);
 
 // Aucune fonction Bloom Bus déclarée mais un bus rattaché → traité comme Membre
 assert.equal(busInScope(mk({ bloomBusId: 'bus_a' }), busLines[0], 'Membre', busLines, allDepts), true);
 assert.equal(busInScope(mk({ bloomBusId: 'bus_a' }), busLines[1], 'Membre', busLines, allDepts), false);
 
 // Responsable de Zone — toute sa zone
-assert.equal(busInScope(mk({ bloomBusId: 'bus_a', departments: { dept_bb: 'Responsable de Zone' } }), busLines[0], 'Membre', busLines, allDepts), true);
-assert.equal(busInScope(mk({ bloomBusId: 'bus_a', departments: { dept_bb: 'Responsable de Zone' } }), busLines[1], 'Membre', busLines, allDepts), false);
+assert.equal(busInScope(mk({ bloomBusId: 'bus_a', departments: { dept_bb: 'responsable_zone' } }), busLines[0], 'Membre', busLines, allDepts), true);
+assert.equal(busInScope(mk({ bloomBusId: 'bus_a', departments: { dept_bb: 'responsable_zone' } }), busLines[1], 'Membre', busLines, allDepts), false);
 
 // Responsable de Commune — falls back to gps.commune when no bus
-assert.equal(busInScope(mk({ departments: { dept_bb: 'Responsable de Commune' }, gps: { lat: 0, lng: 0, commune: 'Cocody' } }), busLines[0], 'Membre', busLines, allDepts), true);
-assert.equal(busInScope(mk({ departments: { dept_bb: 'Responsable de Commune' }, gps: { lat: 0, lng: 0, commune: 'Yopougon' } }), busLines[0], 'Membre', busLines, allDepts), false);
+assert.equal(busInScope(mk({ departments: { dept_bb: 'responsable_commune' }, gps: { lat: 0, lng: 0, commune: 'Cocody' } }), busLines[0], 'Membre', busLines, allDepts), true);
+assert.equal(busInScope(mk({ departments: { dept_bb: 'responsable_commune' }, gps: { lat: 0, lng: 0, commune: 'Yopougon' } }), busLines[0], 'Membre', busLines, allDepts), false);
 
 // Responsable du département Bloom Bus voit tout
-assert.equal(busInScope(mk({ departments: { dept_bb: 'Responsable' } }), busLines[1], 'Membre', busLines, allDepts), true);
+assert.equal(busInScope(mk({ departments: { dept_bb: 'responsable' } }), busLines[1], 'Membre', busLines, allDepts), true);
 
 // Seule exception : les pasteurs (et les rôles système Super Admin/Admin) voient tout,
 // indépendamment de tout rôle Bloom Bus.
@@ -92,8 +92,8 @@ assert.equal(busInScope(mk(), busLines[1], 'Admin', busLines), true);
 // ministère qui possède le département Bloom Bus, ou Responsable d'un AUTRE département)
 // ne donne plus aucun accès automatique : seul le rôle Bloom Bus réel compte.
 assert.equal(busInScope(mk({ id: 'ministre_bb' }), busLines[1], 'Ministre', busLines, allDepts), false);
-assert.equal(busInScope(mk({ bloomBusId: 'bus_a', departments: { dept_1: 'Responsable', dept_bb: 'Membre' } }), busLines[0], 'Responsable', busLines, allDepts), true);
-assert.equal(busInScope(mk({ bloomBusId: 'bus_a', departments: { dept_1: 'Responsable', dept_bb: 'Membre' } }), busLines[1], 'Responsable', busLines, allDepts), false);
+assert.equal(busInScope(mk({ bloomBusId: 'bus_a', departments: { dept_1: 'responsable', dept_bb: 'membre' } }), busLines[0], 'Responsable', busLines, allDepts), true);
+assert.equal(busInScope(mk({ bloomBusId: 'bus_a', departments: { dept_1: 'responsable', dept_bb: 'membre' } }), busLines[1], 'Responsable', busLines, allDepts), false);
 
 // directReportsOf / canFillReportFor — hiérarchie de remplissage de rapport (spec
 // "semaines/saisie hiérarchique"), un palier à la fois : Capitaine←Membre, Zone←Capitaine,
@@ -104,18 +104,18 @@ const hierBusLines: BloomBusEntity[] = [
   { id: 'bus_z2a', name: 'Bus Z2A', commune: 'Cocody', zone: 'Zone Sud', centerLat: 0, centerLng: 0 },
   { id: 'bus_c2a', name: 'Bus C2A', commune: 'Yopougon', zone: 'Zone Ouest', centerLat: 0, centerLng: 0 },
 ];
-const bbDept: Department = { id: 'dept_bb', name: 'Bloom Bus', type: 'spécial', ministryId: 'min_bb', specialFunction: 'bloom_bus', description: '' };
+const bbDept: Department = { id: 'dept_bb', name: 'Bloom Bus', type: 'special', ministryId: 'min_bb', specialFunction: 'bloom_bus', description: '' };
 const hierDepts = [bbDept];
 
-const membre1 = mk({ id: 'membre1', bloomBusId: 'bus_z1a', departments: { dept_bb: 'Membre' } });
-const capA = mk({ id: 'capA', bloomBusId: 'bus_z1a', departments: { dept_bb: 'Capitaine de Bus' } });
-const capB = mk({ id: 'capB', bloomBusId: 'bus_z1b', departments: { dept_bb: 'Capitaine de Bus' } });
-const capC = mk({ id: 'capC', bloomBusId: 'bus_z2a', departments: { dept_bb: 'Capitaine de Bus' } });
-const zoneLead1 = mk({ id: 'zoneLead1', bloomBusId: 'bus_z1a', departments: { dept_bb: 'Responsable de Zone' } });
-const zoneLead2 = mk({ id: 'zoneLead2', bloomBusId: 'bus_z2a', departments: { dept_bb: 'Responsable de Zone' } });
-const communeLead = mk({ id: 'communeLead', bloomBusId: 'bus_z1a', departments: { dept_bb: 'Responsable de Commune' } });
-const communeLead2 = mk({ id: 'communeLead2', bloomBusId: 'bus_c2a', departments: { dept_bb: 'Responsable de Commune' } });
-const deptLead = mk({ id: 'deptLead', departments: { dept_bb: 'Responsable' } });
+const membre1 = mk({ id: 'membre1', bloomBusId: 'bus_z1a', departments: { dept_bb: 'membre' } });
+const capA = mk({ id: 'capA', bloomBusId: 'bus_z1a', departments: { dept_bb: 'capitaine' } });
+const capB = mk({ id: 'capB', bloomBusId: 'bus_z1b', departments: { dept_bb: 'capitaine' } });
+const capC = mk({ id: 'capC', bloomBusId: 'bus_z2a', departments: { dept_bb: 'capitaine' } });
+const zoneLead1 = mk({ id: 'zoneLead1', bloomBusId: 'bus_z1a', departments: { dept_bb: 'responsable_zone' } });
+const zoneLead2 = mk({ id: 'zoneLead2', bloomBusId: 'bus_z2a', departments: { dept_bb: 'responsable_zone' } });
+const communeLead = mk({ id: 'communeLead', bloomBusId: 'bus_z1a', departments: { dept_bb: 'responsable_commune' } });
+const communeLead2 = mk({ id: 'communeLead2', bloomBusId: 'bus_c2a', departments: { dept_bb: 'responsable_commune' } });
+const deptLead = mk({ id: 'deptLead', departments: { dept_bb: 'responsable' } });
 const pasteur = mk({ id: 'pasteur' });
 
 const hierMembers = [membre1, capA, capB, capC, zoneLead1, zoneLead2, communeLead, communeLead2, deptLead, pasteur];

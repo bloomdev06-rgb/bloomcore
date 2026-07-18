@@ -299,7 +299,7 @@ export default function BloomBusView({
     (m) =>
       m.bloomBusId &&
       busIds.includes(m.bloomBusId) &&
-      m.level !== "Nouveau" &&
+      m.level !== "nouveau" &&
       (activeBranch === "global" || m.branch === activeBranch), // étanchéité par branche §3
   );
   // Source unique des disques de remplissage + de la synthèse d'évolution : les membres réels
@@ -376,7 +376,7 @@ export default function BloomBusView({
   // Nombre de membres par territoire (§5 — commune / zone / bus), pour l'arbre de la sidebar.
   const countForBusIds = (ids: string[]) =>
     members.filter(
-      (m) => m.bloomBusId && ids.includes(m.bloomBusId) && m.level !== "Nouveau" && (activeBranch === "global" || m.branch === activeBranch),
+      (m) => m.bloomBusId && ids.includes(m.bloomBusId) && m.level !== "nouveau" && (activeBranch === "global" || m.branch === activeBranch),
     ).length;
 
   // Synthèse santé + évolution (§Accueil-1.3 / §5) — sur les membres du niveau territorial sélectionné.

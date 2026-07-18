@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Branch, Member, AuditLog, AppNotification, AdminAccount } from '../types';
-import { load, save } from '../data';
+import { load, save, labelFor } from '../data';
 import { DEFAULT_OPERATOR_NAME } from '../data/operator';
 import { INITIAL_ADMINS } from '../mockData';
 import { UserCog, ShieldAlert, History, X, AlertTriangle, Check } from 'lucide-react';
@@ -24,7 +24,7 @@ const ADMIN_ACTIONS = [
 
 // Default eligibility: senior pastoral cursus or Coach level.
 const isEligible = (m: Member) =>
-  m.level === 'Coach' || ['Assistant Pasteur', 'Pasteur Assistant', 'Pasteur Titulaire'].includes(m.pastoralCursus);
+  m.level === 'coach' || ['assistant_pasteur', 'pasteur_assistant', 'pasteur_titulaire'].includes(m.pastoralCursus);
 
 export default function AccountsView({ activeBranch, simulatedRole, members, audits, onAddAuditLog, onAddNotification }: AccountsViewProps) {
   const isSuper = simulatedRole === 'Super Admin';
@@ -61,7 +61,7 @@ export default function AccountsView({ activeBranch, simulatedRole, members, aud
     setAdmins(prev => [...prev, {
       id: `adm_${picked.id}`,
       name: `${picked.firstName} ${picked.lastName}`,
-      subtitle: exception ? `${picked.level} · Exception` : (picked.pastoralCursus !== 'Aucun' ? picked.pastoralCursus : picked.level),
+      subtitle: exception ? `${labelFor(picked.level)} · Exception` : (picked.pastoralCursus !== 'aucun' ? labelFor(picked.pastoralCursus) : labelFor(picked.level)),
       role,
       exception,
       reason: exception ? reason.trim() : undefined,
@@ -223,7 +223,7 @@ export default function AccountsView({ activeBranch, simulatedRole, members, aud
               <option value="">— Sélectionner —</option>
               {candidates.map(m => (
                 <option key={m.id} value={m.id}>
-                  {m.firstName} {m.lastName} — {m.pastoralCursus !== 'Aucun' ? m.pastoralCursus : m.level}{isEligible(m) ? '' : ' (non éligible)'}
+                  {m.firstName} {m.lastName} — {m.pastoralCursus !== 'aucun' ? labelFor(m.pastoralCursus) : labelFor(m.level)}{isEligible(m) ? '' : ' (non éligible)'}
                 </option>
               ))}
             </select>

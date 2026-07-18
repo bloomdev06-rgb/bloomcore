@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Member, Branch, NotifChannels } from '../types';
-import { useDepartments } from '../data';
+import { useDepartments, labelFor } from '../data';
 import { apiChangePassword } from '../data/api';
 import { ThemeToggle } from './ui/theme-toggle';
 import { Phone, Mail, Briefcase, Calendar, MapPin, Droplet, ArrowRight, LogOut, Compass, Award, Pencil, Check, X, Smartphone, MessageSquare, Sun, Shield, KeyRound, Monitor, Trash2 } from 'lucide-react';
@@ -54,8 +54,8 @@ const NOTIF_CHANNELS: { key: keyof NotifChannels; label: string; icon: any }[] =
   { key: 'whatsapp', label: 'WhatsApp', icon: Phone },
 ];
 
-const COMMUNITY_LEVELS = ['Nouveau', 'Stagiaire', 'Boss', 'Leader', 'Coach'];
-const CURSUS_LEVELS = ['Aucun', 'Appelé', 'Serviteur', "Gagneur d'âme", 'Assistant Pasteur', 'Pasteur Assistant', 'Pasteur Titulaire'];
+const COMMUNITY_LEVELS = ['nouveau', 'stagiaire', 'boss', 'leader', 'coach'];
+const CURSUS_LEVELS = ['aucun', 'appele', 'serviteur', 'gagneur_ame', 'assistant_pasteur', 'pasteur_assistant', 'pasteur_titulaire'];
 const BRANCH_LABEL: Record<Branch, string> = { church: 'Bloom Church', light: 'Bloom Light', global: 'Global' };
 
 function Stepper({ steps, current }: { steps: string[]; current: string }) {
@@ -64,7 +64,7 @@ function Stepper({ steps, current }: { steps: string[]; current: string }) {
     <div className="flex flex-wrap items-center gap-1.5 text-xs font-bold">
       {steps.map((s, i) => (
         <React.Fragment key={s}>
-          <span className={`px-3 py-1 rounded-full ${i < idx ? 'bg-bc-success/10 text-bc-success' : i === idx ? 'bg-bc-green text-white' : 'text-bc-text-secondary'}`}>{s}</span>
+          <span className={`px-3 py-1 rounded-full ${i < idx ? 'bg-bc-success/10 text-bc-success' : i === idx ? 'bg-bc-green text-white' : 'text-bc-text-secondary'}`}>{labelFor(s)}</span>
           {i < steps.length - 1 && <ArrowRight size={12} className={i < idx ? 'text-bc-success' : 'text-bc-border'} />}
         </React.Fragment>
       ))}
@@ -140,7 +140,7 @@ export default function ProfileView({ operator, simulatedRole, onUpdateMember, o
 
   // Édition self-service des coordonnées (état/hooks remontés avant l'early-return ci-dessus).
   // An already-recorded baptism (status + date) is the Baptism department's official record → locked.
-  const officialBaptism = operator.baptismStatus === 'Baptisé' && !!operator.baptismDate;
+  const officialBaptism = operator.baptismStatus === 'baptise' && !!operator.baptismDate;
 
   const startEdit = () => {
     setDraft(blankDraft());
@@ -156,7 +156,7 @@ export default function ProfileView({ operator, simulatedRole, onUpdateMember, o
       // Only self-declare baptism when it isn't the department's official record.
       // Self-declared = hors process (baptismViaDepartment: false).
       ...(officialBaptism ? {} : {
-        baptismStatus: draft.baptismDate ? 'Baptisé' : 'Non baptisé',
+        baptismStatus: draft.baptismDate ? 'baptise' : 'non_baptise',
         baptismDate: draft.baptismDate || undefined,
         baptismViaDepartment: draft.baptismDate ? false : undefined,
       }),
@@ -211,7 +211,7 @@ export default function ProfileView({ operator, simulatedRole, onUpdateMember, o
             <h2 className="text-2xl font-ui font-black text-bc-text tracking-tight">{operator.firstName} {operator.lastName}</h2>
             <div className="flex flex-wrap items-center gap-2 mt-2">
               <span className="text-[11px] font-bold px-3 py-1 rounded-full bg-bc-purple/10 text-bc-purple">{simulatedRole}</span>
-              <span className="text-[11px] font-bold px-3 py-1 rounded-full bg-bc-green/10 text-bc-text">{operator.level}</span>
+              <span className="text-[11px] font-bold px-3 py-1 rounded-full bg-bc-green/10 text-bc-text">{labelFor(operator.level)}</span>
               <span className="text-[11px] font-bold px-3 py-1 rounded-full bg-bc-canvas text-bc-text-secondary">{BRANCH_LABEL[operator.branch]}</span>
             </div>
           </div>
@@ -263,7 +263,7 @@ export default function ProfileView({ operator, simulatedRole, onUpdateMember, o
                 <InfoRow icon={Briefcase} label="Profession" value={operator.profession} />
                 <InfoRow icon={Calendar} label="Membre depuis" value={operator.entryDate} />
                 <InfoRow icon={MapPin} label="Commune" value={operator.gps?.commune ?? '—'} />
-                <InfoRow icon={Droplet} label="Baptême" value={operator.baptismStatus === 'Baptisé' ? `Baptisé${operator.baptismDate ? ` · ${operator.baptismDate}` : ''}` : 'Non baptisé'} />
+                <InfoRow icon={Droplet} label="Baptême" value={operator.baptismStatus === 'baptise' ? `Baptisé${operator.baptismDate ? ` · ${operator.baptismDate}` : ''}` : 'Non baptisé'} />
               </div>
             )}
           </div>
@@ -296,7 +296,7 @@ export default function ProfileView({ operator, simulatedRole, onUpdateMember, o
                   return (
                     <div key={deptId} className="flex items-center justify-between px-4 py-2.5 rounded-full bg-bc-canvas">
                       <span className="text-sm font-semibold text-bc-text">{dept ? dept.name : deptId}</span>
-                      <span className="text-[11px] font-bold px-3 py-1 rounded-full bg-white text-bc-text-secondary">{fn}</span>
+                      <span className="text-[11px] font-bold px-3 py-1 rounded-full bg-white text-bc-text-secondary">{labelFor(fn)}</span>
                     </div>
                   );
                 })}

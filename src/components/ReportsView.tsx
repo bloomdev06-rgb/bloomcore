@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { BarChart3, Download, Printer, SlidersHorizontal } from 'lucide-react';
 import { Report, Branch, Member, Event } from '../types';
-import { useBusLines } from '../data';
+import { useBusLines, labelFor } from '../data';
 import { weekId } from '../data/week';
 import { isRed, moissonTotal, busVisitesTotal, busPresenceCulteTotal, busActivitesTotal } from '../data/kpi';
 
@@ -86,12 +86,12 @@ export default function ReportsView({ reports, activeBranch, simulatedRole, memb
       add(S, 'Membres (total)', scopeMembers.length);
       add(S, 'Hommes', scopeMembers.filter(m => m.gender === 'H').length);
       add(S, 'Femmes', scopeMembers.filter(m => m.gender === 'F').length);
-      (['Nouveau', 'Stagiaire', 'Boss', 'Leader', 'Coach'] as const).forEach(l =>
-        add(S, `Niveau ${l}`, scopeMembers.filter(m => m.level === l).length),
+      (['nouveau', 'stagiaire', 'boss', 'leader', 'coach'] as const).forEach(l =>
+        add(S, `Niveau ${labelFor(l)}`, scopeMembers.filter(m => m.level === l).length),
       );
       add(S, 'Membres au rouge', scopeMembers.filter(m => isRed(m, to)).length);
       add(S, 'Arrivées sur la période', scopeMembers.filter(m => inPeriod(m.integrationDateRegistered || m.entryDate)).length);
-      add(S, 'Baptêmes sur la période', scopeMembers.filter(m => m.baptismStatus === 'Baptisé' && inPeriod(m.baptismDate)).length);
+      add(S, 'Baptêmes sur la période', scopeMembers.filter(m => m.baptismStatus === 'baptise' && inPeriod(m.baptismDate)).length);
     }
     if (synthOn.presences) {
       // Exemple canonique du générateur : effectifs de présence aux cultes (Portiers)
@@ -140,9 +140,9 @@ export default function ReportsView({ reports, activeBranch, simulatedRole, memb
     }
     if (synthOn.nouveaux) {
       const S = 'Nouveaux & intégration';
-      add(S, 'En attente', scopeMembers.filter(m => m.integrationState === 'En attente').length);
-      add(S, 'En suivi', scopeMembers.filter(m => m.integrationState === 'Suivi').length);
-      add(S, 'Intégrés', scopeMembers.filter(m => m.integrationState === 'Intégré').length);
+      add(S, 'En attente', scopeMembers.filter(m => m.integrationState === 'en_attente').length);
+      add(S, 'En suivi', scopeMembers.filter(m => m.integrationState === 'suivi').length);
+      add(S, 'Intégrés', scopeMembers.filter(m => m.integrationState === 'integre').length);
       add(S, 'Réception non validée', scopeMembers.filter(m => m.receptionValidated === false).length);
     }
     if (synthOn.cultes) {

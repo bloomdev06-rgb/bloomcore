@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { Shield, Check, X, Sliders, Info, UserCheck, Plus, GitBranch } from 'lucide-react';
 import { PermissionMatrix, Branch, Delegation, Member, CapabilityOverride, SpecialAuthorization, AuditLog, CapabilityOverrideSubject } from '../types';
-import { load, save } from '../data';
+import { load, save, labelFor } from '../data';
 import { DEFAULT_OPERATOR_NAME } from '../data/operator';
 import { motion, AnimatePresence } from 'motion/react';
 
@@ -17,10 +17,11 @@ interface GovernanceViewProps {
 
 // Valeurs d'axe pour les surcharges (§2.6) — DOIVENT correspondre aux valeurs stockées
 // aujourd'hui (sinon l'override ne matche personne). Convergence snake_case = jalon M5.
+// M5 §3 — valeurs stockées (snake_case) ; affichées via labelFor.
 const OVERRIDE_SUBJECT_VALUES: Record<CapabilityOverrideSubject, string[]> = {
-  level: ['Nouveau', 'Stagiaire', 'Boss', 'Leader', 'Coach'],
-  function: ['Responsable', 'Adjoint', 'Trésorier', 'Responsable de section', 'Membre', 'Capitaine de Bus', 'Responsable de Zone', 'Responsable de Commune'],
-  cursus: ['Aucun', 'Appelé', 'Serviteur', "Gagneur d'âme", 'Assistant Pasteur', 'Pasteur Assistant', 'Pasteur Titulaire'],
+  level: ['nouveau', 'stagiaire', 'boss', 'leader', 'coach'],
+  function: ['responsable', 'adjoint', 'tresorier', 'responsable_section', 'membre', 'capitaine', 'responsable_zone', 'responsable_commune'],
+  cursus: ['aucun', 'appele', 'serviteur', 'gagneur_ame', 'assistant_pasteur', 'pasteur_assistant', 'pasteur_titulaire'],
 };
 const SUBJECT_TYPE_LABEL: Record<CapabilityOverrideSubject, string> = { level: 'Niveau', function: 'Fonction', cursus: 'Cursus' };
 
@@ -283,7 +284,7 @@ export default function GovernanceView({
               {(['level', 'function', 'cursus'] as CapabilityOverrideSubject[]).map(t => <option key={t} value={t}>{SUBJECT_TYPE_LABEL[t]}</option>)}
             </select>
             <select value={ovSubjectValue} onChange={e => setOvSubjectValue(e.target.value)} className="border border-bc-border rounded-full px-3 py-2 text-xs bg-white">
-              {OVERRIDE_SUBJECT_VALUES[ovSubjectType].map(v => <option key={v} value={v}>{v}</option>)}
+              {OVERRIDE_SUBJECT_VALUES[ovSubjectType].map(v => <option key={v} value={v}>{labelFor(v)}</option>)}
             </select>
             <select value={ovCap} onChange={e => setOvCap(e.target.value)} className="border border-bc-border rounded-full px-3 py-2 text-xs bg-white">
               {capabilitiesList.map(c => <option key={c.key} value={c.key}>{c.label}</option>)}

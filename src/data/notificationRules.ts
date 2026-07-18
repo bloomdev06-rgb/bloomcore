@@ -28,7 +28,7 @@ function encadrantIdsFor(m: Member, members: Member[]): string[] {
   const deptIds = Object.keys(m.departments ?? {});
   for (const x of members) {
     if (x.id === m.id) continue;
-    if (Object.entries(x.departments ?? {}).some(([dId, fn]) => deptIds.includes(dId) && fn === 'Responsable')) {
+    if (Object.entries(x.departments ?? {}).some(([dId, fn]) => deptIds.includes(dId) && fn === 'responsable')) {
       ids.push(x.id);
     }
   }
@@ -44,7 +44,7 @@ export function deriveTimeBasedNotifications(
 ): AppNotification[] {
   const out: AppNotification[] = [];
   for (const m of members) {
-    if (m.integrationState !== 'En attente' || !m.integrationDateRegistered) continue;
+    if (m.integrationState !== 'en_attente' || !m.integrationDateRegistered) continue;
     const days = (now.getTime() - new Date(m.integrationDateRegistered).getTime()) / DAY_MS;
     if (days > delays.red) {
       // D6 — une alerte par destinataire (Ministre de tutelle + coach assigné + responsable

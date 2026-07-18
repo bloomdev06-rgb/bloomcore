@@ -1,7 +1,7 @@
 import React, { useState, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { Member, Branch, Report, AuditLog, PermissionMatrix, Delegation, FormDef, CapabilityOverride, SpecialAuthorization } from '../types';
-import { useDepartments, useBusLines, useProjects, load, resolveCapability } from '../data';
+import { useDepartments, useBusLines, useProjects, load, resolveCapability, labelFor } from '../data';
 import { DEFAULT_OPERATOR_NAME } from '../data/operator';
 import { isRed } from '../data/kpi';
 import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend } from 'recharts';
@@ -12,8 +12,8 @@ import { PhotoLightbox } from './ui/PhotoLightbox';
 import { Badge } from './ui/Badge';
 import { Modal } from './ui/Modal';
 
-const COMMUNITY_LEVELS = ['Nouveau', 'Stagiaire', 'Boss', 'Leader', 'Coach'];
-const CURSUS_LEVELS = ['Aucun', 'Appelé', 'Serviteur', "Gagneur d'âme", 'Assistant Pasteur', 'Pasteur Assistant', 'Pasteur Titulaire'];
+const COMMUNITY_LEVELS = ['nouveau', 'stagiaire', 'boss', 'leader', 'coach'];
+const CURSUS_LEVELS = ['aucun', 'appele', 'serviteur', 'gagneur_ame', 'assistant_pasteur', 'pasteur_assistant', 'pasteur_titulaire'];
 // P4.9(c) — seul catalogue de parcours à étapes réellement défini dans l'app (cf. FormBuilderView fd_bapteme).
 // Pas de catalogue équivalent pour dept_eden_zero ailleurs : on affiche son étape en texte brut plutôt que d'inventer des libellés.
 const PARCOURS_STEPS: Record<string, string[]> = {
@@ -26,7 +26,7 @@ function Stepper({ steps, current }: { steps: string[]; current: string }) {
     <div className="flex flex-wrap items-center gap-1.5 text-xs font-bold">
       {steps.map((s, i) => (
         <React.Fragment key={s}>
-          <span className={`px-3 py-1 rounded-full ${i < idx ? 'bg-bc-success/10 text-bc-success' : i === idx ? 'bg-bc-green text-white' : 'text-bc-text-secondary/40'}`}>{s}</span>
+          <span className={`px-3 py-1 rounded-full ${i < idx ? 'bg-bc-success/10 text-bc-success' : i === idx ? 'bg-bc-green text-white' : 'text-bc-text-secondary/40'}`}>{labelFor(s)}</span>
           {i < steps.length - 1 && <ArrowRight size={12} className={i < idx ? 'text-bc-success' : 'text-bc-border'} />}
         </React.Fragment>
       ))}
@@ -177,13 +177,13 @@ export default function Member360View({ member, onClose, onEdit, onUpdate, repor
                 </h2>
                 <div className="flex flex-wrap gap-2 mt-2">
                   <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-bc-canvas text-bc-text-secondary">
-                    {member.level}
+                    {labelFor(member.level)}
                   </span>
                   <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-bc-canvas text-bc-text-secondary">
                     {member.branch === 'church' ? 'Bloom Church' : 'Bloom Light'}
                   </span>
                   <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-bc-canvas text-bc-text-secondary">
-                    {member.baptismStatus}
+                    {labelFor(member.baptismStatus)}
                   </span>
                   {isAtRisk && (
                     <Badge tone="danger" className="text-[10px] flex items-center gap-1">
@@ -403,19 +403,19 @@ export default function Member360View({ member, onClose, onEdit, onUpdate, repor
                       </div>
                       <div className="flex justify-between items-center pb-3 border-b border-bc-border">
                         <span className="text-xs text-bc-text-secondary">Date d'intégration</span>
-                        <span className="text-sm font-bold text-bc-text">{member.integrationState === 'Intégré' ? '15 Octobre 2025' : 'En attente'}</span>
+                        <span className="text-sm font-bold text-bc-text">{member.integrationState === 'integre' ? '15 Octobre 2025' : 'En attente'}</span>
                       </div>
                       <div className="flex justify-between items-center pb-3 border-b border-bc-border">
                         <span className="text-xs text-bc-text-secondary">Statut Baptême</span>
                         <div className="text-right">
-                          <span className="text-sm font-bold text-bc-text block">{member.baptismStatus}</span>
-                          {member.baptismStatus === 'Baptisé' && (
+                          <span className="text-sm font-bold text-bc-text block">{labelFor(member.baptismStatus)}</span>
+                          {member.baptismStatus === 'baptise' && (
                             <span className="text-[10px] text-bc-success font-bold">
                               {member.baptismDate ? `le ${member.baptismDate}` : ''}
                               {member.baptismViaDepartment === true ? ' · via dép. Baptême' : member.baptismViaDepartment === false ? ' · hors process' : ''}
                             </span>
                           )}
-                          {member.baptismStatus === 'Non baptisé' && (
+                          {member.baptismStatus === 'non_baptise' && (
                             <span className="text-[10px] text-bc-warning font-bold">Aucun baptême enregistré</span>
                           )}
                         </div>

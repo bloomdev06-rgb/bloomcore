@@ -28,7 +28,7 @@ assert.equal(dominantHealthLevel([], 'spirituel'), 0);
 // isRed: true only past the 7-day threshold, false when the date field is missing (no crash)
 const nowRed = new Date(2026, 5, 30, 12); // mardi 30/6/2026, en heure locale (semaine calendaire = lundi 29/6)
 const mkMember = (over: Partial<Member> = {}): Member => ({
-  integrationState: 'En attente',
+  integrationState: 'en_attente',
   integrationDateRegistered: '2026-06-20',
   ...over,
 } as Member);
@@ -36,10 +36,10 @@ assert.equal(isRed(mkMember(), nowRed), true); // En attente depuis 10j → clau
 assert.equal(isRed(mkMember({ integrationDateRegistered: '2026-06-29' }), nowRed), false); // 1 jour
 assert.equal(isRed(mkMember({ integrationDateRegistered: undefined }), nowRed), false); // pas de date
 // D5 clause 2 — en suivi sans contact > 7j (horloge démarre à l'enregistrement, reset par lastContact)
-assert.equal(isRed(mkMember({ integrationState: 'Suivi' }), nowRed), true); // enregistré 10j, jamais contacté
-assert.equal(isRed(mkMember({ integrationState: 'Suivi', lastContact: '2026-06-28' }), nowRed), false); // contact il y a 2j → reset
-assert.equal(isRed(mkMember({ integrationState: 'Suivi', lastContact: '2026-06-18' }), nowRed), true); // contact il y a 12j → stale
-assert.equal(isRed(mkMember({ integrationState: 'Intégré' }), nowRed), false); // hors pipeline
+assert.equal(isRed(mkMember({ integrationState: 'suivi' }), nowRed), true); // enregistré 10j, jamais contacté
+assert.equal(isRed(mkMember({ integrationState: 'suivi', lastContact: '2026-06-28' }), nowRed), false); // contact il y a 2j → reset
+assert.equal(isRed(mkMember({ integrationState: 'suivi', lastContact: '2026-06-18' }), nowRed), true); // contact il y a 12j → stale
+assert.equal(isRed(mkMember({ integrationState: 'integre' }), nowRed), false); // hors pipeline
 
 // busMobilisationRate: (mobilisés / rattachés) x 100, null when no rattachés / no report in period
 const busMembers: Member[] = [
@@ -92,7 +92,7 @@ assert.deepEqual([...activeBusIds(weeklyBusReports, 'month', new Date('2026-09-0
 // moissonBySource: splits ADN vs Bus within the period
 const split = moissonBySource(
   [
-    { reportType: 'rapport_adn', date: '2026-06-29', content: { nouveauxHommes: 2, nouveauxFemmes: 3 } } as Report,
+    { reportType: 'rapport_adn', date: '2026-06-29', content: { nouveauxH: 2, nouveauxF: 3 } } as Report,
     { reportType: 'rapport_bloom_bus_life', date: '2026-06-29', content: { soulsWon: 4 } } as Report,
   ],
   'week',
@@ -128,9 +128,9 @@ assert.deepEqual([...activeMemberIds(
 
 // moissonTotal: sums ADN (H+F) and bus-life moissonNouveaux within the period
 const moissonReports: Report[] = [
-  { reportType: 'rapport_adn', date: '2026-06-29', content: { nouveauxHommes: 2, nouveauxFemmes: 3 } } as Report,
+  { reportType: 'rapport_adn', date: '2026-06-29', content: { nouveauxH: 2, nouveauxF: 3 } } as Report,
   { reportType: 'rapport_bloom_bus_life', date: '2026-06-29', content: { soulsWon: 4 } } as Report,
-  { reportType: 'rapport_adn', date: '2026-01-01', content: { nouveauxHommes: 100 } } as Report, // out of window
+  { reportType: 'rapport_adn', date: '2026-01-01', content: { nouveauxH: 100 } } as Report, // out of window
 ];
 assert.equal(moissonTotal(moissonReports, 'week', nowRed), 9);
 

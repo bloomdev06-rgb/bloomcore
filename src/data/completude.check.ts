@@ -57,18 +57,18 @@ const busLines: BloomBusEntity[] = [
   { id: 'bus_a', name: 'Bus A', commune: 'C1', zone: 'Z1', centerLat: 0, centerLng: 0 },
   { id: 'bus_b', name: 'Bus B', commune: 'C1', zone: 'Z1', centerLat: 0, centerLng: 0 },
 ];
-const bbDept: Department = { id: 'dept_bloom_bus', name: 'Bloom Bus', type: 'spécial', ministryId: 'min_1', description: '', specialFunction: 'bloom_bus' };
+const bbDept: Department = { id: 'dept_bloom_bus', name: 'Bloom Bus', type: 'special', ministryId: 'min_1', description: '', specialFunction: 'bloom_bus' };
 const departments: Department[] = [bbDept];
 
 function mkMember(id: string, role: string | undefined, bloomBusId?: string): Member {
   return {
     id, lastName: id, firstName: id, phone: '', email: '', gender: 'H', birthDate: '2000-01-01',
     maritalStatus: 'Célibataire', profession: '', entryDate: '2020-01-01', branch: 'church',
-    level: 'Nouveau', pastoralCursus: 'Aucun',
+    level: 'nouveau', pastoralCursus: 'aucun',
     departments: role ? { [bbDept.id]: role as any } : {},
     bloomBusId,
     healthKPIs: { spirituel: 0, social: 0, financier: 0, physique: 0, presenceCulte: 0, presenceService: 0 },
-    baptismStatus: 'Non baptisé',
+    baptismStatus: 'non_baptise',
   };
 }
 

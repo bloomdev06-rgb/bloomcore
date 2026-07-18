@@ -7,6 +7,7 @@ import { PhotoLightbox } from "./ui/PhotoLightbox";
 import { Modal } from "./ui/Modal";
 import { toast } from "./ui/Toast";
 import { bloomBusRoleOf } from "../data/scope";
+import { labelFor } from "../data";
 
 // Système ivoirien : primaire → lycée + niveaux du supérieur.
 export const SCHOOL_LEVELS = [
@@ -84,9 +85,9 @@ export default function MemberFormModal({
   const [lat, setLat] = useState("5.3854");
   const [lng, setLng] = useState("-3.9781");
   const [memberBranch, setMemberBranch] = useState<Branch>("church");
-  const [level, setLevel] = useState<CommunityLevel>("Stagiaire");
-  const [pastoralCursus, setPastoralCursus] = useState<PastoralCursus>("Aucun");
-  const [baptismStatus, setBaptismStatus] = useState<"Non baptisé" | "Baptisé">("Non baptisé");
+  const [level, setLevel] = useState<CommunityLevel>("stagiaire");
+  const [pastoralCursus, setPastoralCursus] = useState<PastoralCursus>("aucun");
+  const [baptismStatus, setBaptismStatus] = useState<"non_baptise" | "baptise">("non_baptise");
   const [baptismDate, setBaptismDate] = useState("");
   const [baptismViaDepartment, setBaptismViaDepartment] = useState(false);
   const [deptName, setDeptName] = useState("dept_louange");
@@ -143,9 +144,9 @@ export default function MemberFormModal({
       setLat("5.3854");
       setLng("-3.9781");
       setMemberBranch(activeBranch === "global" ? "church" : activeBranch);
-      setLevel("Stagiaire");
-      setPastoralCursus("Aucun");
-      setBaptismStatus("Non baptisé");
+      setLevel("stagiaire");
+      setPastoralCursus("aucun");
+      setBaptismStatus("non_baptise");
       setBaptismDate("");
       setBaptismViaDepartment(false);
       setDeptName(lockDepartmentId || "dept_louange");
@@ -283,8 +284,8 @@ export default function MemberFormModal({
         level,
         pastoralCursus,
         baptismStatus,
-        baptismDate: baptismStatus === "Baptisé" ? baptismDate || undefined : undefined,
-        baptismViaDepartment: baptismStatus === "Baptisé" ? baptismViaDepartment : undefined,
+        baptismDate: baptismStatus === "baptise" ? baptismDate || undefined : undefined,
+        baptismViaDepartment: baptismStatus === "baptise" ? baptismViaDepartment : undefined,
         departments: updatedDepartments,
         hasPassedToBossForm: true,
       });
@@ -308,8 +309,8 @@ export default function MemberFormModal({
         level,
         pastoralCursus,
         baptismStatus,
-        baptismDate: baptismStatus === "Baptisé" ? baptismDate || undefined : undefined,
-        baptismViaDepartment: baptismStatus === "Baptisé" ? baptismViaDepartment : undefined,
+        baptismDate: baptismStatus === "baptise" ? baptismDate || undefined : undefined,
+        baptismViaDepartment: baptismStatus === "baptise" ? baptismViaDepartment : undefined,
         departments: updatedDepartments,
         deptAttachmentStatus: directBloomBusRegistration ? "pending" : undefined,
         deptAttachmentOrigin: directBloomBusRegistration ? "bloom_bus" : undefined,
@@ -613,10 +614,10 @@ export default function MemberFormModal({
                   onChange={(e) => setLevel(e.target.value as any)}
                   className="w-full border border-bc-border rounded-full px-2 py-1.5 text-xs bg-white"
                 >
-                  <option value="Stagiaire">Stagiaire</option>
-                  <option value="Boss">Boss</option>
-                  <option value="Leader">Leader</option>
-                  <option value="Coach">Coach</option>
+                  <option value="stagiaire">Stagiaire</option>
+                  <option value="boss">Boss</option>
+                  <option value="leader">Leader</option>
+                  <option value="coach">Coach</option>
                 </select>
               </div>
 
@@ -628,13 +629,13 @@ export default function MemberFormModal({
                   onChange={(e) => setPastoralCursus(e.target.value as any)}
                   className="w-full border border-bc-border rounded-full px-2 py-1.5 text-xs bg-white"
                 >
-                  <option value="Aucun">Aucun</option>
-                  <option value="Appelé">Appelé</option>
-                  <option value="Serviteur">Serviteur</option>
-                  <option value="Gagneur d'âme">Gagneur d'âme</option>
-                  <option value="Assistant Pasteur">Assistant Pasteur</option>
-                  <option value="Pasteur Assistant">Pasteur Assistant</option>
-                  <option value="Pasteur Titulaire">Pasteur Titulaire</option>
+                  <option value="aucun">Aucun</option>
+                  <option value="appele">Appelé</option>
+                  <option value="serviteur">Serviteur</option>
+                  <option value="gagneur_ame">Gagneur d'âme</option>
+                  <option value="assistant_pasteur">Assistant Pasteur</option>
+                  <option value="pasteur_assistant">Pasteur Assistant</option>
+                  <option value="pasteur_titulaire">Pasteur Titulaire</option>
                 </select>
               </div>
 
@@ -696,10 +697,10 @@ export default function MemberFormModal({
                     onChange={(e) => setDeptRole(e.target.value as any)}
                     className="w-full border border-bc-border rounded-full px-2 py-1.5 text-xs bg-white"
                   >
-                    <option value="Membre">Membre</option>
-                    <option value="Adjoint">Adjoint</option>
-                    <option value="Responsable">Responsable</option>
-                    <option value="Capitaine de Bus">Capitaine de Bus</option>
+                    <option value="membre">Membre</option>
+                    <option value="adjoint">Adjoint</option>
+                    <option value="responsable">Responsable</option>
+                    <option value="capitaine">Capitaine de Bus</option>
                   </select>
                 </div>
               </div>
@@ -727,10 +728,10 @@ export default function MemberFormModal({
                       onChange={(e) => setDeptRole(e.target.value as any)}
                       className="w-full border border-bc-border rounded-full px-2 py-1.5 text-xs bg-white"
                     >
-                      <option value="Membre">Membre</option>
-                      <option value="Adjoint">Adjoint</option>
-                      <option value="Responsable">Responsable</option>
-                      <option value="Capitaine de Bus">Capitaine de Bus</option>
+                      <option value="membre">Membre</option>
+                      <option value="adjoint">Adjoint</option>
+                      <option value="responsable">Responsable</option>
+                      <option value="capitaine">Capitaine de Bus</option>
                     </select>
                   </div>
                 </div>
@@ -745,7 +746,7 @@ export default function MemberFormModal({
                   <div className="flex flex-wrap gap-2">
                     {Object.entries(depts).map(([dId, fn]) => (
                       <span key={dId} className="inline-flex items-center gap-1 px-2 py-1 rounded-full bg-bc-green/10 text-xs text-bc-text">
-                        {departments.find((d) => d.id === dId)?.name ?? dId} · {fn}
+                        {departments.find((d) => d.id === dId)?.name ?? dId} · {labelFor(fn)}
                         <button
                           type="button"
                           aria-label={`Retirer ${dId}`}
@@ -777,8 +778,8 @@ export default function MemberFormModal({
                 onChange={(e) => setBaptismStatus(e.target.value as "Non baptisé" | "Baptisé")}
                 className="w-full border border-bc-border rounded-full px-3 py-1.5 text-xs bg-white"
               >
-                <option value="Non baptisé">Non baptisé</option>
-                <option value="Baptisé">Baptisé</option>
+                <option value="non_baptise">Non baptisé</option>
+                <option value="baptise">Baptisé</option>
               </select>
               {baptismStatus === "Baptisé" && (
                 <>

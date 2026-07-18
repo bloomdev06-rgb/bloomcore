@@ -2,6 +2,7 @@
 // can see, below the page-level `view_members` gate (that gate only decides who
 // can open the tab at all).
 import { Member, BloomBusEntity, Department, Ministry } from '../types';
+import { roleForDeptFn } from '../../packages/shared/migrate';
 
 export const FULL_SCOPE_ROLES = ['Super Admin', 'Admin', 'Pasteur Principal', 'Pasteur'];
 // PROFILS-INTERFACES : seuls la ligne pastorale/staff et le Coach (bi-branche) ont le
@@ -76,9 +77,13 @@ export function inMemberScope(
 // autre titre (ex. Ministre, Responsable d'un autre département) est plus prioritaire.
 // Seule exception : les pasteurs ont un accès global, indépendamment de tout rôle Bloom
 // Bus (Super Admin/Admin gardent aussi un accès global, en tant que rôles système).
+// M5 a fait passer DeptFunction en snake_case côté stockage, mais toute la logique de scope
+// raisonne en noms de rôle capitalisés. On remappe donc la valeur stockée vers le nom de rôle.
+
 export function bloomBusRoleOf(operator: Member, departments: Department[]): string | undefined {
   const busDept = departments.find(d => d.specialFunction === 'bloom_bus');
-  return busDept ? operator.departments?.[busDept.id] : undefined;
+  const fn = busDept ? operator.departments?.[busDept.id] : undefined;
+  return fn ? roleForDeptFn(fn) : undefined;
 }
 
 export function fullBloomBusAccess(operator: Member, role: string, departments: Department[]): boolean {

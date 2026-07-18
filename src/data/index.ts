@@ -21,6 +21,7 @@ import {
 } from '../mockData';
 export { deriveTimeBasedNotifications } from './notificationRules';
 export { apiBootstrap, apiLogin, clearAuthToken, apiPut, apiFetchCollection, openNotificationStream, syncQueueLength } from './api';
+export { labelFor } from '../../packages/shared/migrate';
 export { canView, hasCapability, resolveCapability } from './permissions';
 import { apiPut } from './api';
 

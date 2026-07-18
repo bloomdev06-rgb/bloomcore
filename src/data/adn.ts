@@ -1,6 +1,6 @@
 // Dashboard ADN — synthèse des Nouveaux & OJ reçus par culte/événement, sur une période.
 // Deux sources volontairement distinctes (pas d'addition entre elles, sinon double comptage) :
-// - le comptage officiel saisi par l'ADN (rapport_adn, content.nouveauxHommes/Femmes + ojHommes/Femmes) ;
+// - le comptage officiel saisi par l'ADN (rapport_adn, content.nouveauxH/Femmes + ojH/Femmes) ;
 // - les fiches d'accueil individuelles (Member.receivedEventId, ojFlag).
 // Pur, partagé — style maison src/data/*.
 import type { Member, Report, Event } from '../types';
@@ -49,15 +49,15 @@ export function adnByEvent(
     if (r.reportType !== 'rapport_adn' || !inPeriod(r.date)) continue;
     const ev = r.eventId ? eventById.get(r.eventId) : undefined;
     const row = rowFor(ev ? r.eventId! : 'autre', ev?.title ?? 'Autre', ev?.date);
-    row.countNouveaux += Number(r.content?.nouveauxHommes ?? 0) + Number(r.content?.nouveauxFemmes ?? 0);
-    row.countOj += Number(r.content?.ojHommes ?? 0) + Number(r.content?.ojFemmes ?? 0);
+    row.countNouveaux += Number(r.content?.nouveauxH ?? 0) + Number(r.content?.nouveauxF ?? 0);
+    row.countOj += Number(r.content?.ojH ?? 0) + Number(r.content?.ojF ?? 0);
   }
 
   // Fiches d'accueil individuelles. Sans receivedEventId (fiches d'avant ce champ, ou reçu
   // hors cadre) → bucket 'autre'.
   for (const m of members) {
     const d = m.integrationDateRegistered || m.entryDate;
-    if (!m.integrationDateRegistered && m.level !== 'Nouveau') continue; // pas une fiche d'accueil
+    if (!m.integrationDateRegistered && m.level !== 'nouveau') continue; // pas une fiche d'accueil
     if (!inPeriod(d)) continue;
     const key = m.receivedEventId && eventById.has(m.receivedEventId) ? m.receivedEventId : 'autre';
     const ev = eventById.get(key);

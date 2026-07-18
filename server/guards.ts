@@ -3,6 +3,7 @@
 // (PUT whole-array). Appelé par PUT /:name et POST /sync/batch.
 import { getCollection, appendToCollection, mergeCollection } from './db.ts';
 import { parseReportPayload } from '../packages/shared/schemas/report.ts';
+import { canonicalize } from '../packages/shared/migrate.ts';
 
 export class GuardError extends Error {
   status: number;
@@ -99,6 +100,9 @@ export function applyWrite(
   preserve: Set<string> = new Set(),
 ): { added: any[]; changed: any[]; conflicts: string[] } {
   validateItems(name, incoming); // frontière de confiance (#12) — avant toute écriture
+  // M5 — normalise toute écriture vers les valeurs snake_case §3. Linchpin offline-first :
+  // un vieux client envoyant d'anciennes valeurs les voit converties ici → jamais réintroduites.
+  incoming = incoming.map((it) => canonicalize(name, it));
   const stored = getCollection(name);
   const storedById = new Map(stored.map((s) => [String(s.id), s]));
   const incomingById = new Map(incoming.map((it) => [String(it.id), it]));

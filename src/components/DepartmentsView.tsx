@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { Branch, Member, Report, Department, DepartmentType, SpecialFunction, Activity as ActivityEntity, AuditLog, Delegation, DeptFunction, Event, PermissionMatrix, FormDef, BloomBusEntity } from '../types';
 import { LayoutList, ChevronRight, Users, Calendar, Activity, Plus, X, Sparkles, FileText, CheckCircle, UserCheck, Heart, TrendingUp, Clock, AlertCircle, FolderKanban } from 'lucide-react';
-import { useMinistries, useProjects, load, save, activitiesSeed } from '../data';
+import { useMinistries, useProjects, load, save, activitiesSeed, labelFor } from '../data';
 import {
   activeMemberIds, dominantHealthLevel, isRed, moissonBySource, ojTotal,
   pendingFollowUps, periodRange, projectProgress, Period, PeriodInput, weeklyActiveCounts, weeklyBaptismCounts,
@@ -94,7 +94,7 @@ export default function DepartmentsView({ activeBranch, simulatedRole, members =
   // L'affectation RÉELLE de l'opérateur prime ; ROLE_HOME_DEPT n'est qu'un repli pour les
   // rôles sans département assigné — sinon un Responsable de Louange atterrit sur Prod & Tech
   // (dept_tech) et y gère des membres qui ne sont pas les siens.
-  const defaultDept = (myDeptEntries.find(([, fn]) => fn === 'Responsable')?.[0])
+  const defaultDept = (myDeptEntries.find(([, fn]) => fn === 'responsable')?.[0])
     || myDeptEntries[0]?.[0]
     || ROLE_HOME_DEPT[simulatedRole]
     || departments[0]?.id;
@@ -135,18 +135,18 @@ export default function DepartmentsView({ activeBranch, simulatedRole, members =
   const deptMembers = members.filter(m => selectedDept && Object.keys(m.departments).includes(selectedDept));
   // Membres actifs du dept sur la période du sélecteur (aligné Accueil).
   const deptActiveCount = selectedDept ? activeMemberIds(reports, effectivePeriod, new Date(), selectedDept).size : 0;
-  const deptResponsable = deptMembers.find(m => selectedDept && m.departments[selectedDept] === 'Responsable');
+  const deptResponsable = deptMembers.find(m => selectedDept && m.departments[selectedDept] === 'responsable');
   const byFunction = (fn: string) => deptMembers.filter(m => selectedDept && m.departments[selectedDept] === fn);
   // Nouveaux affectés à ce département, suivis par le Responsable jusqu'à Boss :
   // Nouveau (réception non validée) -> Nouveau (en attente d'entretien) -> Stagiaire -> Boss (membre).
   // Chaque étape reste visible dans l'onglet Membres (deptMembers, non filtré par level) tant
   // qu'elle n'a pas atteint Boss ; elle sort de cet onglet Intégration une fois membre.
-  const deptNouveaux = deptMembers.filter(m => m.level === 'Nouveau');
+  const deptNouveaux = deptMembers.filter(m => m.level === 'nouveau');
   const pendingReception = deptNouveaux.filter(m => m.receptionValidated === false);
   const receivedNouveaux = deptNouveaux.filter(m => m.receptionValidated !== false);
   // Un membre en attente de validation Bloom Bus ne doit PAS apparaître aussi dans l'onglet
   // Stagiaires : sinon on le promeut Boss depuis là en court-circuitant « Réceptions à valider ».
-  const deptStagiaires = deptMembers.filter(m => m.level === 'Stagiaire' && m.deptAttachmentStatus !== 'pending');
+  const deptStagiaires = deptMembers.filter(m => m.level === 'stagiaire' && m.deptAttachmentStatus !== 'pending');
   const canValidate = ['Responsable', 'Coach', 'Leader', 'Pasteur', 'Ministre', 'Admin', 'Super Admin'].includes(simulatedRole);
   // Membres enregistrés directement par un responsable hiérarchique Bloom Bus (chemin distinct
   // de la procédure ADN "nouveau") — rattachement à ce département en attente de validation.
@@ -181,7 +181,7 @@ export default function DepartmentsView({ activeBranch, simulatedRole, members =
   const deptActivities = activities.filter(a => a.departmentId === selectedDept);
   const deptReports = reports.filter(r => r.departmentId === selectedDept);
   // Un département n'a pas ses propres projets — on affiche ceux de son ministère de rattachement.
-  const deptProjects = useProjects().filter(p => p.status === 'En cours' && p.scope === 'ministry' && p.ministryId === selectedDeptData?.ministryId);
+  const deptProjects = useProjects().filter(p => p.status === 'En cours' && p.scope === 'ministere' && p.ministryId === selectedDeptData?.ministryId);
   const lastDeptActivityDate = deptReports.length
     ? new Date(Math.max(...deptReports.map(r => new Date(r.date).getTime()))).toLocaleDateString('fr-FR')
     : '--';
@@ -274,8 +274,8 @@ export default function DepartmentsView({ activeBranch, simulatedRole, members =
     if (sectionId) ds[selectedDept] = sectionId;
     else delete ds[selectedDept];
     // Détaché de sa section → un Responsable de section redevient simple Membre.
-    const demote = !sectionId && m.departments[selectedDept] === 'Responsable de section';
-    onUpdateMember?.({ ...m, deptSections: ds, ...(demote && { departments: { ...m.departments, [selectedDept]: 'Membre' as DeptFunction } }) });
+    const demote = !sectionId && m.departments[selectedDept] === 'responsable_section';
+    onUpdateMember?.({ ...m, deptSections: ds, ...(demote && { departments: { ...m.departments, [selectedDept]: 'membre' as DeptFunction } }) });
   };
   const [newSectionName, setNewSectionName] = useState('');
   const [confirmingSectionId, setConfirmingSectionId] = useState<string | null>(null);
@@ -353,7 +353,7 @@ export default function DepartmentsView({ activeBranch, simulatedRole, members =
                     Département {selectedDeptData.name}
                   </h2>
                   <p className="text-xs text-bc-text-secondary mt-1 flex items-center gap-2">
-                    <span>{selectedMinistryData?.name} • Type : {selectedDeptData.type}</span>
+                    <span>{selectedMinistryData?.name} • Type : {labelFor(selectedDeptData.type)}</span>
                     {sf && (
                       <span className="inline-flex items-center gap-1 text-[10px] font-bold text-bc-green bg-bc-green/10 border border-bc-green/20 px-2 py-0.5 rounded-full">
                         <Sparkles size={10} /> {SPECIAL_LABEL[sf]}
@@ -673,16 +673,16 @@ export default function DepartmentsView({ activeBranch, simulatedRole, members =
                 <div className="space-y-4">
                   {/* Organisation interne — rôles fixes du département */}
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                    {(['Responsable', 'Adjoint', 'Trésorier'] as DeptFunction[]).map(fn => (
+                    {(['responsable', 'adjoint', 'tresorier'] as DeptFunction[]).map(fn => (
                       <div key={fn} className="bg-white rounded-2xl border border-bc-border p-4">
-                        <h4 className="text-[10px] font-bold uppercase tracking-wider text-bc-text-secondary mb-2">{fn} ({byFunction(fn).length})</h4>
+                        <h4 className="text-[10px] font-bold uppercase tracking-wider text-bc-text-secondary mb-2">{labelFor(fn)} ({byFunction(fn).length})</h4>
                         <div className="space-y-1.5">
                           {byFunction(fn).length === 0 && <p className="text-[11px] text-bc-text-secondary italic">Non assigné</p>}
                           {byFunction(fn).map(m => (
                             <div key={m.id} className="flex items-center justify-between text-xs font-medium text-bc-text bg-bc-canvas/40 border border-bc-border rounded-full px-3 py-1.5">
                               <span className="truncate">{m.firstName} {m.lastName}</span>
                               {canValidate && (
-                                <button onClick={() => setDeptFunction(m, 'Membre')} title="Retirer la fonction" className="text-bc-text-secondary hover:text-bc-danger ml-2 shrink-0 active-scale">
+                                <button onClick={() => setDeptFunction(m, 'membre')} title="Retirer la fonction" className="text-bc-text-secondary hover:text-bc-danger ml-2 shrink-0 active-scale">
                                   <X size={11} />
                                 </button>
                               )}
@@ -730,7 +730,7 @@ export default function DepartmentsView({ activeBranch, simulatedRole, members =
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                       {(selectedDeptData?.sections ?? []).map(sec => {
                         const secMembers = deptMembers.filter(m => selectedDept && m.deptSections?.[selectedDept] === sec.id);
-                        const secLead = secMembers.find(m => selectedDept && m.departments[selectedDept] === 'Responsable de section');
+                        const secLead = secMembers.find(m => selectedDept && m.departments[selectedDept] === 'responsable_section');
                         return (
                           <div key={sec.id} className="border border-bc-border rounded-2xl p-4 bg-bc-canvas/30">
                             <div className="flex items-center justify-between mb-1">
@@ -750,8 +750,8 @@ export default function DepartmentsView({ activeBranch, simulatedRole, members =
                                   <span className="truncate font-medium text-bc-text">{m.firstName} {m.lastName}</span>
                                   {canValidate && (
                                     <span className="flex items-center gap-2 shrink-0 ml-2">
-                                      {selectedDept && m.departments[selectedDept] !== 'Responsable de section' && (
-                                        <button onClick={() => setDeptFunction(m, 'Responsable de section')} title="Nommer responsable de section" className="text-[9px] font-bold text-bc-green hover:underline">
+                                      {selectedDept && m.departments[selectedDept] !== 'responsable_section' && (
+                                        <button onClick={() => setDeptFunction(m, 'responsable_section')} title="Nommer responsable de section" className="text-[9px] font-bold text-bc-green hover:underline">
                                           Resp.
                                         </button>
                                       )}
@@ -974,13 +974,13 @@ export default function DepartmentsView({ activeBranch, simulatedRole, members =
                             <Avatar src={coach?.avatarUrl} initials={coach ? `${coach.firstName[0]}${coach.lastName[0]}` : '?'} size="sm" className="w-8 h-8 text-[10px] bg-bc-purple/10 text-bc-purple" />
                             <div>
                               <h3 className="font-bold text-bc-text text-sm">{coach ? `${coach.firstName} ${coach.lastName}` : 'Coach inconnu'}</h3>
-                              <p className="text-[10px] text-bc-text-secondary">{coach?.level} · suit {suivis.length} personne{suivis.length > 1 ? 's' : ''}</p>
+                              <p className="text-[10px] text-bc-text-secondary">{labelFor(coach?.level)} · suit {suivis.length} personne{suivis.length > 1 ? 's' : ''}</p>
                             </div>
                           </div>
                           <div className="space-y-2">
                             {suivis.map(m => (
                               <div key={m.id} className="flex items-center justify-between bg-bc-canvas/40 border border-bc-border rounded-xl px-4 py-2.5 text-xs">
-                                <span className="font-medium text-bc-text">{m.firstName} {m.lastName} <span className="text-bc-text-secondary">· {m.level}</span></span>
+                                <span className="font-medium text-bc-text">{m.firstName} {m.lastName} <span className="text-bc-text-secondary">· {labelFor(m.level)}</span></span>
                                 {canValidate ? (
                                   <button onClick={() => openReportModal('rapport_suivi_coach', m.id)} className="text-[10px] font-bold text-bc-green hover:underline active-scale">Rédiger un suivi</button>
                                 ) : (
@@ -998,7 +998,7 @@ export default function DepartmentsView({ activeBranch, simulatedRole, members =
                         <div className="space-y-2">
                           {unmentored.map(m => (
                             <div key={m.id} className="flex items-center justify-between bg-bc-canvas/40 border border-bc-border rounded-xl px-4 py-2.5 text-xs">
-                              <span className="font-medium text-bc-text">{m.firstName} {m.lastName} <span className="text-bc-text-secondary">· {m.level}</span></span>
+                              <span className="font-medium text-bc-text">{m.firstName} {m.lastName} <span className="text-bc-text-secondary">· {labelFor(m.level)}</span></span>
                               {canValidate ? (
                                 <button onClick={() => openReportModal('rapport_suivi_coach', m.id)} className="text-[10px] font-bold text-bc-green hover:underline active-scale">Rédiger un suivi</button>
                               ) : (
@@ -1026,7 +1026,7 @@ export default function DepartmentsView({ activeBranch, simulatedRole, members =
                           <select value={delTo} onChange={e => setDelTo(e.target.value)} className="border border-bc-border rounded-full px-3 py-2 text-xs bg-white min-w-[180px]">
                             <option value="">Choisir un membre...</option>
                             {deptMembers.filter(m => m.id !== deptResponsable.id).map(m => (
-                              <option key={m.id} value={m.id}>{m.firstName} {m.lastName} ({m.departments[selectedDept!]})</option>
+                              <option key={m.id} value={m.id}>{m.firstName} {m.lastName} ({labelFor(m.departments[selectedDept!])})</option>
                             ))}
                           </select>
                         </div>

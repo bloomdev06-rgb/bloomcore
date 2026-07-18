@@ -57,11 +57,11 @@ export function dominantHealthLevel(members: Member[], axis: keyof Member['healt
 export function isRed(m: Member, now: Date = new Date()): boolean {
   const cutoff = now.getTime() - 7 * 24 * 60 * 60 * 1000;
   const pendingTooLong =
-    m.integrationState === 'En attente' &&
+    m.integrationState === 'en_attente' &&
     !!m.integrationDateRegistered &&
     new Date(m.integrationDateRegistered).getTime() < cutoff;
   // Clause 2 : membre en pipeline (En attente/Suivi) dont le dernier contact remonte à > 7j.
-  const followed = m.integrationState === 'En attente' || m.integrationState === 'Suivi';
+  const followed = m.integrationState === 'en_attente' || m.integrationState === 'suivi';
   const lastTouch = m.lastContact || m.integrationDateRegistered;
   const staleContact = followed && !!lastTouch && new Date(lastTouch).getTime() < cutoff;
   return pendingTooLong || staleContact;
@@ -108,7 +108,7 @@ export function moissonTotal(reports: Report[], period: PeriodInput, now: Date =
       continue;
     }
     if (r.reportType === 'rapport_adn') {
-      total += Number(r.content?.nouveauxHommes ?? 0) + Number(r.content?.nouveauxFemmes ?? 0);
+      total += Number(r.content?.nouveauxH ?? 0) + Number(r.content?.nouveauxF ?? 0);
     } else if (r.reportType === 'rapport_bloom_bus_life') {
       total += Number(r.content?.soulsWon ?? 0);
     }
@@ -282,7 +282,7 @@ export function weeklyMoissonCounts(reports: Report[], period: PeriodInput, now:
       const d = new Date(r.date).getTime();
       if (d < from || d >= to) continue;
       if (r.reportType === 'rapport_adn') {
-        count += Number(r.content?.nouveauxHommes ?? 0) + Number(r.content?.nouveauxFemmes ?? 0);
+        count += Number(r.content?.nouveauxH ?? 0) + Number(r.content?.nouveauxF ?? 0);
       } else if (r.reportType === 'rapport_bloom_bus_life') {
         count += Number(r.content?.soulsWon ?? 0);
       }
@@ -310,7 +310,7 @@ export function activeMemberIds(
   return ids;
 }
 
-// Accueil — OJ « Oui à Jésus » sur la période, Σ rapport_adn.content.ojHommes/ojFemmes (ADN seulement,
+// Accueil — OJ « Oui à Jésus » sur la période, Σ rapport_adn.content.ojH/ojF (ADN seulement,
 // le Bloom Bus ne trace pas ce flag — cf. PROFILS-INTERFACES.md §10).
 export function ojTotal(reports: Report[], period: PeriodInput, now: Date = new Date()): number {
   const { from, to } = periodRange(period, now);
@@ -319,7 +319,7 @@ export function ojTotal(reports: Report[], period: PeriodInput, now: Date = new 
     if (r.reportType !== 'rapport_adn') continue;
     const d = new Date(r.date);
     if (d < from || d > to) continue;
-    total += Number(r.content?.ojHommes ?? 0) + Number(r.content?.ojFemmes ?? 0);
+    total += Number(r.content?.ojH ?? 0) + Number(r.content?.ojF ?? 0);
   }
   return total;
 }
@@ -332,7 +332,7 @@ export function weeklyOjCounts(reports: Report[], period: PeriodInput, now: Date
       if (r.reportType !== 'rapport_adn') continue;
       const d = new Date(r.date).getTime();
       if (d < from || d >= to) continue;
-      count += Number(r.content?.ojHommes ?? 0) + Number(r.content?.ojFemmes ?? 0);
+      count += Number(r.content?.ojH ?? 0) + Number(r.content?.ojF ?? 0);
     }
     return { week, count };
   });
@@ -347,7 +347,7 @@ export function moissonBySource(reports: Report[], period: PeriodInput, now: Dat
     const d = new Date(r.date);
     if (d < from || d > to) continue;
     if (r.reportType === 'rapport_adn') {
-      adn += Number(r.content?.nouveauxHommes ?? 0) + Number(r.content?.nouveauxFemmes ?? 0);
+      adn += Number(r.content?.nouveauxH ?? 0) + Number(r.content?.nouveauxF ?? 0);
     } else if (r.reportType === 'rapport_bloom_bus_life') {
       bus += Number(r.content?.soulsWon ?? 0);
     }

@@ -3,8 +3,11 @@
 // permissions. En production, c'est CE rôle (dérivé du membre connecté) qui pilote l'app,
 // pas le panneau de simulation (dev-only). Sans ça, tout le monde resterait « Pasteur ».
 import { Member, AdminAccount, Ministry } from '../types';
+import { roleForDeptFn, roleForLevel } from '../../packages/shared/migrate';
 
-const PASTORAL_CURSUS = ['Pasteur Titulaire', 'Pasteur Assistant', 'Assistant Pasteur'];
+// M5 : cursus snake_case §3 (comparés à member.pastoralCursus migré). Les NOMS de rôles
+// (ROLE_PRIORITY, matrice) restent stables — on remappe la valeur stockée → nom de rôle.
+const PASTORAL_CURSUS = ['pasteur_titulaire', 'pasteur_assistant', 'assistant_pasteur'];
 
 // Du plus privilégié au moins privilégié. Le premier rôle détenu par le membre gagne.
 const ROLE_PRIORITY = [
@@ -22,9 +25,9 @@ export function resolveMemberRoles(member: Member, admins: AdminAccount[] = [], 
   if (adminEntry) roles.add(adminEntry.role);
   if (PASTORAL_CURSUS.includes(member.pastoralCursus)) roles.add('Pasteur');
   if (ministries.some((m) => !(m as any).deletedAt && m.tuteurId === member.id)) roles.add('Ministre');
-  for (const fn of Object.values(member.departments ?? {})) roles.add(String(fn));
-  if (member.level === 'Coach' || member.level === 'Leader') roles.add(member.level);
-  if (member.level === 'Nouveau') roles.add('Nouveau');
+  for (const fn of Object.values(member.departments ?? {})) roles.add(roleForDeptFn(fn));
+  if (member.level === 'coach' || member.level === 'leader') roles.add(roleForLevel(member.level));
+  if (member.level === 'nouveau') roles.add('Nouveau');
   roles.add('Membre');
   return roles;
 }

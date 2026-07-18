@@ -1,5 +1,5 @@
 import React, { useState, useEffect, lazy, Suspense } from 'react';
-import { load, save, seeds, useDepartments, useMinistries, useBusLines, useAdmins, deriveTimeBasedNotifications, apiBootstrap, apiPut, clearAuthToken, enableSync, canView, openNotificationStream, apiFetchCollection } from './data';
+import { load, save, seeds, useDepartments, useMinistries, useBusLines, useAdmins, deriveTimeBasedNotifications, apiBootstrap, apiPut, clearAuthToken, enableSync, canView, openNotificationStream, apiFetchCollection, labelFor } from './data';
 import { resolveMemberRole } from './data/roles';
 import { MEMBERS_TAB_DEPT_ONLY_ROLES } from './data/scope';
 import { isLegacySeedEventId } from './data/events';
@@ -278,12 +278,12 @@ export default function App() {
       ? busLines.find(b => b.commune === m.gps!.commune)
       : undefined;
     // P4.15 (c) — un "Oui à Jésus" rejoint aussi le département Baptême (parcours à étapes).
-    const departments = m.ojFlag ? { ...m.departments, dept_bapteme: 'Membre' as const } : m.departments;
+    const departments = m.ojFlag ? { ...m.departments, dept_bapteme: 'membre' as const } : m.departments;
     const enriched: Member = { ...m, ...(bus && { bloomBusId: bus.id }), departments };
 
     setMembers(prev => [enriched, ...prev]);
 
-    if (enriched.level === 'Nouveau') {
+    if (enriched.level === 'nouveau') {
       handleAddNotification(mkNotif(
         'Nouveau enregistré',
         `${enriched.firstName} ${enriched.lastName} enregistré(e) par l'ADN.`,
@@ -296,7 +296,7 @@ export default function App() {
     const log: AuditLog = {
       id: genId('aud_reg'),
       timestamp: new Date().toISOString(),
-      actionType: enriched.level === 'Nouveau' ? 'MEMBER_REGISTERED_ADN' : 'MEMBER_CREATED_MANUAL',
+      actionType: enriched.level === 'nouveau' ? 'MEMBER_REGISTERED_ADN' : 'MEMBER_CREATED_MANUAL',
       operatorName: operatorDisplayName(operator),
       operatorId: operator?.id ?? 'mem_1',
       details: `Création du profil de ${enriched.firstName} ${enriched.lastName} (${enriched.level}).`,
@@ -340,7 +340,7 @@ export default function App() {
         handleAddNotification(mkNotif('Changement de statut', `${m.firstName} ${m.lastName} : ${before.integrationState ?? '—'} → ${m.integrationState ?? '—'}.`, 'info', m.branch));
       }
       if (before.level !== m.level || before.pastoralCursus !== m.pastoralCursus) {
-        handleAddNotification(mkNotif('Promotion', `${m.firstName} ${m.lastName} est passé(e) à ${m.level}${m.pastoralCursus && m.pastoralCursus !== 'Aucun' ? ` · ${m.pastoralCursus}` : ''}.`, 'success', m.branch));
+        handleAddNotification(mkNotif('Promotion', `${m.firstName} ${m.lastName} est passé(e) à ${labelFor(m.level)}${m.pastoralCursus && m.pastoralCursus !== 'aucun' ? ` · ${labelFor(m.pastoralCursus)}` : ''}.`, 'success', m.branch));
       }
       if (JSON.stringify(before.departments) !== JSON.stringify(m.departments)) {
         handleAddNotification(mkNotif('Changement d\'affectation', `Affectations départementales de ${m.firstName} ${m.lastName} mises à jour.`, 'info', m.branch));
@@ -348,7 +348,7 @@ export default function App() {
       if (before.branch !== m.branch) {
         handleAddNotification(mkNotif('Transfert de branche', `${m.firstName} ${m.lastName} transféré(e) vers ${m.branch === 'church' ? 'Bloom Church' : 'Bloom Light'}.`, 'warning', m.branch));
       }
-      if (before.baptismStatus !== 'Baptisé' && m.baptismStatus === 'Baptisé') {
+      if (before.baptismStatus !== 'baptise' && m.baptismStatus === 'baptise') {
         handleAddNotification(mkNotif('Baptême complété', `${m.firstName} ${m.lastName} a été baptisé(e).`, 'success', m.branch));
       }
       if (!before.isDrachme && m.isDrachme) {

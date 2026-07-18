@@ -20,7 +20,7 @@ export default function CreateDepartmentModal({
 }) {
   const [name, setName] = useState('');
   const [ministryId, setMinistryId] = useState(ministries[0]?.id ?? '');
-  const [type, setType] = useState<DepartmentType>('service');
+  const [type, setType] = useState<DepartmentType>('normal');
   const [special, setSpecial] = useState<SpecialFunction | ''>('');
 
   const submit = () => {
@@ -31,7 +31,7 @@ export default function CreateDepartmentModal({
       ministryId,
       type,
       description: '',
-      specialFunction: type === 'spécial' && special ? special : undefined,
+      specialFunction: type === 'special' && special ? special : undefined,
     });
   };
 
@@ -43,10 +43,10 @@ export default function CreateDepartmentModal({
             {ministries.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
           </select>
           <select value={type} onChange={(e) => setType(e.target.value as DepartmentType)} className="w-full border border-bc-border rounded-xl px-3 py-2 text-sm bg-white">
-            <option value="service">Type : normal (service)</option>
-            <option value="spécial">Type : spécial</option>
+            <option value="normal">Type : normal</option>
+            <option value="special">Type : spécial</option>
           </select>
-          {type === 'spécial' && (
+          {type === 'special' && (
             <select value={special} onChange={(e) => setSpecial(e.target.value as SpecialFunction)} className="w-full border border-bc-border rounded-xl px-3 py-2 text-sm bg-white">
               <option value="">— Fonction spéciale —</option>
               {(['adn', 'portiers', 'integration', 'bloom_bus', 'gestion_cultes', 'parcours_etapes'] as SpecialFunction[]).map((f) => (

@@ -94,10 +94,10 @@ export default function CulteReportView({ events, reports, operator, activeBranc
       setGdcValues({
         date: ev?.date ?? '',
         ...(adn ? {
-          oj: String(Number(adn.ojHommes ?? 0) + Number(adn.ojFemmes ?? 0)),
-          totalNouveaux: String(Number(adn.nouveauxHommes ?? 0) + Number(adn.nouveauxFemmes ?? 0)),
-          effF: String(Number(adn.nouveauxFemmes ?? 0)),
-          effG: String(Number(adn.nouveauxHommes ?? 0)),
+          oj: String(Number(adn.ojH ?? 0) + Number(adn.ojF ?? 0)),
+          totalNouveaux: String(Number(adn.nouveauxH ?? 0) + Number(adn.nouveauxF ?? 0)),
+          effF: String(Number(adn.nouveauxF ?? 0)),
+          effG: String(Number(adn.nouveauxH ?? 0)),
         } : {}),
         ...(c.gdcValues ?? {}),
       });
@@ -114,7 +114,7 @@ export default function CulteReportView({ events, reports, operator, activeBranc
     setAdultes(Number(c.attendeesAdultes ?? 0));
     setEnfants(Number(c.attendeesEnfants ?? 0));
     // Lien ADN → GDC (fiche générale) : nouvelles décisions pré-remplies depuis le comptage OJ.
-    setDecisions(Number(c.nouvellesDecisions ?? (adn ? Number(adn.ojHommes ?? 0) + Number(adn.ojFemmes ?? 0) : 0)));
+    setDecisions(Number(c.nouvellesDecisions ?? (adn ? Number(adn.ojH ?? 0) + Number(adn.ojF ?? 0) : 0)));
     setNotes(c.notes ?? '');
   };
 

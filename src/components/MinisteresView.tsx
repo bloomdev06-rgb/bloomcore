@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Branch, Ministry, Member, Report, Department, AuditLog } from '../types';
 import { Grid, ChevronRight, Users, Folder, ArrowLeft, BarChart3, GripVertical, Plus, X, Flame, Palette, MonitorSpeaker, HeartHandshake, Rocket, Network, BookOpen, TrendingUp, Sparkles, Clock, AlertCircle, Calendar, FolderKanban, Trash2 } from 'lucide-react';
-import { useMinistries, useProjects, load, save, activitiesSeed } from '../data';
+import { useMinistries, useProjects, load, save, activitiesSeed, labelFor } from '../data';
 import { DEFAULT_OPERATOR_NAME } from '../data/operator';
 import {
   activeMemberIds, dominantHealthLevel, isRed, moissonBySource, ojTotal,
@@ -100,7 +100,7 @@ function TuteurSearch({ valueLabel, candidates, onSelect }: {
             className="w-full text-left px-3 py-2 text-xs hover:bg-bc-canvas"
           >
             <span className="font-bold text-bc-text">{c.firstName} {c.lastName}</span>
-            <span className="text-bc-text-secondary"> — {c.level}</span>
+            <span className="text-bc-text-secondary"> — {labelFor(c.level)}</span>
           </button>
         ))}
         {results.length === 0 && <p className="px-3 py-2 text-xs italic text-bc-text-secondary">Aucun résultat</p>}
@@ -180,7 +180,7 @@ export default function MinisteresView({ activeBranch, simulatedRole, members, r
     return m ? `${m.firstName} ${m.lastName}` : 'Non assigné';
   };
   // Candidates for "Ministre de tutelle": senior members.
-  const tuteurCandidates = members.filter(m => m.level === 'Leader' || m.level === 'Coach');
+  const tuteurCandidates = members.filter(m => m.level === 'leader' || m.level === 'coach');
 
   // Santé d'un département = moyenne de chaque critère (5) sur tous ses membres (branche active).
   const HEALTH_CRITERIA = [
@@ -221,7 +221,7 @@ export default function MinisteresView({ activeBranch, simulatedRole, members, r
     const ministryMembers = members.filter(m =>
       Object.keys(m.departments ?? {}).some(id => mDeptIds.includes(id)) && (activeBranch === 'global' || m.branch === activeBranch));
     const ministryReports = reports.filter(r => r.departmentId && mDeptIds.includes(r.departmentId));
-    const ministryNouveaux = ministryMembers.filter(m => m.level === 'Nouveau');
+    const ministryNouveaux = ministryMembers.filter(m => m.level === 'nouveau');
     const ministryPendingReception = ministryNouveaux.filter(m => m.receptionValidated === false);
     const { from: mPFrom, to: mPTo } = periodRange(effectivePeriod);
     const ministryPeriodBaptised = ministryMembers.filter(m => m.baptismDate && new Date(m.baptismDate) >= mPFrom && new Date(m.baptismDate) <= mPTo);
@@ -232,7 +232,7 @@ export default function MinisteresView({ activeBranch, simulatedRole, members, r
     const ministryRedCount = ministryMembers.filter(m => isRed(m)).length;
     const ministryGrowthData = weeklyGrowthSeries(ministryMembers, ministryReports, effectivePeriod);
     const ministryActivities = load('bc_activities', activitiesSeed).filter(a => mDeptIds.includes(a.departmentId));
-    const ministryProjects = allProjects.filter(p => p.status === 'En cours' && p.scope === 'ministry' && p.ministryId === selected.id);
+    const ministryProjects = allProjects.filter(p => p.status === 'En cours' && p.scope === 'ministere' && p.ministryId === selected.id);
 
     return (
       <div className="space-y-6 animate-in slide-in-from-right-4 duration-300">
@@ -464,7 +464,7 @@ export default function MinisteresView({ activeBranch, simulatedRole, members, r
           <h3 className="font-ui font-bold text-bc-text mb-4 tracking-tight">Classement des Départements</h3>
           <div className="divide-y divide-bc-border">
             {rankedDepts.map(({ dept, h }) => {
-              const responsable = members.find(m => m.departments?.[dept.id] === 'Responsable');
+              const responsable = members.find(m => m.departments?.[dept.id] === 'responsable');
               return (
               <div key={dept.id} className="py-4 flex flex-col md:flex-row md:items-center justify-between gap-4">
                 <div>

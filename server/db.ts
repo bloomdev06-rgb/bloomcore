@@ -9,7 +9,9 @@
 // file that would change.
 import { DatabaseSync } from 'node:sqlite';
 import path from 'node:path';
+import fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
+import { canonicalize } from '../packages/shared/migrate.ts';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // BLOOMCORE_DB : surchargable pour les scripts *.check.ts (':memory:').
@@ -69,6 +71,23 @@ db.exec(`
 // ALTER échoue si la colonne existe → on la teste via PRAGMA d'abord.
 if (!(db.prepare('PRAGMA table_info(credentials)').all() as { name: string }[]).some((c) => c.name === 'pwd_version')) {
   db.exec('ALTER TABLE credentials ADD COLUMN pwd_version INTEGER NOT NULL DEFAULT 0');
+}
+
+// M5 — backfill unique des valeurs vers le snake_case §3 (packages/shared/migrate).
+// Idempotent : gardé par un flag kv `_m5_migrated`. Normalise les blobs existants une fois ;
+// la normalisation en écriture (guards.applyWrite) prend le relais ensuite. Dump de sécurité
+// avant réécriture (les maps sont bijectives, mais on garde un filet de rollback).
+if (!(db.prepare("SELECT 1 FROM kv WHERE key = '_m5_migrated'").get())) {
+  const names = (db.prepare('SELECT DISTINCT name FROM collections').all() as { name: string }[]).map((r) => r.name);
+  if (names.length) {
+    try {
+      const dump: Record<string, unknown[]> = {};
+      for (const n of names) dump[n] = getCollection(n);
+      fs.writeFileSync(path.join(__dirname, 'collections.pre-m5.json'), JSON.stringify(dump));
+    } catch { /* dump best-effort — n'empêche pas la migration */ }
+    for (const n of names) setCollection(n, getCollection(n).map((it) => canonicalize(n, it)));
+  }
+  db.prepare('INSERT INTO kv (key, data) VALUES (?, ?)').run('_m5_migrated', JSON.stringify(new Date().toISOString()));
 }
 
 // Whole-array collections: the frontend always replaces the full array on

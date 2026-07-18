@@ -3,26 +3,28 @@ import type { ReportType, CapabilityOverrideSubject } from '../packages/shared/e
 
 export type Branch = 'church' | 'light' | 'global';
 
-export type CommunityLevel = 'Nouveau' | 'Stagiaire' | 'Boss' | 'Leader' | 'Coach';
+// M5 §3 — valeurs snake_case FR (convergées). Libellés d'affichage via labelFor() (packages/shared/migrate).
+export type CommunityLevel = 'nouveau' | 'stagiaire' | 'boss' | 'leader' | 'coach';
 
-// Fonction d'un membre au sein d'un département (hiérarchie interne).
+// Fonction d'un membre au sein d'un département (hiérarchie interne). Sur-ensemble réel
+// conservé (§3 illustratif : tresorier/responsable_section réels, coach/leader vivent sur level).
 export type DeptFunction =
-  | 'Responsable' | 'Adjoint' | 'Trésorier' | 'Responsable de section' | 'Membre'
-  | 'Capitaine de Bus' | 'Responsable de Zone' | 'Responsable de Commune';
+  | 'responsable' | 'adjoint' | 'tresorier' | 'responsable_section' | 'membre'
+  | 'capitaine' | 'responsable_zone' | 'responsable_commune';
 
-export type IntegrationState = 'En attente' | 'Suivi' | 'Intégré';
+export type IntegrationState = 'en_attente' | 'suivi' | 'integre';
 export type IntegrationFollowStatus = 'Non suivi' | 'En attente' | 'En cours' | 'À recontacter' | 'Intégré' | 'Non intégré';
 
-export type PastoralCursus = 
-  | 'Aucun' 
-  | 'Appelé' 
-  | 'Serviteur' 
-  | 'Gagneur d\'âme' 
-  | 'Assistant Pasteur' 
-  | 'Pasteur Assistant' 
-  | 'Pasteur Titulaire';
+export type PastoralCursus =
+  | 'aucun'
+  | 'appele'
+  | 'serviteur'
+  | 'gagneur_ame'
+  | 'assistant_pasteur'
+  | 'pasteur_assistant'
+  | 'pasteur_titulaire';
 
-export type DepartmentType = 'service' | 'spécial';
+export type DepartmentType = 'normal' | 'special';
 
 export type SpecialFunction = 'adn' | 'portiers' | 'integration' | 'bloom_bus' | 'gestion_cultes' | 'parcours_etapes';
 
@@ -132,7 +134,7 @@ export interface Member {
     presenceService: number;
   };
 
-  baptismStatus: 'Non baptisé' | 'Baptisé';
+  baptismStatus: 'non_baptise' | 'baptise';
   baptismDate?: string;
   baptismViaDepartment?: boolean; // §7 — baptism went through the Baptism department process (vs hors process)
   isDrachme?: boolean; // §2.5 — "Drachme (perdu)": strayed member, manually flagged, distinct from "au rouge"
@@ -242,14 +244,15 @@ export interface ProjectTask {
   title: string;
   assignee: string;
   due?: string;
-  status: 'todo' | 'doing' | 'done';
+  status: 'a_faire' | 'en_cours' | 'fait';
 }
 
 export interface Project {
   id: string;
   name: string;
-  scope: 'church' | 'light' | 'both' | 'ministry'; // §16 — transverse, branche, ou ministère
-  ministryId?: string; // when scope === 'ministry'
+  scope: 'branche' | 'transverse' | 'ministere'; // §3/§16 — transverse, branche, ou ministère
+  branch?: Branch; // §3 M5 — identité de branche quand scope === 'branche' (ex church/light)
+  ministryId?: string; // when scope === 'ministere'
   status: 'En cours' | 'Planifié' | 'Terminé';
   pmo: string;
   startDate?: string;

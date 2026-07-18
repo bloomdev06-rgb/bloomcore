@@ -13,7 +13,7 @@ import {
   weeklyBaptismCounts, weeklyActiveCounts, weeklyMoissonCounts, weeklyGrowthSeries,
   ojTotal, weeklyOjCounts,
 } from '../data/kpi';
-import { useBusLines, useProjects, useDepartments, useMinistries } from '../data';
+import { useBusLines, useProjects, useDepartments, useMinistries, labelFor } from '../data';
 import { ROLE_HOME_DEPT } from '../data/scope';
 
 interface DashboardViewProps {
@@ -92,7 +92,7 @@ export default function DashboardView({ activeBranch, simulatedRole, members = [
 
   // §13.3 — Responsable/Coach/Leader ne voient que leur département ; Ministre, son ministère.
   const homeDeptId = ROLE_HOME_DEPT[simulatedRole]
-    || Object.entries(operator?.departments ?? {}).find(([, fn]) => fn === 'Responsable')?.[0]
+    || Object.entries(operator?.departments ?? {}).find(([, fn]) => fn === 'responsable')?.[0]
     || Object.keys(operator?.departments ?? {})[0];
   const ownMinistry = simulatedRole === 'Ministre' ? ministries.find(m => m.tuteurId === operator?.id) : undefined;
   const scopeDeptIds =
@@ -106,9 +106,9 @@ export default function DashboardView({ activeBranch, simulatedRole, members = [
   const branchMembers = scopedMembers.filter(m => activeBranch === 'global' || m.branch === activeBranch);
   const branchReports = scopedReports.filter(r => activeBranch === 'global' || r.targetBranch === activeBranch);
   const branchEvents = events.filter(e => activeBranch === 'global' || e.branch === activeBranch || e.branch === 'global');
-  const waitingCount = branchMembers.filter(m => m.integrationState === 'En attente').length;
+  const waitingCount = branchMembers.filter(m => m.integrationState === 'en_attente').length;
   const redCount = branchMembers.filter(m => isRed(m)).length;
-  const pendingReceptionsCount = branchMembers.filter(m => m.integrationState === 'En attente' && m.receptionValidated === false).length;
+  const pendingReceptionsCount = branchMembers.filter(m => m.integrationState === 'en_attente' && m.receptionValidated === false).length;
   // Actif = a servi ≥ 1 fois sur la période du sélecteur.
   const activeCount = activeMemberIds(branchReports, effectivePeriod).size;
   // Agenda Proche : les 3 prochains événements réels non clôturés de la branche.
@@ -126,13 +126,13 @@ export default function DashboardView({ activeBranch, simulatedRole, members = [
   const baptisedViaDept = periodBaptised.filter(m => m.baptismViaDepartment).length;
   // "Nouveau en attente" — enregistrés et orientés vers un département, pas encore reçus par le responsable.
   const nouveauxEnAttente = branchMembers.filter(m =>
-    m.level === 'Nouveau' && Object.keys(m.departments ?? {}).length > 0 && m.receptionValidated === false).length;
+    m.level === 'nouveau' && Object.keys(m.departments ?? {}).length > 0 && m.receptionValidated === false).length;
   const followUps = pendingFollowUps(branchReports);
   // §8.3 — même règle de confidentialité que ReportsView : le corps pastoral seul voit le contenu.
   const canSeeConfidential = ['Pasteur', 'Pasteur Principal', 'Ministre'].includes(simulatedRole);
   const health = periodHealthLevels(branchReports, effectivePeriod);
   const projectsInProgress = useProjects().filter(p =>
-    p.status === 'En cours' && (activeBranch === 'global' || p.scope === activeBranch || p.scope === 'both' || p.scope === 'ministry'));
+    p.status === 'En cours' && (activeBranch === 'global' || (p.scope === 'branche' && p.branch === activeBranch) || p.scope === 'transverse' || p.scope === 'ministere'));
 
   // §13.3 — dashboard par profil. Encadrement = tableau décisionnel ; autres = tableau personnel.
   const LEADERSHIP = ['Pasteur', 'Pasteur Principal', 'Ministre', 'Admin', 'Super Admin', 'Responsable', 'Coach', 'Leader'];
@@ -176,8 +176,8 @@ export default function DashboardView({ activeBranch, simulatedRole, members = [
             <div className="bg-white rounded-[2rem] border border-bc-border p-6">
               <h3 className="text-sm font-ui font-bold text-bc-text mb-3">Mon parcours</h3>
               <div className="space-y-2">
-                <div className="flex justify-between text-xs"><span className="text-bc-text-secondary">Niveau</span><span className="font-bold text-bc-text">{operator.level}</span></div>
-                <div className="flex justify-between text-xs"><span className="text-bc-text-secondary">Cursus</span><span className="font-bold text-bc-text">{operator.pastoralCursus}</span></div>
+                <div className="flex justify-between text-xs"><span className="text-bc-text-secondary">Niveau</span><span className="font-bold text-bc-text">{labelFor(operator.level)}</span></div>
+                <div className="flex justify-between text-xs"><span className="text-bc-text-secondary">Cursus</span><span className="font-bold text-bc-text">{labelFor(operator.pastoralCursus)}</span></div>
                 <div className="flex justify-between text-xs"><span className="text-bc-text-secondary">Départements</span><span className="font-bold text-bc-text">{Object.keys(operator.departments ?? {}).length}</span></div>
               </div>
             </div>

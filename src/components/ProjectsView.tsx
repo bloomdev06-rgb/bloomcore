@@ -15,9 +15,9 @@ interface ProjectsViewProps {
 }
 
 const COLUMNS: { key: ProjectTask['status']; label: string }[] = [
-  { key: 'todo', label: 'À faire' },
-  { key: 'doing', label: 'En cours' },
-  { key: 'done', label: 'Fait' },
+  { key: 'a_faire', label: 'À faire' },
+  { key: 'en_cours', label: 'En cours' },
+  { key: 'fait', label: 'Fait' },
 ];
 
 const TEAM_ROLES = ['PMO', 'Responsable COM', 'Logistique', 'Finance', 'Membre'];
@@ -27,7 +27,7 @@ export default function ProjectsView({ activeBranch, simulatedRole, events = [],
   const ministries = useMinistries();
   const ministryName = (id?: string) => ministries.find((m) => m.id === id)?.name ?? 'Ministère';
   const scopeLabel = (p: Project) =>
-    p.scope === 'both' ? 'Transverse' : p.scope === 'ministry' ? ministryName(p.ministryId) : p.scope === 'church' ? 'Bloom Church' : 'Bloom Light';
+    p.scope === 'transverse' ? 'Transverse' : p.scope === 'ministere' ? ministryName(p.ministryId) : p.branch === 'church' ? 'Bloom Church' : 'Bloom Light';
   // Persiste en localStorage (B4) : sans ça, créer/éditer un projet puis changer d'onglet perdait tout.
   const [projects, setProjects] = useState<Project[]>(seed);
   useEffect(() => { save('bc_projects', projects); }, [projects]);
@@ -55,7 +55,7 @@ export default function ProjectsView({ activeBranch, simulatedRole, events = [],
     () =>
       projects.filter(
         (p) =>
-          (p.scope === 'both' || p.scope === 'ministry' || activeBranch === 'global' || p.scope === activeBranch) &&
+          (p.scope === 'transverse' || p.scope === 'ministere' || activeBranch === 'global' || (p.scope === 'branche' && p.branch === activeBranch)) &&
           (filterStatus === 'all' || p.status === filterStatus) &&
           (filterScope === 'all' || p.scope === filterScope) &&
           (filterPmo === 'all' || p.pmo === filterPmo),
@@ -69,7 +69,7 @@ export default function ProjectsView({ activeBranch, simulatedRole, events = [],
     setProjects((prev) => prev.map((p) => (p.id === id ? { ...p, ...patch } : p)));
 
   const moveTask = (project: Project, taskId: string, dir: -1 | 1) => {
-    const order: ProjectTask['status'][] = ['todo', 'doing', 'done'];
+    const order: ProjectTask['status'][] = ['a_faire', 'en_cours', 'fait'];
     update(project.id, {
       actions: (project.actions ?? []).map((t) => {
         if (t.id !== taskId) return t;
@@ -90,7 +90,7 @@ export default function ProjectsView({ activeBranch, simulatedRole, events = [],
   const removeObjective = (project: Project, objId: string) =>
     update(project.id, { objectives: (project.objectives ?? []).filter((o) => o.id !== objId) });
   const addAction = (project: Project, title: string, assignee: string, due: string) =>
-    update(project.id, { actions: [...(project.actions ?? []), { id: `a_${Date.now()}`, title, assignee: assignee || 'Non assigné', due: due || undefined, status: 'todo' }] });
+    update(project.id, { actions: [...(project.actions ?? []), { id: `a_${Date.now()}`, title, assignee: assignee || 'Non assigné', due: due || undefined, status: 'a_faire' }] });
   const addTeamMember = (project: Project, member: string, role: string) =>
     update(project.id, { team: [...(project.team ?? []), { member, role }] });
   const removeTeamMember = (project: Project, idx: number) =>
@@ -252,8 +252,8 @@ export default function ProjectsView({ activeBranch, simulatedRole, events = [],
                         <div className="text-[10px] text-bc-text-secondary">{a.assignee}{a.due && ` · ${a.due}`}</div>
                         {canMoveTask(selected) && (
                           <div className="flex gap-1 mt-1.5">
-                            {col.key !== 'todo' && <button onClick={() => moveTask(selected, a.id, -1)} className="text-[10px] px-2 py-0.5 rounded-full border border-bc-border hover:bg-white active-scale">◀</button>}
-                            {col.key !== 'done' && <button onClick={() => moveTask(selected, a.id, 1)} className="text-[10px] px-2 py-0.5 rounded-full border border-bc-border hover:bg-white active-scale">▶</button>}
+                            {col.key !== 'a_faire' && <button onClick={() => moveTask(selected, a.id, -1)} className="text-[10px] px-2 py-0.5 rounded-full border border-bc-border hover:bg-white active-scale">◀</button>}
+                            {col.key !== 'fait' && <button onClick={() => moveTask(selected, a.id, 1)} className="text-[10px] px-2 py-0.5 rounded-full border border-bc-border hover:bg-white active-scale">▶</button>}
                           </div>
                         )}
                       </div>
@@ -381,14 +381,18 @@ function Mini({ icon, value }: { icon: React.ReactNode; value: string }) {
 function CreateProjectModal({ onClose, onCreate }: { onClose: () => void; onCreate: (p: Project) => void }) {
   const ministries = useMinistries();
   const [name, setName] = useState('');
-  const [scope, setScope] = useState<Project['scope']>('both');
+  const [scope, setScope] = useState<'both' | 'church' | 'light' | 'ministry'>('both');
   const [ministryId, setMinistryId] = useState(ministries[0]?.id ?? '');
   const [pmo, setPmo] = useState('');
   const [endDate, setEndDate] = useState('');
 
   const submit = () => {
     if (!name.trim() || !pmo.trim()) return;
-    onCreate({ id: `proj_${Date.now()}`, name: name.trim(), scope, ministryId: scope === 'ministry' ? ministryId : undefined, status: 'Planifié', pmo: pmo.trim(), endDate: endDate || undefined, team: [{ member: pmo.trim(), role: 'PMO' }], objectives: [], actions: [] });
+    const scopeFields: Pick<Project, 'scope' | 'branch' | 'ministryId'> =
+      scope === 'both' ? { scope: 'transverse' }
+      : scope === 'ministry' ? { scope: 'ministere', ministryId }
+      : { scope: 'branche', branch: scope };
+    onCreate({ id: `proj_${Date.now()}`, name: name.trim(), ...scopeFields, status: 'Planifié', pmo: pmo.trim(), endDate: endDate || undefined, team: [{ member: pmo.trim(), role: 'PMO' }], objectives: [], actions: [] });
   };
 
   return (
@@ -396,7 +400,7 @@ function CreateProjectModal({ onClose, onCreate }: { onClose: () => void; onCrea
       <div className="space-y-3">
         <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Nom du projet" className="w-full border border-bc-border rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-bc-green" />
         <input value={pmo} onChange={(e) => setPmo(e.target.value)} placeholder="PMO (chef de projet)" className="w-full border border-bc-border rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-bc-green" />
-        <select value={scope} onChange={(e) => setScope(e.target.value as Project['scope'])} className="w-full border border-bc-border rounded-xl px-3 py-2 text-sm bg-white">
+        <select value={scope} onChange={(e) => setScope(e.target.value as 'both' | 'church' | 'light' | 'ministry')} className="w-full border border-bc-border rounded-xl px-3 py-2 text-sm bg-white">
           <option value="both">Transverse (2 branches)</option>
           <option value="church">Bloom Church</option>
           <option value="light">Bloom Light</option>

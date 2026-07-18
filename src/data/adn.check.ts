@@ -17,7 +17,7 @@ const members = [
   nouveau('hors', '2026-01-01', { receivedEventId: 'e1' }), // hors période
 ];
 const reports = [
-  { id: 'r1', reportType: 'rapport_adn', date: '2026-07-12', eventId: 'e1', content: { nouveauxHommes: 3, nouveauxFemmes: 2, ojHommes: 1, ojFemmes: 1 } } as unknown as Report,
+  { id: 'r1', reportType: 'rapport_adn', date: '2026-07-12', eventId: 'e1', content: { nouveauxH: 3, nouveauxF: 2, ojH: 1, ojF: 1 } } as unknown as Report,
 ];
 
 const rows = adnByEvent(members, reports, events, 'month', now);

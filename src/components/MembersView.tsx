@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from "react";
+import { labelFor } from "../data";
 import {
   Search,
   Filter,
@@ -117,7 +118,7 @@ export default function MembersView({
   const filteredMembers = members
     .filter((m) => {
       // Exclude 'Nouveau' state from members view if they haven't graduated to a member level yet
-      if (m.level === "Nouveau" && m.integrationState !== "Intégré")
+      if (m.level === "nouveau" && m.integrationState !== "integre")
         return false;
 
       const matchesSearch =
@@ -207,10 +208,10 @@ export default function MembersView({
             className="border border-bc-border rounded-full text-xs py-2 px-3 bg-white focus:outline-none focus:border-bc-green"
           >
             <option value="all">Tous les Niveaux</option>
-            <option value="Stagiaire">Stagiaire</option>
-            <option value="Boss">Boss</option>
-            <option value="Leader">Leader</option>
-            <option value="Coach">Coach</option>
+            <option value="stagiaire">Stagiaire</option>
+            <option value="boss">Boss</option>
+            <option value="leader">Leader</option>
+            <option value="coach">Coach</option>
           </select>
 
           {/* Pastoral Cursus filter */}
@@ -221,13 +222,13 @@ export default function MembersView({
             className="border border-bc-border rounded-full text-xs py-2 px-3 bg-white focus:outline-none focus:border-bc-green"
           >
             <option value="all">Tous les Cursus</option>
-            <option value="Aucun">Aucun</option>
-            <option value="Appelé">Appelé</option>
-            <option value="Serviteur">Serviteur</option>
-            <option value="Gagneur d'âme">Gagneur d'âme</option>
-            <option value="Assistant Pasteur">Assistant Pasteur</option>
-            <option value="Pasteur Assistant">Pasteur Assistant</option>
-            <option value="Pasteur Titulaire">Pasteur Titulaire</option>
+            <option value="aucun">Aucun</option>
+            <option value="appele">Appelé</option>
+            <option value="serviteur">Serviteur</option>
+            <option value="gagneur_ame">Gagneur d'âme</option>
+            <option value="assistant_pasteur">Assistant Pasteur</option>
+            <option value="pasteur_assistant">Pasteur Assistant</option>
+            <option value="pasteur_titulaire">Pasteur Titulaire</option>
           </select>
 
           {/* Department filter */}
@@ -253,14 +254,14 @@ export default function MembersView({
             className="border border-bc-border rounded-full text-xs py-2 px-3 bg-white focus:outline-none focus:border-bc-green"
           >
             <option value="all">Toutes les fonctions</option>
-            <option value="Responsable">Responsable</option>
-            <option value="Adjoint">Adjoint</option>
-            <option value="Trésorier">Trésorier</option>
-            <option value="Responsable de section">Responsable de section</option>
-            <option value="Membre">Membre</option>
-            <option value="Capitaine de Bus">Capitaine de Bus</option>
-            <option value="Responsable de Zone">Responsable de Zone</option>
-            <option value="Responsable de Commune">Responsable de Commune</option>
+            <option value="responsable">Responsable</option>
+            <option value="adjoint">Adjoint</option>
+            <option value="tresorier">Trésorier</option>
+            <option value="responsable_section">Responsable de section</option>
+            <option value="membre">Membre</option>
+            <option value="capitaine">Capitaine de Bus</option>
+            <option value="responsable_zone">Responsable de Zone</option>
+            <option value="responsable_commune">Responsable de Commune</option>
           </select>
 
           {/* Baptism filter */}
@@ -271,8 +272,8 @@ export default function MembersView({
             className="border border-bc-border rounded-full text-xs py-2 px-3 bg-white focus:outline-none focus:border-bc-green"
           >
             <option value="all">Tout statut baptême</option>
-            <option value="Baptisé">Baptisé</option>
-            <option value="Non baptisé">Non baptisé</option>
+            <option value="baptise">Baptisé</option>
+            <option value="non_baptise">Non baptisé</option>
           </select>
 
           {/* Niveau scolaire — liste des élèves/étudiants par niveau (ex. 3ème, Terminale) */}
@@ -492,12 +493,12 @@ export default function MembersView({
                   {/* Primary Axes Badges */}
                   <div className="flex flex-wrap gap-1.5 mt-3">
                     <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded-md inline-flex items-center gap-1 ${levelStyle(member.level)}`}>
-                      <GraduationCap size={9} /> {member.level}
+                      <GraduationCap size={9} /> {labelFor(member.level)}
                     </span>
 
-                    {member.pastoralCursus !== "Aucun" && (
+                    {member.pastoralCursus !== "aucun" && (
                       <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-md bg-bc-warning/10 text-bc-warning border border-bc-warning/20">
-                        ⛪ {member.pastoralCursus}
+                        ⛪ {labelFor(member.pastoralCursus)}
                       </span>
                     )}
                   </div>
@@ -615,11 +616,11 @@ export default function MembersView({
                       <td className="px-4 py-3">
                         <div className="flex flex-col items-start gap-1">
                           <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded-md inline-flex items-center gap-1 ${levelStyle(member.level)}`}>
-                            <GraduationCap size={9} /> {member.level}
+                            <GraduationCap size={9} /> {labelFor(member.level)}
                           </span>
-                          {member.pastoralCursus !== "Aucun" && (
+                          {member.pastoralCursus !== "aucun" && (
                             <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-md bg-bc-warning/10 text-bc-warning border border-bc-warning/20">
-                              ⛪ {member.pastoralCursus}
+                              ⛪ {labelFor(member.pastoralCursus)}
                             </span>
                           )}
                         </div>

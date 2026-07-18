@@ -8,8 +8,12 @@ import { inMemberScope, canFillReportFor, bloomBusRoleOf, MULTI_BRANCH_ROLES } f
 import { isBusReportLocked } from '../src/data/reportLock.ts';
 import { getKv } from './db.ts';
 import { GuardError, readCollection, canonical } from './guards.ts';
+import { roleForDeptFn, roleForLevel } from '../packages/shared/migrate.ts';
 
-const PASTORAL_ROLES = ['Pasteur Titulaire', 'Pasteur Assistant', 'Assistant Pasteur'];
+// M5 : valeurs de cursus snake_case §3 (comparées à member.pastoralCursus migré). Le
+// vocabulaire de RÔLES (FULL_SCOPE_ROLES, STAFF_ROLES…) reste stable — on remappe les
+// valeurs stockées vers ces noms de rôles au moment de la dérivation (cf. M5-PLAN.md §3.4).
+const PASTORAL_ROLES = ['pasteur_titulaire', 'pasteur_assistant', 'assistant_pasteur'];
 const FULL_SCOPE_ROLES = ['Super Admin', 'Admin', 'Pasteur Principal', 'Pasteur'];
 const STAFF_ROLES = ['Responsable', 'Ministre', 'Pasteur', 'Admin', 'Super Admin'];
 const ABOVE_MEMBER_ROLES = [
@@ -41,8 +45,8 @@ export function resolveRoles(member: Member, admins: AdminAccount[], ministries:
   if (adminEntry) roles.add(adminEntry.role);
   if (PASTORAL_ROLES.includes(member.pastoralCursus)) roles.add('Pasteur');
   if (ministries.some((m) => !(m as any).deletedAt && m.tuteurId === member.id)) roles.add('Ministre');
-  for (const fn of Object.values(member.departments ?? {})) roles.add(String(fn));
-  if (member.level === 'Coach' || member.level === 'Leader') roles.add(member.level);
+  for (const fn of Object.values(member.departments ?? {})) roles.add(roleForDeptFn(fn));
+  if (member.level === 'coach' || member.level === 'leader') roles.add(roleForLevel(member.level));
   roles.add('Membre');
   return [...roles];
 }

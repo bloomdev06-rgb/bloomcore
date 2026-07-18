@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { Branch, Member, PastoralCursus } from '../types';
 import { Heart, User, ArrowUpCircle, FileText, Share2, Search, PenLine, LayoutList, Network, X } from 'lucide-react';
-import { useBusLines, useDepartments, useMinistries } from '../data';
+import { useBusLines, useDepartments, useMinistries, labelFor } from '../data';
 import { inMemberScope } from '../data/scope';
 import { motion } from 'motion/react';
 import { staggerParent, staggerItem } from './ui/motion';
@@ -17,7 +17,7 @@ interface CursusViewProps {
 }
 
 // Pastoral ladder, entry ('Aucun') excluded from the org chart.
-const CURSUS_ORDER: PastoralCursus[] = ['Aucun', 'Appelé', 'Serviteur', "Gagneur d'âme", 'Assistant Pasteur', 'Pasteur Assistant', 'Pasteur Titulaire'];
+const CURSUS_ORDER: PastoralCursus[] = ['aucun', 'appele', 'serviteur', 'gagneur_ame', 'assistant_pasteur', 'pasteur_assistant', 'pasteur_titulaire'];
 const nextCursus = (c: PastoralCursus): PastoralCursus => CURSUS_ORDER[Math.min(CURSUS_ORDER.indexOf(c) + 1, CURSUS_ORDER.length - 1)];
 const isTop = (c: PastoralCursus) => CURSUS_ORDER.indexOf(c) === CURSUS_ORDER.length - 1;
 
@@ -42,7 +42,7 @@ export default function CursusView({ activeBranch, simulatedRole, members = [], 
   // le cursus des membres de son propre département, pas de tout le branch.
   const cursusBase = members.filter(m =>
     m.pastoralCursus &&
-    m.pastoralCursus !== 'Aucun' &&
+    m.pastoralCursus !== 'aucun' &&
     (!operator || inMemberScope(operator, m, simulatedRole, busLines, departments, ministries))
   );
   const cursusMembers = cursusBase.filter(m => m.branch === operatorBranch);
@@ -73,7 +73,7 @@ export default function CursusView({ activeBranch, simulatedRole, members = [], 
       <button
         onClick={(e) => { e.stopPropagation(); setPromoting(m); }}
         className="p-2 text-bc-text-secondary hover:text-bc-green transition-colors active-scale"
-        title={`Promouvoir → ${nextCursus(m.pastoralCursus)}`}
+        title={`Promouvoir → ${labelFor(nextCursus(m.pastoralCursus))}`}
       >
         <ArrowUpCircle size={18} />
       </button>
@@ -194,7 +194,7 @@ export default function CursusView({ activeBranch, simulatedRole, members = [], 
                                   <button
                                     onClick={() => setPromoting(m)}
                                     className="p-1 text-bc-text-secondary hover:text-bc-green transition-colors active-scale"
-                                    title={`Promouvoir → ${nextCursus(m.pastoralCursus)}`}
+                                    title={`Promouvoir → ${labelFor(nextCursus(m.pastoralCursus))}`}
                                   >
                                     <ArrowUpCircle size={16} />
                                   </button>
@@ -262,7 +262,7 @@ export default function CursusView({ activeBranch, simulatedRole, members = [], 
                       <div>
                         <h4 className="text-sm font-bold text-bc-text">{m.firstName} {m.lastName}</h4>
                         <p className="text-xs text-bc-text-secondary">
-                          {m.pastoralCursus} • {m.branch === 'church' ? 'Bloom Church' : 'Bloom Light'}
+                          {labelFor(m.pastoralCursus)} • {m.branch === 'church' ? 'Bloom Church' : 'Bloom Light'}
                           {(() => {
                             const mentor = members.find(x => x.id === m.mentorId);
                             const filleuls = cursusMembers.filter(c => c.mentorId === m.id).length;
@@ -278,13 +278,13 @@ export default function CursusView({ activeBranch, simulatedRole, members = [], 
                           onClick={(e) => e.stopPropagation()}
                           onChange={(e) => onUpdateMember({ ...m, mentorId: e.target.value || undefined })}
                           className="text-[10px] border border-bc-border rounded-full px-2 py-1.5 bg-white max-w-[160px]"
-                          title={`Confié à un ${nextCursus(m.pastoralCursus) ?? '—'} (niveau directement supérieur)`}
+                          title={`Confié à un ${labelFor(nextCursus(m.pastoralCursus)) || '—'} (niveau directement supérieur)`}
                         >
                           <option value="">Aucun mentor</option>
                           {/* §15 — chaque membre du cursus est confié au NIVEAU DIRECTEMENT SUPÉRIEUR :
                               Appelé → Serviteur → Gagneur d'âme → … → Pasteur Titulaire. */}
                           {cursusMembers.filter(c => c.id !== m.id && c.pastoralCursus === nextCursus(m.pastoralCursus)).map(c => (
-                            <option key={c.id} value={c.id}>{c.firstName} {c.lastName} ({c.pastoralCursus})</option>
+                            <option key={c.id} value={c.id}>{c.firstName} {c.lastName} ({labelFor(c.pastoralCursus)})</option>
                           ))}
                         </select>
                       )}
@@ -308,9 +308,9 @@ export default function CursusView({ activeBranch, simulatedRole, members = [], 
             Promouvoir <span className="font-bold text-bc-text">{promoting.firstName} {promoting.lastName}</span> dans le cursus pastoral ?
           </p>
           <div className="flex items-center justify-center gap-3 mb-6">
-            <span className="text-xs font-bold px-3 py-1.5 rounded-full bg-bc-canvas text-bc-text-secondary">{promoting.pastoralCursus}</span>
+            <span className="text-xs font-bold px-3 py-1.5 rounded-full bg-bc-canvas text-bc-text-secondary">{labelFor(promoting.pastoralCursus)}</span>
             <ArrowUpCircle size={16} className="text-bc-green rotate-90" />
-            <span className="text-xs font-bold px-3 py-1.5 rounded-full bg-bc-green text-white">{nextCursus(promoting.pastoralCursus)}</span>
+            <span className="text-xs font-bold px-3 py-1.5 rounded-full bg-bc-green text-white">{labelFor(nextCursus(promoting.pastoralCursus))}</span>
           </div>
           <div className="flex gap-3 justify-end pt-3 border-t border-bc-border">
             <button onClick={() => setPromoting(null)} className="px-4 py-2 border border-bc-border text-bc-text-secondary rounded-full text-xs hover:bg-bc-canvas active-scale">Annuler</button>
