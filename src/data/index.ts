@@ -20,7 +20,7 @@ import {
   INITIAL_ADMINS,
 } from '../mockData';
 export { deriveTimeBasedNotifications } from './notificationRules';
-export { apiBootstrap, apiLogin, clearAuthToken, apiPut } from './api';
+export { apiBootstrap, apiLogin, clearAuthToken, apiPut, apiFetchCollection, openNotificationStream, syncQueueLength } from './api';
 export { canView, hasCapability, resolveCapability } from './permissions';
 import { apiPut } from './api';
 

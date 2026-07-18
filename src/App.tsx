@@ -1,5 +1,5 @@
 import React, { useState, useEffect, lazy, Suspense } from 'react';
-import { load, save, seeds, useDepartments, useMinistries, useBusLines, useAdmins, deriveTimeBasedNotifications, apiBootstrap, apiPut, clearAuthToken, enableSync, canView } from './data';
+import { load, save, seeds, useDepartments, useMinistries, useBusLines, useAdmins, deriveTimeBasedNotifications, apiBootstrap, apiPut, clearAuthToken, enableSync, canView, openNotificationStream, apiFetchCollection } from './data';
 import { resolveMemberRole } from './data/roles';
 import { MEMBERS_TAB_DEPT_ONLY_ROLES } from './data/scope';
 import { isLegacySeedEventId } from './data/events';
@@ -178,6 +178,18 @@ export default function App() {
       // effets de persistance du montage n'écrasent des données serveur plus fraîches.
       enableSync();
     });
+  }, [loggedInMemberId]);
+
+  // Temps réel (§7) : à chaque poke SSE du serveur (nouvelle notif / alerte
+  // d'intégration), re-fetch la collection notifications sans re-bootstrap complet.
+  useEffect(() => {
+    if (!loggedInMemberId) return;
+    const close = openNotificationStream(() => {
+      void apiFetchCollection('notifications').then((list) => {
+        if (list) setNotifications(list as AppNotification[]);
+      });
+    });
+    return close;
   }, [loggedInMemberId]);
 
   const handleLogout = () => {

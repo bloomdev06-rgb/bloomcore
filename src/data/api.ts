@@ -90,12 +90,27 @@ const SYNC_QUEUE_KEY = 'bc_syncQueue';
 
 type QueuedOp = { opId: string; name: string; value: unknown; asOf?: string };
 
+// Nombre d'écritures en attente de synchro (pour l'indicateur « Sauvegardé
+// localement », §7). Le changement est signalé par l'event 'bc-sync-changed'.
+export function syncQueueLength(): number {
+  try {
+    return JSON.parse(localStorage.getItem(SYNC_QUEUE_KEY) ?? '[]').length;
+  } catch {
+    return 0;
+  }
+}
+
+function signalSyncChanged(): void {
+  if (typeof window !== 'undefined') window.dispatchEvent(new Event('bc-sync-changed'));
+}
+
 function enqueueSync(name: string, value: unknown): void {
   try {
     const queue: QueuedOp[] = JSON.parse(localStorage.getItem(SYNC_QUEUE_KEY) ?? '[]');
     const next = queue.filter((op) => op.name !== name);
     next.push({ opId: crypto.randomUUID(), name, value, asOf: getSyncedAt(name) });
     localStorage.setItem(SYNC_QUEUE_KEY, JSON.stringify(next));
+    signalSyncChanged();
   } catch {
     // localStorage plein/indisponible — tant pis, LWW au prochain save.
   }
@@ -123,10 +138,38 @@ export async function flushSyncQueue(): Promise<void> {
     const rest = queue.filter((op) => !done.has(op.opId));
     localStorage.setItem(SYNC_QUEUE_KEY, JSON.stringify(rest));
     for (const op of queue) if (done.has(op.opId)) setSyncedAt(op.name, syncedAt);
+    if (rest.length !== queue.length) signalSyncChanged();
     reportConflicts(conflicts); // rattrapage : op multi-collections, pas de contexte unique
   } catch {
     // toujours hors-ligne — on réessaiera au prochain flush.
   }
+}
+
+// Re-fetch d'UNE collection (déjà filtrée RBAC côté serveur). Utilisé par le
+// flux temps réel pour rafraîchir les notifs sans re-bootstrap complet.
+export async function apiFetchCollection(name: string): Promise<unknown[] | null> {
+  const token = getAuthToken();
+  if (!token) return null;
+  try {
+    const res = await fetch(`${API_BASE}/${name}`, { headers: { Authorization: `Bearer ${token}` } });
+    if (!res.ok) return null;
+    const data = await res.json();
+    return Array.isArray(data) ? data : null;
+  } catch {
+    return null;
+  }
+}
+
+// Flux temps réel (SSE, §7). EventSource reconnecte tout seul (retry serveur) et
+// survit aux coupures réseau. onPoke = « quelque chose a changé, re-sync ». Renvoie
+// une fonction de fermeture (à appeler au logout). No-op sans token/navigateur.
+export function openNotificationStream(onPoke: () => void): () => void {
+  if (typeof window === 'undefined' || typeof EventSource === 'undefined') return () => {};
+  const token = getAuthToken();
+  if (!token) return () => {};
+  const es = new EventSource(`${API_BASE}/stream?token=${encodeURIComponent(token)}`);
+  es.addEventListener('notifications', () => onPoke());
+  return () => es.close();
 }
 
 if (typeof window !== 'undefined') {

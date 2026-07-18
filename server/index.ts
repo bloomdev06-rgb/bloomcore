@@ -17,6 +17,7 @@ import { ensureSeeded } from './seed.ts';
 import { applyWrite, readCollection, GuardError } from './guards.ts';
 import { buildContext, assertCanWrite, filterReadable, preservedIds, RbacContext } from './rbac.ts';
 import { dispatch } from './notify.ts';
+import { addClient, poke } from './stream.ts';
 import { startScheduler } from './scheduler.ts';
 
 ensureSeeded();
@@ -252,6 +253,26 @@ app.get('/api/v1/bootstrap', requireAuth, (req, res) => {
   res.json(payload);
 });
 
+// Flux temps réel (SSE, §7). EventSource ne peut pas poser de header Authorization
+// → token en query (même contrainte que /uploads). Doit rester AVANT /:name pour
+// ne pas être capturé comme nom de collection. 'no-transform' fait sauter la
+// compression gzip globale (sinon le flux est bufferisé et jamais envoyé).
+app.get('/api/v1/stream', (req, res) => {
+  const token = typeof req.query.token === 'string' ? req.query.token : null;
+  if (!token || !verifyToken(token)) return res.status(401).json({ error: 'unauthorized' });
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache, no-transform');
+  res.setHeader('Connection', 'keep-alive');
+  res.setHeader('X-Accel-Buffering', 'no'); // proxys type nginx : ne pas bufferiser
+  res.flushHeaders?.();
+  res.write('retry: 5000\n\n'); // délai de reconnexion côté navigateur
+  addClient(res);
+  // Battement toutes les 25 s : garde la connexion ouverte à travers les proxys
+  // qui coupent les connexions inactives (commentaire SSE, ignoré par le client).
+  const beat = setInterval(() => res.write(': ping\n\n'), 25_000);
+  req.on('close', () => clearInterval(beat));
+});
+
 app.get('/api/v1/:name', requireAuth, (req, res) => {
   const { name } = req.params;
   if (ARRAY_COLLECTIONS.has(name)) {
@@ -280,6 +301,7 @@ app.put('/api/v1/:name', requireAuth, (req, res) => {
       // réel côté client ; email/SMS/WhatsApp via adapters, simulés sans clés).
       if (name === 'notifications' && added.length) {
         dispatch(added, readCollection('members'), getKv('settings'));
+        poke(); // cloche/alertes en direct (§7)
       }
       // Spec : "compte créé à l'enrôlement, le membre définit son mot de passe
       // via lien" — chaque membre ajouté reçoit une invitation d'activation.
@@ -326,8 +348,9 @@ app.post('/api/v1/sync/batch', requireAuth, (req, res) => {
       if (ARRAY_COLLECTIONS.has(name)) {
         if (!Array.isArray(value)) throw new GuardError(400, 'expected an array');
         assertCanWrite(name, (req as any).rbac, value);
-        const { conflicts: opConflicts } = applyWrite(name, value, typeof asOf === 'string' ? asOf : undefined, preservedIds(name, (req as any).rbac));
+        const { added: opAdded, conflicts: opConflicts } = applyWrite(name, value, typeof asOf === 'string' ? asOf : undefined, preservedIds(name, (req as any).rbac));
         conflicts.push(...opConflicts);
+        if (name === 'notifications' && opAdded.length) poke();
       } else if (KV_KEYS.has(name)) {
         assertCanWrite(name, (req as any).rbac, []);
         setKv(name, value);

@@ -4,6 +4,7 @@ import { Branch, AppNotification, Member } from '../types';
 import { operatorDisplayName } from '../data/operator';
 import { MULTI_BRANCH_ROLES, GLOBAL_VIEW_ROLES } from '../data/scope';
 import { ThemeToggle } from './ui/theme-toggle';
+import OfflineIndicator from './OfflineIndicator';
 import { Avatar } from './ui/Avatar';
 import { Badge } from './ui/Badge';
 import { motion, AnimatePresence } from 'motion/react';
@@ -191,6 +192,8 @@ export default function Header({
         )}
 
         {/* Theme Toggle */}
+        <OfflineIndicator />
+
         <div className="flex items-center">
           <ThemeToggle />
         </div>

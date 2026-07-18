@@ -8,6 +8,7 @@ import { AppSettings, Member } from '../src/types.ts';
 import { getKv, appendToCollection } from './db.ts';
 import { readCollection } from './guards.ts';
 import { dispatch, drainOutbox } from './notify.ts';
+import { poke } from './stream.ts';
 
 const HOUR_MS = 60 * 60 * 1000;
 const OUTBOX_DRAIN_MS = 60 * 1000; // draine l'outbox toutes les minutes
@@ -29,6 +30,7 @@ export function runSweep(now: Date = new Date()): number {
   if (fresh.length) {
     appendToCollection('notifications', fresh);
     dispatch(fresh, members, settings);
+    poke(); // alertes d'intégration en direct (§7) — sinon visibles au prochain bootstrap
   }
   return fresh.length;
 }
