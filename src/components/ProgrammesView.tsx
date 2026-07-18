@@ -85,7 +85,7 @@ export default function ProgrammesView({
   const enroll = (m: Member) => {
     onUpdateMember({
       ...m,
-      departments: { ...m.departments, dept_bapteme: m.departments?.dept_bapteme ?? 'Membre' },
+      departments: { ...m.departments, dept_bapteme: m.departments?.dept_bapteme ?? 'membre' },
       currentStepId: steps[0]?.id ?? 's0',
     });
     audit('BAPTISM_ENROLLED', `${m.firstName} ${m.lastName} inscrit(e) au parcours de baptême.`);

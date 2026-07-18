@@ -220,7 +220,11 @@ export default function MinisteresView({ activeBranch, simulatedRole, members, r
     const mDeptIds = mDepts.map(d => d.id);
     const ministryMembers = members.filter(m =>
       Object.keys(m.departments ?? {}).some(id => mDeptIds.includes(id)) && (activeBranch === 'global' || m.branch === activeBranch));
-    const ministryReports = reports.filter(r => r.departmentId && mDeptIds.includes(r.departmentId));
+    // Filtre branche cohérent avec ministryMembers (l.221) et branchReports (l.214) : sans lui,
+    // le grand chiffre "Actifs" (scopé branche) contredisait son propre sparkline et Moisson/OJ/
+    // Croissance fuyaient l'autre branche en vue church/light.
+    const ministryReports = reports.filter(r => r.departmentId && mDeptIds.includes(r.departmentId)
+      && (activeBranch === 'global' || r.targetBranch === activeBranch));
     const ministryNouveaux = ministryMembers.filter(m => m.level === 'nouveau');
     const ministryPendingReception = ministryNouveaux.filter(m => m.receptionValidated === false);
     const { from: mPFrom, to: mPTo } = periodRange(effectivePeriod);

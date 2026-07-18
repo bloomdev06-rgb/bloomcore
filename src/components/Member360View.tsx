@@ -53,9 +53,13 @@ export default function Member360View({ member, onClose, onEdit, onUpdate, repor
   // P1.4 — dept_bapteme's step labels read live from FormBuilder's fd_bapteme FormDef when
   // present, falling back to the static PARCOURS_STEPS catalog otherwise.
   const baptemeForm = forms.find((f) => f.id === 'fd_bapteme');
-  const parcoursSteps: Record<string, string[]> = {
-    ...PARCOURS_STEPS,
-    ...(baptemeForm?.steps?.length ? { dept_bapteme: baptemeForm.steps.map((s) => s.label) } : {}),
+  // Le Stepper matche par LABEL, mais member.currentStepId est un ID d'étape ('s0'..'s3').
+  // On garde donc les paires {id,label} pour traduire l'id courant → son label (sinon
+  // indexOf(id) dans un tableau de labels = -1 → aucune étape surlignée).
+  const parcoursStepDefs: Record<string, { id: string; label: string }[]> = {
+    dept_bapteme: baptemeForm?.steps?.length
+      ? baptemeForm.steps.map((s) => ({ id: s.id, label: s.label }))
+      : PARCOURS_STEPS.dept_bapteme.map((label, i) => ({ id: `s${i}`, label })),
   };
   // Même liste que l'icône d'édition de MembersView (MembersView.tsx:572,784) — la fiche 360
   // ouvre le même formulaire d'édition complet et doit être gardée à l'identique.
@@ -441,8 +445,11 @@ export default function Member360View({ member, onClose, onEdit, onUpdate, repor
                     <div className="bg-white p-6 rounded-2xl border border-bc-border shadow-sm">
                       <h4 className="font-ui font-bold text-bc-text mb-4">Parcours à étapes — {parcoursDept.name}</h4>
                       {member.currentStepId ? (
-                        parcoursSteps[parcoursDept.id] ? (
-                          <Stepper steps={parcoursSteps[parcoursDept.id]} current={member.currentStepId} />
+                        parcoursStepDefs[parcoursDept.id] ? (
+                          <Stepper
+                            steps={parcoursStepDefs[parcoursDept.id].map((s) => s.label)}
+                            current={parcoursStepDefs[parcoursDept.id].find((s) => s.id === member.currentStepId)?.label ?? ''}
+                          />
                         ) : (
                           <p className="text-xs text-bc-text-secondary">Étape actuelle : <span className="font-bold text-bc-text">{member.currentStepId}</span></p>
                         )
