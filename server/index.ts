@@ -11,16 +11,21 @@ import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import express from 'express';
 import compression from 'compression';
-import { db, getCollection, setCollection, appendToCollection, getKv, setKv } from './db.ts';
+import { db } from './db.ts';
+import { getCollection, setCollection, appendToCollection, getKv, setKv } from './datastore.ts';
 import { hashPassword, verifyPassword, signToken, verifyToken, createOneTimeToken, consumeOneTimeToken, upsertCredentials, requireSecret, usingInsecureSecret, resolveBindHost } from './auth.ts';
 import { ensureSeeded } from './seed.ts';
+import { runBootMigration } from './bootMigrate.ts';
 import { applyWrite, readCollection, GuardError } from './guards.ts';
 import { buildContext, assertCanWrite, filterReadable, preservedIds, RbacContext } from './rbac.ts';
 import { dispatch } from './notify.ts';
 import { addClient, poke } from './stream.ts';
 import { startScheduler } from './scheduler.ts';
 
-ensureSeeded();
+// M6 — importer les vraies données SQLite→Postgres AVANT le seed, pour que
+// ensureSeeded ne fasse que combler ce qui manque (idempotent, no-op en SQLite).
+await runBootMigration();
+await ensureSeeded();
 
 const app = express();
 // Compression gzip de tout (assets + JSON API) : le bootstrap ~450 Ko tombe à ~60 Ko —
@@ -71,13 +76,13 @@ const ARRAY_COLLECTIONS = new Set([
 ]);
 const KV_KEYS = new Set(['permissions', 'settings']);
 
-function requireAuth(req: express.Request, res: express.Response, next: express.NextFunction) {
+async function requireAuth(req: express.Request, res: express.Response, next: express.NextFunction) {
   const header = req.headers.authorization;
   const token = header?.startsWith('Bearer ') ? header.slice(7) : null;
   const memberId = token ? verifyToken(token) : null;
   if (!memberId) return res.status(401).json({ error: 'unauthorized' });
   // Contexte RBAC complet (membre + rôles résolus depuis les données).
-  const ctx = buildContext(memberId);
+  const ctx = await buildContext(memberId);
   if (!ctx) return res.status(401).json({ error: 'unauthorized' });
   (req as any).memberId = memberId;
   (req as any).rbac = ctx;
@@ -88,9 +93,9 @@ const isAdmin = (ctx: RbacContext) => ctx.roles.includes('Admin') || ctx.roles.i
 
 // Healthcheck public (orchestrateur / load balancer / Docker HEALTHCHECK) — pas d'auth.
 // Vérifie que le process répond ET que la base SQLite est joignable.
-app.get('/api/v1/health', (_req, res) => {
+app.get('/api/v1/health', async (_req, res) => {
   try {
-    readCollection('members');
+    await readCollection('members');
     res.json({ ok: true, ts: Date.now() });
   } catch {
     res.status(503).json({ ok: false });
@@ -100,10 +105,10 @@ app.get('/api/v1/health', (_req, res) => {
 // WORKFLOWS §84-85 — login par téléphone OU email (`identifier` ; `phone` reste
 // accepté en alias pour l'ancien client). Pas d'auto-inscription : un membre
 // sans ligne credentials n'est simplement pas encore activé.
-function findByIdentifier(identifier: string) {
+async function findByIdentifier(identifier: string) {
   const norm = String(identifier).replace(/\s/g, '');
   const lower = norm.toLowerCase();
-  return readCollection('members').find(
+  return (await readCollection('members')).find(
     (m) => String(m.phone).replace(/\s/g, '') === norm || (m.email && String(m.email).toLowerCase() === lower),
   );
 }
@@ -128,13 +133,13 @@ const loginFail = (key: string) => {
 // réponse ne distingue plus « compte existant » de « inexistant » (anti-oracle de timing).
 const DUMMY_HASH = hashPassword('__nonexistent_account__');
 
-app.post('/api/v1/auth/login', (req, res) => {
+app.post('/api/v1/auth/login', async (req, res) => {
   const { identifier, phone, password } = req.body ?? {};
   const id = identifier ?? phone;
   if (!id || !password) return res.status(400).json({ error: 'identifier and password required' });
   const key = loginKey(req, id);
   if (loginLocked(key)) return res.status(429).json({ error: 'trop de tentatives, réessayez plus tard' });
-  const member = findByIdentifier(id);
+  const member = await findByIdentifier(id);
   const cred = member
     ? (db.prepare('SELECT password_hash FROM credentials WHERE member_id = ?').get(member.id) as { password_hash: string } | undefined)
     : undefined;
@@ -154,7 +159,7 @@ app.post('/api/v1/auth/login', (req, res) => {
 const APP_URL = process.env.APP_URL || 'http://localhost:3000';
 const isProd = IS_PROD;
 
-function issueAuthLink(member: any, purpose: 'activate' | 'reset'): string {
+async function issueAuthLink(member: any, purpose: 'activate' | 'reset'): Promise<string> {
   const token = createOneTimeToken(member.id, purpose);
   const label = purpose === 'activate' ? 'Activation de votre compte BloomCore' : 'Réinitialisation de votre mot de passe BloomCore';
   dispatch(
@@ -168,31 +173,31 @@ function issueAuthLink(member: any, purpose: 'activate' | 'reset'): string {
       targetMemberId: member.id,
     }],
     [member],
-    getKv('settings'),
+    await getKv('settings'),
   );
   return token;
 }
 
-app.post('/api/v1/auth/request-activation', (req, res) => {
-  const member = req.body?.identifier ? findByIdentifier(req.body.identifier) : null;
-  const devToken = member ? issueAuthLink(member, 'activate') : null;
+app.post('/api/v1/auth/request-activation', async (req, res) => {
+  const member = req.body?.identifier ? await findByIdentifier(req.body.identifier) : null;
+  const devToken = member ? await issueAuthLink(member, 'activate') : null;
   res.json({ ok: true, ...(!isProd && devToken ? { devToken } : {}) });
 });
 
-app.post('/api/v1/auth/request-reset', (req, res) => {
-  const member = req.body?.identifier ? findByIdentifier(req.body.identifier) : null;
-  const devToken = member ? issueAuthLink(member, 'reset') : null;
+app.post('/api/v1/auth/request-reset', async (req, res) => {
+  const member = req.body?.identifier ? await findByIdentifier(req.body.identifier) : null;
+  const devToken = member ? await issueAuthLink(member, 'reset') : null;
   res.json({ ok: true, ...(!isProd && devToken ? { devToken } : {}) });
 });
 
-app.post('/api/v1/auth/complete', (req, res) => {
+app.post('/api/v1/auth/complete', async (req, res) => {
   const { token, password } = req.body ?? {};
   if (!token || !password) return res.status(400).json({ error: 'token and password required' });
   if (String(password).length < 8) return res.status(400).json({ error: 'mot de passe trop court (min 8)' });
   const consumed = consumeOneTimeToken(String(token));
   if (!consumed) return res.status(401).json({ error: 'token invalide, expiré ou déjà utilisé' });
   upsertCredentials(consumed.memberId, String(password));
-  const member = readCollection('members').find((m) => m.id === consumed.memberId);
+  const member = (await readCollection('members')).find((m) => m.id === consumed.memberId);
   res.json({ token: signToken(consumed.memberId), member });
 });
 
@@ -214,16 +219,16 @@ app.post('/api/v1/auth/change-password', requireAuth, (req, res) => {
   res.json({ ok: true, token: signToken(memberId) });
 });
 
-app.post('/api/v1/auth/admin-reset', requireAuth, (req, res) => {
+app.post('/api/v1/auth/admin-reset', requireAuth, async (req, res) => {
   const ctx = (req as any).rbac as RbacContext;
   if (!isAdmin(ctx)) return res.status(403).json({ error: 'réservé aux Admin' });
   const { memberId } = req.body ?? {};
-  const member = readCollection('members').find((m) => m.id === memberId);
+  const member = (await readCollection('members')).find((m) => m.id === memberId);
   if (!member) return res.status(404).json({ error: 'membre inconnu' });
-  const devToken = issueAuthLink(member, 'reset');
+  const devToken = await issueAuthLink(member, 'reset');
   // Journal inviolable : la réinitialisation par un admin est auditée côté serveur.
-  applyWrite('audits', [
-    ...readCollection('audits'),
+  await applyWrite('audits', [
+    ...(await readCollection('audits')),
     {
       id: `aud_pwd_reset_${memberId}_${Date.now()}`,
       timestamp: new Date().toISOString(),
@@ -236,8 +241,8 @@ app.post('/api/v1/auth/admin-reset', requireAuth, (req, res) => {
   res.json({ ok: true, ...(!isProd ? { devToken } : {}) });
 });
 
-app.get('/api/v1/auth/me', requireAuth, (req, res) => {
-  const member = getCollection('members').find((m) => m.id === (req as any).memberId);
+app.get('/api/v1/auth/me', requireAuth, async (req, res) => {
+  const member = (await getCollection('members')).find((m) => m.id === (req as any).memberId);
   if (!member) return res.status(404).json({ error: 'not found' });
   res.json(member);
 });
@@ -245,11 +250,11 @@ app.get('/api/v1/auth/me', requireAuth, (req, res) => {
 // Single round-trip for initial load (App.tsx's bootstrap effect). Auth-gated :
 // les données membres ne sont pas lisibles anonymement ; le client pré-login
 // reçoit 401 et retombe sur localStorage (offline-first inchangé).
-app.get('/api/v1/bootstrap', requireAuth, (req, res) => {
+app.get('/api/v1/bootstrap', requireAuth, async (req, res) => {
   const ctx = (req as any).rbac as RbacContext;
   const payload: Record<string, unknown> = {};
-  for (const name of ARRAY_COLLECTIONS) payload[name] = filterReadable(name, ctx, readCollection(name));
-  for (const key of KV_KEYS) payload[key] = getKv(key);
+  for (const name of ARRAY_COLLECTIONS) payload[name] = await filterReadable(name, ctx, await readCollection(name));
+  for (const key of KV_KEYS) payload[key] = await getKv(key);
   res.json(payload);
 });
 
@@ -273,46 +278,46 @@ app.get('/api/v1/stream', (req, res) => {
   req.on('close', () => clearInterval(beat));
 });
 
-app.get('/api/v1/:name', requireAuth, (req, res) => {
+app.get('/api/v1/:name', requireAuth, async (req, res) => {
   const { name } = req.params;
   if (ARRAY_COLLECTIONS.has(name)) {
     // ?includeDeleted=1 : corbeille (tombstones visibles), réservée aux Admin+.
     const includeDeleted = req.query.includeDeleted === '1' && isAdmin((req as any).rbac);
-    return res.json(filterReadable(name, (req as any).rbac, readCollection(name, includeDeleted)));
+    return res.json(await filterReadable(name, (req as any).rbac, await readCollection(name, includeDeleted)));
   }
-  if (KV_KEYS.has(name)) return res.json(getKv(name));
+  if (KV_KEYS.has(name)) return res.json(await getKv(name));
   res.status(404).json({ error: 'unknown collection' });
 });
 
 // Whole-value replace, matching src/data/index.ts's save(key, value) exactly —
 // no per-item PATCH/DELETE routes because nothing in the frontend calls them.
 // Pipeline : assertCanWrite (RBAC + scope) puis applyWrite (invariants données).
-app.put('/api/v1/:name', requireAuth, (req, res) => {
+app.put('/api/v1/:name', requireAuth, async (req, res) => {
   const { name } = req.params;
   try {
     if (ARRAY_COLLECTIONS.has(name)) {
       if (!Array.isArray(req.body)) return res.status(400).json({ error: 'expected an array' });
-      assertCanWrite(name, (req as any).rbac, req.body);
+      await assertCanWrite(name, (req as any).rbac, req.body);
       const asOf = typeof req.query.asOf === 'string' ? req.query.asOf : undefined;
       // Préserve les items hors de la portée de lecture de l'opérateur : un client scopé
       // n'a qu'un sous-ensemble, son PUT ne doit pas tombstoner ce qu'il ne voit pas.
-      const { added, conflicts } = applyWrite(name, req.body, asOf, preservedIds(name, (req as any).rbac));
+      const { added, conflicts } = await applyWrite(name, req.body, asOf, await preservedIds(name, (req as any).rbac));
       // Fan-out multicanal des notifications nouvellement créées (in-app déjà
       // réel côté client ; email/SMS/WhatsApp via adapters, simulés sans clés).
       if (name === 'notifications' && added.length) {
-        dispatch(added, readCollection('members'), getKv('settings'));
+        dispatch(added, await readCollection('members'), await getKv('settings'));
         poke(); // cloche/alertes en direct (§7)
       }
       // Spec : "compte créé à l'enrôlement, le membre définit son mot de passe
       // via lien" — chaque membre ajouté reçoit une invitation d'activation.
       if (name === 'members' && added.length) {
-        for (const m of added) issueAuthLink(m, 'activate');
+        for (const m of added) await issueAuthLink(m, 'activate');
       }
       return res.json({ ok: true, syncedAt: new Date().toISOString(), conflicts });
     }
     if (KV_KEYS.has(name)) {
-      assertCanWrite(name, (req as any).rbac, []);
-      setKv(name, req.body);
+      await assertCanWrite(name, (req as any).rbac, []);
+      await setKv(name, req.body);
       return res.json({ ok: true });
     }
   } catch (e) {
@@ -325,7 +330,7 @@ app.put('/api/v1/:name', requireAuth, (req, res) => {
 // File de rattrapage hors-ligne (spec offline-first) : le client rejoue ici les
 // écritures perdues quand apiPut a échoué. LWW whole-array — même pipeline
 // RBAC + guards que PUT, idempotent par opId (table sync_ops).
-app.post('/api/v1/sync/batch', requireAuth, (req, res) => {
+app.post('/api/v1/sync/batch', requireAuth, async (req, res) => {
   const ops = req.body?.ops;
   if (!Array.isArray(ops)) return res.status(400).json({ error: 'expected {ops: [...]}' });
   const applied: string[] = [];
@@ -347,13 +352,13 @@ app.post('/api/v1/sync/batch', requireAuth, (req, res) => {
     try {
       if (ARRAY_COLLECTIONS.has(name)) {
         if (!Array.isArray(value)) throw new GuardError(400, 'expected an array');
-        assertCanWrite(name, (req as any).rbac, value);
-        const { added: opAdded, conflicts: opConflicts } = applyWrite(name, value, typeof asOf === 'string' ? asOf : undefined, preservedIds(name, (req as any).rbac));
+        await assertCanWrite(name, (req as any).rbac, value);
+        const { added: opAdded, conflicts: opConflicts } = await applyWrite(name, value, typeof asOf === 'string' ? asOf : undefined, await preservedIds(name, (req as any).rbac));
         conflicts.push(...opConflicts);
         if (name === 'notifications' && opAdded.length) poke();
       } else if (KV_KEYS.has(name)) {
-        assertCanWrite(name, (req as any).rbac, []);
-        setKv(name, value);
+        await assertCanWrite(name, (req as any).rbac, []);
+        await setKv(name, value);
       } else {
         throw new GuardError(404, 'unknown collection');
       }
@@ -374,7 +379,7 @@ import { createHmac, timingSafeEqual } from 'node:crypto';
 const WEBHOOK_SECRET = requireSecret('ACADEMY_WEBHOOK_SECRET', ['change-me']);
 const REPLAY_WINDOW_MS = 5 * 60 * 1000;
 
-app.post('/api/v1/webhooks/academy', (req, res) => {
+app.post('/api/v1/webhooks/academy', async (req, res) => {
   const sig = String(req.headers['x-bloom-signature'] ?? '');
   const ts = Number(req.headers['x-bloom-timestamp'] ?? 0);
   if (!sig || !ts || Math.abs(Date.now() - ts) > REPLAY_WINDOW_MS) {
@@ -397,7 +402,7 @@ app.post('/api/v1/webhooks/academy', (req, res) => {
   // Traitement : consomme le payload puis marque processed=1. En cas d'échec, on laisse
   // processed=0 pour inspection/rejeu manuel (la ligne est déjà stockée, pas re-signable).
   try {
-    processAcademyEvent(JSON.parse(raw.toString('utf8')));
+    await processAcademyEvent(JSON.parse(raw.toString('utf8')));
     db.prepare('UPDATE webhook_events SET processed = 1 WHERE id = ?').run((ins as any).lastInsertRowid);
   } catch (e) {
     console.error('[webhook] traitement échoué (payload conservé):', (e as Error).message);
@@ -408,9 +413,9 @@ app.post('/api/v1/webhooks/academy', (req, res) => {
 // École Bloom → certification. Payload attendu :
 // { type:'certification', memberId, courseTitle, level?, externalRef? }. Point d'extension
 // pour d'autres types d'événements de l'école.
-function processAcademyEvent(payload: any): void {
+async function processAcademyEvent(payload: any): Promise<void> {
   if (payload?.type === 'certification' && payload.memberId && payload.courseTitle) {
-    appendToCollection('certifications', [{
+    await appendToCollection('certifications', [{
       id: `cert_academy_${payload.externalRef ?? payload.memberId}_${Date.now()}`,
       memberId: String(payload.memberId),
       source: 'ecole_bloom',
@@ -477,7 +482,7 @@ app.post('/api/v1/uploads', requireAuth, (req, res) => {
 
 // Migration idempotente au boot : les avatars base64 déjà en base deviennent des fichiers.
 {
-  const members = getCollection('members');
+  const members = await getCollection('members');
   let migrated = 0;
   for (const m of members as any[]) {
     if (typeof m.avatarUrl === 'string' && m.avatarUrl.startsWith('data:image/')) {
@@ -486,7 +491,7 @@ app.post('/api/v1/uploads', requireAuth, (req, res) => {
     }
   }
   if (migrated) {
-    setCollection('members', members);
+    await setCollection('members', members);
     console.log(`[uploads] ${migrated} photo(s) base64 migrée(s) vers ${UPLOAD_DIR}.`);
   }
 }

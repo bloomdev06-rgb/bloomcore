@@ -6,7 +6,7 @@ import { Member, Ministry, PermissionMatrix, Delegation, AdminAccount, Departmen
 import { hasCapability } from '../src/data/permissions.ts';
 import { inMemberScope, canFillReportFor, bloomBusRoleOf, MULTI_BRANCH_ROLES } from '../src/data/scope.ts';
 import { isBusReportLocked } from '../src/data/reportLock.ts';
-import { getKv } from './db.ts';
+import { getKv } from './datastore.ts';
 import { GuardError, readCollection, canonical } from './guards.ts';
 import { roleForDeptFn, roleForLevel } from '../packages/shared/migrate.ts';
 
@@ -57,11 +57,11 @@ export interface RbacContext {
 }
 
 // Construit le contexte pour un memberId authentifié — null si le membre a disparu.
-export function buildContext(memberId: string): RbacContext | null {
-  const member = readCollection('members').find((m: Member) => m.id === memberId);
+export async function buildContext(memberId: string): Promise<RbacContext | null> {
+  const member = (await readCollection('members')).find((m: Member) => m.id === memberId);
   if (!member) return null;
-  const admins = readCollection('admins') as AdminAccount[];
-  const ministries = readCollection('ministries') as Ministry[];
+  const admins = await readCollection('admins') as AdminAccount[];
+  const ministries = await readCollection('ministries') as Ministry[];
   return { member, roles: resolveRoles(member, admins, ministries) };
 }
 
@@ -69,16 +69,16 @@ const hasAny = (roles: string[], allowed: string[]) => roles.some((r) => allowed
 
 // Capacité accordée si N'IMPORTE LEQUEL des rôles résolus la détient dans la
 // matrice live (kv permissions), ou via une délégation ciblant l'opérateur.
-function hasCapAnyRole(ctx: RbacContext, capability: string): boolean {
-  const matrix = (getKv('permissions') ?? {}) as PermissionMatrix;
-  const delegations = readCollection('delegations') as Delegation[];
+async function hasCapAnyRole(ctx: RbacContext, capability: string): Promise<boolean> {
+  const matrix = (await getKv('permissions') ?? {}) as PermissionMatrix;
+  const delegations = await readCollection('delegations') as Delegation[];
   return ctx.roles.some((role) => hasCapability(matrix, capability, role, ctx.member.id, delegations));
 }
 
 // Items ajoutés ou modifiés par rapport au stocké (le scoping ne s'applique
 // qu'à ce que l'opérateur touche réellement, pas au reste du whole-array).
-function touchedItems(name: string, incoming: any[]): any[] {
-  const stored = readCollection(name, true);
+async function touchedItems(name: string, incoming: any[]): Promise<any[]> {
+  const stored = await readCollection(name, true);
   const byId = new Map(stored.map((s: any) => [String(s.id), s]));
   return incoming.filter((it) => {
     const old = byId.get(String(it.id));
@@ -91,9 +91,9 @@ function touchedItems(name: string, incoming: any[]): any[] {
 // ne détient qu'un sous-ensemble ; son PUT whole-array omet le reste non pour le supprimer
 // mais parce qu'il ne l'a jamais reçu. Ces ids ne sont donc ni des suppressions (pas de 403)
 // ni des tombstones (préservés par applyWrite). Full-scope → ensemble vide → LWW classique.
-export function preservedIds(name: string, ctx: RbacContext): Set<string> {
-  const stored = readCollection(name, true).filter((s: any) => !s.deletedAt);
-  const visible = new Set(filterReadable(name, ctx, stored).map((s: any) => String(s.id)));
+export async function preservedIds(name: string, ctx: RbacContext): Promise<Set<string>> {
+  const stored = (await readCollection(name, true)).filter((s: any) => !s.deletedAt);
+  const visible = new Set((await filterReadable(name, ctx, stored)).map((s: any) => String(s.id)));
   return new Set(
     stored.filter((s: any) => !visible.has(String(s.id))).map((s: any) => String(s.id)),
   );
@@ -104,16 +104,16 @@ export function preservedIds(name: string, ctx: RbacContext): Set<string> {
 // (S3 — on ne supprime que dans son périmètre). Les items hors-portée sont exclus ici
 // (préservés, cf. preservedIds) : un Capitaine renvoyant ses seuls membres ne tombstone
 // plus — et n'est plus 403 par — le reste de l'église qu'il ne voit pas.
-function removedItems(name: string, incoming: any[], ctx: RbacContext): any[] {
+async function removedItems(name: string, incoming: any[], ctx: RbacContext): Promise<any[]> {
   const incomingIds = new Set(incoming.map((it) => String(it.id)));
-  const preserve = preservedIds(name, ctx);
-  return readCollection(name, true).filter(
+  const preserve = await preservedIds(name, ctx);
+  return (await readCollection(name, true)).filter(
     (s: any) => !s.deletedAt && !incomingIds.has(String(s.id)) && !preserve.has(String(s.id)),
   );
 }
 
 // Porte d'écriture par collection + scoping par item. Lève GuardError(403/400).
-export function assertCanWrite(name: string, ctx: RbacContext, incoming: any[]): void {
+export async function assertCanWrite(name: string, ctx: RbacContext, incoming: any[]): Promise<void> {
   const { roles, member } = ctx;
 
   switch (name) {
@@ -142,7 +142,7 @@ export function assertCanWrite(name: string, ctx: RbacContext, incoming: any[]):
       const GRANTORS = ['Ministre', 'Pasteur', 'Pasteur Principal', 'Admin', 'Super Admin'];
       if (!hasAny(roles, GRANTORS)) throw new GuardError(403, 'special_authorizations: réservé aux Ministres et Pasteurs');
       if (!roles.includes('Super Admin')) {
-        for (const s of touchedItems(name, incoming) as SpecialAuthorization[]) {
+        for (const s of (await touchedItems(name, incoming)) as SpecialAuthorization[]) {
           if (s.memberId === member.id) throw new GuardError(403, 'special_authorizations: auto-octroi interdit');
         }
       }
@@ -159,19 +159,19 @@ export function assertCanWrite(name: string, ctx: RbacContext, incoming: any[]):
     }
 
     case 'members': {
-      if (!hasCapAnyRole(ctx, 'view_members')) throw new GuardError(403, 'members: capacité view_members requise');
+      if (!(await hasCapAnyRole(ctx, 'view_members'))) throw new GuardError(403, 'members: capacité view_members requise');
       if (hasAny(roles, FULL_SCOPE_ROLES)) return;
       // Symétrique de la lecture (filterReadable, fail-closed) : sans rôle de périmètre
       // déterminé, un opérateur n'écrit QUE sur sa propre fiche. Sinon inMemberScope ferait
       // du fail-open sur 'Membre' (scope.ts) → écriture sur n'importe quel membre.
       const scopeEntry = SCOPE_ROLE_ORDER.find(([r]) => roles.includes(r));
-      const departments = readCollection('departments') as Department[];
-      const ministries = readCollection('ministries') as Ministry[];
+      const departments = await readCollection('departments') as Department[];
+      const ministries = await readCollection('ministries') as Ministry[];
       // Bus lines LIVES (pas le seed figé) : un bus créé/déplacé change les zones/communes
       // servant au scoping Responsable de Zone/Commune.
-      const busLines = readCollection('bus_lines') as BloomBusEntity[];
+      const busLines = await readCollection('bus_lines') as BloomBusEntity[];
       // Écritures ET suppressions par omission : les deux doivent rester dans le périmètre.
-      for (const target of [...touchedItems(name, incoming), ...removedItems(name, incoming, ctx)]) {
+      for (const target of [...(await touchedItems(name, incoming)), ...(await removedItems(name, incoming, ctx))]) {
         const inScope = scopeEntry
           ? inMemberScope(member, target as Member, scopeEntry[1], busLines, departments, ministries)
           : String((target as Member).id) === String(member.id);
@@ -183,9 +183,9 @@ export function assertCanWrite(name: string, ctx: RbacContext, incoming: any[]):
       // en modifiant les champs privilégiés de SA PROPRE fiche (`departments` alimente
       // resolveRoles → escalade de rôle). Les responsables gèrent bien ces champs sur les
       // AUTRES membres (target.id ≠ self, non bloqué ici) — jamais sur eux-mêmes.
-      const selfBefore = readCollection(name, true).find((s: any) => String(s.id) === String(member.id));
+      const selfBefore = (await readCollection(name, true)).find((s: any) => String(s.id) === String(member.id));
       if (selfBefore) {
-        for (const item of touchedItems(name, incoming)) {
+        for (const item of await touchedItems(name, incoming)) {
           if (String(item.id) !== String(member.id)) continue;
           for (const f of ['departments', 'level', 'pastoralCursus', 'bloomBusId', 'deptAttachmentStatus', 'deptAttachmentOrigin', 'testRole']) {
             if (canonical((item as any)[f]) !== canonical((selfBefore as any)[f])) {
@@ -203,7 +203,7 @@ export function assertCanWrite(name: string, ctx: RbacContext, incoming: any[]):
     case 'ministries':
       if (!hasAny(roles, STAFF_ROLES)) throw new GuardError(403, `${name}: réservé aux Responsables et plus`);
       if (name === 'events' && !hasAny(roles, FULL_SCOPE_ROLES)) {
-        for (const ev of [...touchedItems(name, incoming), ...removedItems(name, incoming, ctx)]) {
+        for (const ev of [...(await touchedItems(name, incoming)), ...(await removedItems(name, incoming, ctx))]) {
           if (ev.branch && ev.branch !== 'global' && member.branch && ev.branch !== member.branch) {
             throw new GuardError(403, `events: ${ev.id} appartient à l'autre branche`);
           }
@@ -212,7 +212,7 @@ export function assertCanWrite(name: string, ctx: RbacContext, incoming: any[]):
       return;
 
     case 'reports': {
-      if (!hasAny(roles, ABOVE_MEMBER_ROLES) && !hasCapAnyRole(ctx, 'rapport_service')) {
+      if (!hasAny(roles, ABOVE_MEMBER_ROLES) && !(await hasCapAnyRole(ctx, 'rapport_service'))) {
         throw new GuardError(403, 'reports: rôle serviteur ou délégation requis');
       }
       // Verrou 24h : un rapport Bloom Bus rempli et/ou validé n'est plus modifiable (ni
@@ -220,8 +220,8 @@ export function assertCanWrite(name: string, ctx: RbacContext, incoming: any[]):
       // admins compris (immuabilité des rapports déposés). Seul l'acte de validation
       // (validated/validatedAt) reste permis après coup : relecture, pas modification.
       {
-        const oldById = new Map(readCollection('reports', true).map((s: any) => [String(s.id), s]));
-        for (const r of touchedItems(name, incoming)) {
+        const oldById = new Map((await readCollection('reports', true)).map((s: any) => [String(s.id), s]));
+        for (const r of await touchedItems(name, incoming)) {
           const old = oldById.get(String(r.id));
           if (!old || old.deletedAt || !isBusReportLocked(old)) continue;
           const validationOnly = canonical({ ...old, validated: r.validated, validatedAt: r.validatedAt }) === canonical(r);
@@ -229,7 +229,7 @@ export function assertCanWrite(name: string, ctx: RbacContext, incoming: any[]):
             throw new GuardError(403, `reports: ${r.id} verrouillé — rapport Bloom Bus non modifiable 24h après remplissage/validation`);
           }
         }
-        for (const r of removedItems(name, incoming, ctx)) {
+        for (const r of await removedItems(name, incoming, ctx)) {
           if (isBusReportLocked(r)) {
             throw new GuardError(403, `reports: ${r.id} verrouillé — suppression impossible 24h après remplissage/validation`);
           }
@@ -237,10 +237,10 @@ export function assertCanWrite(name: string, ctx: RbacContext, incoming: any[]):
       }
       if (!hasAny(roles, FULL_SCOPE_ROLES)) {
         const scopeRole = SCOPE_ROLE_ORDER.find(([r]) => roles.includes(r))?.[1] ?? 'Membre';
-        const allMembers = readCollection('members') as Member[];
-        const busLines = readCollection('bus_lines') as BloomBusEntity[];
-        const departments = readCollection('departments') as Department[];
-        for (const r of [...touchedItems(name, incoming), ...removedItems(name, incoming, ctx)]) {
+        const allMembers = await readCollection('members') as Member[];
+        const busLines = await readCollection('bus_lines') as BloomBusEntity[];
+        const departments = await readCollection('departments') as Department[];
+        for (const r of [...(await touchedItems(name, incoming)), ...(await removedItems(name, incoming, ctx))]) {
           if (r.targetBranch && r.targetBranch !== 'global' && member.branch && r.targetBranch !== member.branch) {
             throw new GuardError(403, `reports: ${r.id} appartient à l'autre branche`);
           }
@@ -278,7 +278,7 @@ export function assertCanWrite(name: string, ctx: RbacContext, incoming: any[]):
     case 'audits': {
       // Journal inviolable : l'append-only vit dans guards.ts. Ici on empêche la
       // FORGE — un membre ne peut insérer que des entrées à son propre nom (S4).
-      for (const a of touchedItems(name, incoming)) {
+      for (const a of await touchedItems(name, incoming)) {
         if (a.operatorId && a.operatorId !== member.id) {
           throw new GuardError(403, "audits: operatorId doit être le vôtre (journal non falsifiable)");
         }
@@ -290,7 +290,7 @@ export function assertCanWrite(name: string, ctx: RbacContext, incoming: any[]):
       // L'émission vers autrui (→ fan-out email/SMS/WhatsApp) est réservée à
       // l'encadrement ; un simple membre ne touche que ses propres notifications (S4).
       if (hasAny(roles, ABOVE_MEMBER_ROLES)) return;
-      for (const n of touchedItems(name, incoming)) {
+      for (const n of await touchedItems(name, incoming)) {
         if (n.targetMemberId && n.targetMemberId !== member.id) {
           throw new GuardError(403, 'notifications: réservé à vos propres notifications');
         }
@@ -307,7 +307,7 @@ export function assertCanWrite(name: string, ctx: RbacContext, incoming: any[]):
 // Porte de LECTURE (S2) : filtre une collection avant de la renvoyer au client, selon
 // les rôles RÉELS. Le filtrage de confidentialité et de scope vivait uniquement côté
 // client (rideau cosmétique) ; ici la donnée sensible n'est simplement plus envoyée.
-export function filterReadable(name: string, ctx: RbacContext, items: any[]): any[] {
+export async function filterReadable(name: string, ctx: RbacContext, items: any[]): Promise<any[]> {
   const { roles, member } = ctx;
   const fullScope = hasAny(roles, FULL_SCOPE_ROLES);
 
@@ -321,7 +321,7 @@ export function filterReadable(name: string, ctx: RbacContext, items: any[]): an
       // NOMINATIVE à un non-Coach porteur d'une SpecialAuthorization (accordée par Ministre/
       // Pasteur). Grant ADDITIF — n'élargit qu'aux parties explicitement autorisées, ne masque rien.
       const isCoach = roles.includes('Coach');
-      const suiviAuths = (readCollection('special_authorizations') as SpecialAuthorization[]).filter(
+      const suiviAuths = ((await readCollection('special_authorizations')) as SpecialAuthorization[]).filter(
         (s) => !s.deletedAt && s.memberId === member.id && s.capability === CAP_VOIR_SUIVI_MEMBRE
           && (s.branchId == null || s.branchId === member.branch),
       );
@@ -329,10 +329,10 @@ export function filterReadable(name: string, ctx: RbacContext, items: any[]): an
       if (isCoach || suiviAuths.length) {
         const scopeEntry = SCOPE_ROLE_ORDER.find(([r]) => roles.includes(r));
         if (scopeEntry) {
-          const byId = new Map((readCollection('members') as Member[]).map((m) => [m.id, m]));
-          const departments = readCollection('departments') as Department[];
-          const ministries = readCollection('ministries') as Ministry[];
-          const busLines = readCollection('bus_lines') as BloomBusEntity[];
+          const byId = new Map(((await readCollection('members')) as Member[]).map((m) => [m.id, m]));
+          const departments = await readCollection('departments') as Department[];
+          const ministries = await readCollection('ministries') as Ministry[];
+          const busLines = await readCollection('bus_lines') as BloomBusEntity[];
           suiviSubjectInScope = (mid) => {
             const subject = byId.get(mid);
             return !!subject && inMemberScope(member, subject, scopeEntry[1], busLines, departments, ministries);
@@ -369,9 +369,9 @@ export function filterReadable(name: string, ctx: RbacContext, items: any[]): an
       // Aucun rôle de périmètre (simple membre) : inMemberScope fait du fail-open,
       // donc on court-circuite ici — il ne voit que sa propre fiche.
       if (!scopeEntry) return items.filter((m) => m.id === member.id);
-      const departments = readCollection('departments') as Department[];
-      const ministries = readCollection('ministries') as Ministry[];
-      const busLines = readCollection('bus_lines') as BloomBusEntity[];
+      const departments = await readCollection('departments') as Department[];
+      const ministries = await readCollection('ministries') as Ministry[];
+      const busLines = await readCollection('bus_lines') as BloomBusEntity[];
       return items.filter((m) =>
         m.id === member.id ||
         inMemberScope(member, m as Member, scopeEntry[1], busLines, departments, ministries),

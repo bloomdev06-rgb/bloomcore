@@ -1,7 +1,8 @@
 // First-run seeding, reusing the exact same seed data the frontend already
 // uses (src/mockData.ts) so the API and the offline/localStorage fallback
 // never disagree about "what's in the demo data".
-import { getCollection, setCollection, getKv, setKv, db } from './db.ts';
+import { db } from './db.ts';
+import { getCollection, setCollection, getKv, setKv } from './datastore.ts';
 import { hashPassword } from './auth.ts';
 import { isLegacySeedEventId } from '../src/data/events.ts';
 import {
@@ -76,12 +77,12 @@ const KV_SEEDS: Record<string, unknown> = {
 const DEMO_PASSWORD =
   process.env.SEED_DEMO_PASSWORD || (process.env.NODE_ENV === 'production' ? null : 'bloom2026');
 
-export function ensureSeeded(): void {
+export async function ensureSeeded(): Promise<void> {
   for (const [name, seed] of Object.entries(ARRAY_SEEDS)) {
-    if (getCollection(name).length === 0) setCollection(name, seed);
+    if ((await getCollection(name)).length === 0) await setCollection(name, seed);
   }
   for (const [key, seed] of Object.entries(KV_SEEDS)) {
-    if (getKv(key) === null) setKv(key, seed);
+    if ((await getKv(key)) === null) await setKv(key, seed);
   }
   const row = db.prepare('SELECT COUNT(*) as n FROM credentials').get() as { n: number };
   if (row.n === 0 && DEMO_PASSWORD) {
@@ -94,7 +95,7 @@ export function ensureSeeded(): void {
 
   // Events : contenu seed NON sensible → réconcilié dans TOUS les environnements, pour que les
   // cultes récurrents ajoutés après le premier seed apparaissent sur une base déjà peuplée.
-  const addedEvents = reconcileMissingById('events', INITIAL_EVENTS);
+  const addedEvents = await reconcileMissingById('events', INITIAL_EVENTS);
   if (addedEvents) console.log(`[seed] ${addedEvents} événement(s) seed ajouté(s).`);
 
   // Jeu de test Bloom Bus (dev/staging) : REFRESH à chaque démarrage. Les ids `stds_` étant
@@ -102,13 +103,13 @@ export function ensureSeeded(): void {
   // évolution (noms, structure) s'applique au simple redéploiement, sans wipe. Les données
   // NON-`stds_` (membres réels, profils test, édits) sont conservées.
   if (SEED_TEST_PROFILES) {
-    const keepMembers = getCollection('members').filter((m: any) => !String(m.id).startsWith('stds_'));
-    const keepReports = getCollection('reports').filter((r: any) =>
+    const keepMembers = (await getCollection('members')).filter((m: any) => !String(m.id).startsWith('stds_'));
+    const keepReports = (await getCollection('reports')).filter((r: any) =>
       !String(r.id).startsWith('stds_')
       && !String(r.content?.memberId ?? '').startsWith('stds_')
       && !String(r.content?.busId ?? '').startsWith('stds_'));
-    const keepBuses = getCollection('bus_lines').filter((b: any) => !String(b.id).startsWith('stds_'));
-    const curMinistries = getCollection('ministries');
+    const keepBuses = (await getCollection('bus_lines')).filter((b: any) => !String(b.id).startsWith('stds_'));
+    const curMinistries = await getCollection('ministries');
     patchTestProfiles(keepMembers, curMinistries);
     for (const { ministryId, memberId } of testData.ministryTuteurs) {
       const mi = curMinistries.find((m: any) => m.id === ministryId);
@@ -117,10 +118,10 @@ export function ensureSeeded(): void {
     const allBuses = [...keepBuses, ...testData.newBuses];
     const allMembers = [...keepMembers, ...testData.members];
     attachAllToBus(allMembers, allBuses); // tous les membres rattachés à un bus
-    setCollection('bus_lines', allBuses);
-    setCollection('members', allMembers);
-    setCollection('reports', [...keepReports, ...testData.reports]);
-    setCollection('ministries', curMinistries);
+    await setCollection('bus_lines', allBuses);
+    await setCollection('members', allMembers);
+    await setCollection('reports', [...keepReports, ...testData.reports]);
+    await setCollection('ministries', curMinistries);
     if (DEMO_PASSWORD) {
       const hasCred = db.prepare('SELECT 1 FROM credentials WHERE member_id = ?');
       const insertCred = db.prepare('INSERT OR IGNORE INTO credentials (member_id, password_hash) VALUES (?, ?)');
@@ -129,9 +130,9 @@ export function ensureSeeded(): void {
     console.log(`[seed] jeu de test Bloom Bus rafraîchi : ${testData.members.length} membres, ${testData.reports.length} rapports.`);
   }
 
-  reconcileSeedMembers();
-  reconcileLot3();
-  reconcileLot4();
+  await reconcileSeedMembers();
+  await reconcileLot3();
+  await reconcileLot4();
 }
 
 // Lot 4 — remplacement des événements. Deux purges :
@@ -141,17 +142,17 @@ export function ensureSeeded(): void {
 //   les événements que les utilisateurs créeront légitimement après le lot 4.
 // Les canoniques (evt4_*, ids déterministes par date) sont réinsérés par
 // reconcileMissingById à chaque boot, l'horizon avance tout seul.
-function reconcileLot4(): void {
-  const events = getCollection('events');
-  const oneShot = !getKv('lot4_events_purged');
+async function reconcileLot4(): Promise<void> {
+  const events = await getCollection('events');
+  const oneShot = !(await getKv('lot4_events_purged'));
   const kept = (events as any[]).filter((e) =>
     !isLegacySeedEventId(e.id) && (!oneShot || e.id.startsWith('evt4_')),
   );
   if (kept.length !== events.length) {
-    setCollection('events', kept);
+    await setCollection('events', kept);
     console.log(`[seed] lot 4 : ${events.length - kept.length} ancien(s) événement(s) purgé(s).`);
   }
-  if (oneShot) setKv('lot4_events_purged', true);
+  if (oneShot) await setKv('lot4_events_purged', true);
 }
 
 // Lot 3 — réconciliation ciblée d'une base déjà peuplée (idempotente, à chaque boot) :
@@ -159,8 +160,8 @@ function reconcileLot4(): void {
 //   les cultes d'avant ce champ resteraient sans heure de fin.
 // - Profils de test GDC/ADN : 'Membre' → 'Adjoint' (le RBAC serveur exige une fonction
 //   d'encadrement pour écrire des reports) — profils de test, donc gardé par DEMO_PASSWORD.
-function reconcileLot3(): void {
-  const events = getCollection('events');
+async function reconcileLot3(): Promise<void> {
+  const events = await getCollection('events');
   const seedById = new Map(INITIAL_EVENTS.map((e: any) => [e.id, e]));
   let touched = 0;
   for (const e of events as any[]) {
@@ -168,30 +169,30 @@ function reconcileLot3(): void {
     if (seed?.endTime && e.endTime !== seed.endTime) { e.endTime = seed.endTime; touched++; }
   }
   if (touched) {
-    setCollection('events', events);
+    await setCollection('events', events);
     console.log(`[seed] endTime appliqué à ${touched} événement(s) existant(s).`);
   }
 
   if (!DEMO_PASSWORD) return;
-  const members = getCollection('members');
+  const members = await getCollection('members');
   let fixed = 0;
   for (const m of members as any[]) {
     if (m.testRole === 'GDC' && m.departments?.dept_gdc === 'Membre') { m.departments.dept_gdc = 'Adjoint'; fixed++; }
     if (m.testRole === 'ADN' && m.departments?.dept_adn === 'Membre') { m.departments.dept_adn = 'Adjoint'; fixed++; }
   }
   if (fixed) {
-    setCollection('members', members);
+    await setCollection('members', members);
     console.log(`[seed] ${fixed} profil(s) de test GDC/ADN passé(s) Adjoint.`);
   }
 }
 
 // Ajoute les items seed absents (par id) d'une collection SANS écraser l'existant ni
 // ressusciter un tombstone (un id présent, même supprimé, est ignoré). Idempotent.
-function reconcileMissingById(name: string, seed: any[]): number {
-  const current = getCollection(name);
+async function reconcileMissingById(name: string, seed: any[]): Promise<number> {
+  const current = await getCollection(name);
   const ids = new Set(current.map((x: any) => x.id));
   const missing = seed.filter((x) => !ids.has(x.id));
-  if (missing.length) setCollection(name, [...current, ...missing]);
+  if (missing.length) await setCollection(name, [...current, ...missing]);
   return missing.length;
 }
 
@@ -199,12 +200,12 @@ function reconcileMissingById(name: string, seed: any[]): number {
 // profils de test ajoutés après le premier seed) SANS écraser les données existantes :
 // ajoute uniquement ceux dont l'id est absent, et garantit un credential démo pour chacun.
 // Idempotent — exécuté à chaque démarrage. Gardé par DEMO_PASSWORD (données/credentials de test).
-function reconcileSeedMembers(): void {
+async function reconcileSeedMembers(): Promise<void> {
   if (!DEMO_PASSWORD) return;
 
-  const addedMembers = reconcileMissingById('members', INITIAL_MEMBERS);
+  const addedMembers = await reconcileMissingById('members', INITIAL_MEMBERS);
   if (addedMembers) console.log(`[seed] ${addedMembers} membre(s) seed ajouté(s).`);
-  reconcileMissingById('admins', INITIAL_ADMINS);
+  await reconcileMissingById('admins', INITIAL_ADMINS);
 
   const hasCred = db.prepare('SELECT 1 FROM credentials WHERE member_id = ?');
   const insertCred = db.prepare('INSERT OR IGNORE INTO credentials (member_id, password_hash) VALUES (?, ?)');

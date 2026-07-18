@@ -34,34 +34,34 @@ assert.deepEqual(resolveRoles(simple as any, [], []), ['Membre'], 'simple membre
 
 // --- assertCanWrite via contexte réel (DB :memory:) ---
 setKv('permissions', { view_members: { Responsable: true } });
-applyWrite('members', [superAdmin, pasteur, ministre, resp, simple, baseMember({ id: 'm6', departments: { d1: 'membre' } }), baseMember({ id: 'm7' })]);
-applyWrite('admins', [...admins, { id: 'adm_m7', name: 'AD', subtitle: '', role: 'Admin' }] as any);
-applyWrite('ministries', ministries as any);
-applyWrite('departments', [{ id: 'd1', name: 'D1', ministryId: 'min1', type: 'normal' }]);
+await applyWrite('members', [superAdmin, pasteur, ministre, resp, simple, baseMember({ id: 'm6', departments: { d1: 'membre' } }), baseMember({ id: 'm7' })]);
+await applyWrite('admins', [...admins, { id: 'adm_m7', name: 'AD', subtitle: '', role: 'Admin' }] as any);
+await applyWrite('ministries', ministries as any);
+await applyWrite('departments', [{ id: 'd1', name: 'D1', ministryId: 'min1', type: 'normal' }]);
 
-const ctxSimple = buildContext('m5')!;
-assert.throws(
+const ctxSimple = (await buildContext('m5'))!;
+await assert.rejects(
   () => assertCanWrite('permissions', ctxSimple, []),
   (e: any) => e instanceof GuardError && e.status === 403,
   'permissions refusé au simple membre',
 );
-assert.throws(
+await assert.rejects(
   () => assertCanWrite('members', ctxSimple, []),
   (e: any) => e instanceof GuardError && e.status === 403,
   'members refusé sans capacité view_members',
 );
 
-const ctxSA = buildContext('mem_sa')!;
-assertCanWrite('permissions', ctxSA, []); // ne lève pas
-assertCanWrite('members', ctxSA, []);
+const ctxSA = (await buildContext('mem_sa'))!;
+await assertCanWrite('permissions', ctxSA, []); // ne lève pas
+await assertCanWrite('members', ctxSA, []);
 
 // Responsable : capacité OK (matrice), scope département — m6 partage d1, m5 non.
-const ctxResp = buildContext('m4')!;
+const ctxResp = (await buildContext('m4'))!;
 const allMembers = [superAdmin, pasteur, ministre, resp, simple, baseMember({ id: 'm6', departments: { d1: 'membre' } })];
 // Écriture whole-array (usage réel du client) éditant m6 dans son scope → OK.
-assertCanWrite('members', ctxResp, allMembers.map((m: any) => (m.id === 'm6' ? { ...m, profession: 'edit' } : m)));
+await assertCanWrite('members', ctxResp, allMembers.map((m: any) => (m.id === 'm6' ? { ...m, profession: 'edit' } : m)));
 // Éditer un membre hors scope (m5) → rejeté.
-assert.throws(
+await assert.rejects(
   () => assertCanWrite('members', ctxResp, allMembers.map((m: any) => (m.id === 'm5' ? { ...m, profession: 'edit' } : m))),
   (e: any) => e instanceof GuardError && e.status === 403,
   'édition hors scope département rejetée',
@@ -71,60 +71,60 @@ assert.throws(
 // l'omission hors-scope provoquait un 403 sur tout le write, bloquant aussi les ajouts légitimes
 // (ex. l'enregistrement Bloom Bus par un Capitaine).
 const scopedSubset = [resp, allMembers[5]]; // m4 (self) + m6 (dans le scope de m4)
-assertCanWrite('members', ctxResp, scopedSubset); // ne lève plus
-const preserve = preservedIds('members', ctxResp);
+await assertCanWrite('members', ctxResp, scopedSubset); // ne lève plus
+const preserve = await preservedIds('members', ctxResp);
 assert.ok(preserve.has('mem_sa') && preserve.has('m5'), 'membres hors-scope marqués à préserver');
-applyWrite('members', scopedSubset, undefined, preserve);
-const afterMerge = readCollection('members', true);
+await applyWrite('members', scopedSubset, undefined, preserve);
+const afterMerge = await readCollection('members', true);
 assert.ok(afterMerge.find((m: any) => m.id === 'm5' && !m.deletedAt), 'm5 hors-scope préservé (pas tombstoné)');
 assert.ok(afterMerge.find((m: any) => m.id === 'mem_sa' && !m.deletedAt), 'mem_sa hors-scope préservé');
 
 // Délégation : simple membre avec délégation toId obtient la capacité.
-applyWrite('delegations', [{ id: 'del1', from: 'm4', to: 'M5', toId: 'm5', scope: 'd1', right: 'view_members' }]);
-assertCanWrite('members', buildContext('m5')!, []); // capacité via délégation, aucun item touché
+await applyWrite('delegations', [{ id: 'del1', from: 'm4', to: 'M5', toId: 'm5', scope: 'd1', right: 'view_members' }]);
+await assertCanWrite('members', (await buildContext('m5'))!, []); // capacité via délégation, aucun item touché
 // #5 écriture fail-closed : m5 a la capacité view_members (déléguée, non scopée dans ce chemin)
 // mais AUCUN rôle de périmètre → il ne peut éditer que sa propre fiche, pas celle d'autrui.
-assert.throws(
-  () => assertCanWrite('members', buildContext('m5')!, [{ id: 'm6', firstName: 'Hack' }]),
+await assert.rejects(
+  async () => assertCanWrite('members', (await buildContext('m5'))!, [{ id: 'm6', firstName: 'Hack' }]),
   (e: any) => e instanceof GuardError && e.status === 403,
   'écriture scope-less sur autrui rejetée (#5)',
 );
-assertCanWrite('members', buildContext('m5')!, [{ ...simple, profession: 'edit-self' }]); // sa fiche → OK
+await assertCanWrite('members', (await buildContext('m5'))!, [{ ...simple, profession: 'edit-self' }]); // sa fiche → OK
 
 // Interdiction de déléguer le rapport spirituel Bloom Bus.
-const ctxRespB = buildContext('m4')!;
-assert.throws(
+const ctxRespB = (await buildContext('m4'))!;
+await assert.rejects(
   () => assertCanWrite('delegations', ctxRespB, [{ id: 'del2', from: 'm4', to: 'X', toId: 'm6', scope: 'd1', right: 'rapport_bloom_bus_member' }]),
   (e: any) => e instanceof GuardError && e.status === 400,
   'délégation rapport_bloom_bus_member interdite',
 );
 
 // Scoping branche sur events pour non-privilégié.
-assert.throws(
+await assert.rejects(
   () => assertCanWrite('events', ctxRespB, [{ id: 'ev1', title: 'X', type: 'special_inside', date: '2026-07-06', branch: 'light', closed: false }]),
   (e: any) => e instanceof GuardError && e.status === 403,
   'event autre branche rejeté pour Responsable church',
 );
 
 // S4 — journal non falsifiable : un membre ne peut s'attribuer les actions d'autrui.
-assert.throws(
+await assert.rejects(
   () => assertCanWrite('audits', ctxResp, [{ id: 'aud_x', operatorId: 'mem_sa', actionType: 'X' }]),
   (e: any) => e instanceof GuardError && e.status === 403,
   'audit avec operatorId falsifié rejeté (S4)',
 );
-assertCanWrite('audits', ctxResp, [{ id: 'aud_y', operatorId: 'm4', actionType: 'X' }]); // son propre id → OK
+await assertCanWrite('audits', ctxResp, [{ id: 'aud_y', operatorId: 'm4', actionType: 'X' }]); // son propre id → OK
 
 // --- M3 §2.6/§5 : gouvernance des couches de capacités dynamiques ---
-const ctxMinistre = buildContext('m3')!;
-const ctxAdmin = buildContext('m7')!;
-const ctxPasteur = buildContext('m2')!;
+const ctxMinistre = (await buildContext('m3'))!;
+const ctxAdmin = (await buildContext('m7'))!;
+const ctxPasteur = (await buildContext('m2'))!;
 // capability_overrides = matrice dynamique → §11.2 : Admin / Pasteur Principal / Super Admin
 const co = (id: string) => [{ id, subjectType: 'level', subjectValue: 'Leader', branchId: 'church', capability: 'x', enabled: true }];
-assertCanWrite('capability_overrides', ctxSA, co('co1'));      // Super Admin → OK
-assertCanWrite('capability_overrides', ctxAdmin, co('co1b'));  // Admin → OK (§11.2, plus large que la matrice statique)
+await assertCanWrite('capability_overrides', ctxSA, co('co1'));      // Super Admin → OK
+await assertCanWrite('capability_overrides', ctxAdmin, co('co1b'));  // Admin → OK (§11.2, plus large que la matrice statique)
 // refusé au Pasteur SIMPLE (non listé), Ministre, Responsable, membre
 for (const [ctx, who] of [[ctxPasteur, 'Pasteur simple'], [ctxResp, 'Responsable'], [ctxMinistre, 'Ministre'], [ctxSimple, 'membre']] as const) {
-  assert.throws(
+  await assert.rejects(
     () => assertCanWrite('capability_overrides', ctx, co('co2')),
     (e: any) => e instanceof GuardError && e.status === 403,
     `capability_overrides refusé au ${who}`,
@@ -132,44 +132,44 @@ for (const [ctx, who] of [[ctxPasteur, 'Pasteur simple'], [ctxResp, 'Responsable
 }
 // special_authorizations : accordé par Ministre/Pasteur, PAS un Responsable/membre
 const saItem = (over: any = {}) => ({ id: 'sa1', memberId: 'm6', capability: 'x', grantedById: 'm3', createdAt: '2026-01-01', ...over });
-assertCanWrite('special_authorizations', ctxMinistre, [saItem()]); // Ministre octroie à autrui → OK
-assert.throws(() => assertCanWrite('special_authorizations', ctxResp, [saItem({ grantedById: 'm4' })]), (e: any) => e instanceof GuardError && e.status === 403, 'special_auth refusé au Responsable');
-assert.throws(() => assertCanWrite('special_authorizations', ctxSimple, [saItem({ grantedById: 'm5' })]), (e: any) => e instanceof GuardError && e.status === 403, 'special_auth refusé au membre');
+await assertCanWrite('special_authorizations', ctxMinistre, [saItem()]); // Ministre octroie à autrui → OK
+await assert.rejects(() => assertCanWrite('special_authorizations', ctxResp, [saItem({ grantedById: 'm4' })]), (e: any) => e instanceof GuardError && e.status === 403, 'special_auth refusé au Responsable');
+await assert.rejects(() => assertCanWrite('special_authorizations', ctxSimple, [saItem({ grantedById: 'm5' })]), (e: any) => e instanceof GuardError && e.status === 403, 'special_auth refusé au membre');
 // anti-escalade : un Ministre ne s'auto-octroie pas
-assert.throws(() => assertCanWrite('special_authorizations', ctxMinistre, [saItem({ memberId: 'm3' })]), (e: any) => e instanceof GuardError && e.status === 403, 'auto-octroi interdit (non Super Admin)');
+await assert.rejects(() => assertCanWrite('special_authorizations', ctxMinistre, [saItem({ memberId: 'm3' })]), (e: any) => e instanceof GuardError && e.status === 403, 'auto-octroi interdit (non Super Admin)');
 // Super Admin exempté de l'anti-auto-octroi
-assertCanWrite('special_authorizations', ctxSA, [saItem({ id: 'sa_self', memberId: 'mem_sa', grantedById: 'mem_sa' })]);
+await assertCanWrite('special_authorizations', ctxSA, [saItem({ id: 'sa_self', memberId: 'mem_sa', grantedById: 'mem_sa' })]);
 
 // --- M3-report §240/§5 : visibilité des rapports de SUIVI de membre (confidentiels) ---
 // Re-seed les membres du scénario (les tests de scope plus haut ont tombstoné m8 via un PUT scopé).
-applyWrite('members', [superAdmin, pasteur, ministre, resp, simple, baseMember({ id: 'm6', departments: { d1: 'membre' } }), baseMember({ id: 'm8', departments: { d1: 'Coach' } })]);
+await applyWrite('members', [superAdmin, pasteur, ministre, resp, simple, baseMember({ id: 'm6', departments: { d1: 'membre' } }), baseMember({ id: 'm8', departments: { d1: 'Coach' } })]);
 const suivi = { id: 'rep_suivi', reportType: 'rapport_suivi_coach', confidential: true, content: { memberId: 'm6' }, targetBranch: 'church', date: '2026-07-15', authorId: 'm8' };
 const suiviM5 = { ...suivi, id: 'rep_suivi5', content: { memberId: 'm5' } }; // sujet hors périmètre de m4
-const ctxCoach = buildContext('m8')!;
-const seesSuivi = (ctx: any, items: any[]) => filterReadable('reports', ctx, items).some((r: any) => r.id === 'rep_suivi');
+const ctxCoach = (await buildContext('m8'))!;
+const seesSuivi = async (ctx: any, items: any[]) => (await filterReadable('reports', ctx, items)).some((r: any) => r.id === 'rep_suivi');
 // Coach dont le membre suivi relève du périmètre (partage un département) → voit
-assert.ok(seesSuivi(ctxCoach, [suivi]), 'Coach voit le suivi de son membre (§240)');
+assert.ok(await seesSuivi(ctxCoach, [suivi]), 'Coach voit le suivi de son membre (§240)');
 // Responsable non-Coach sans autorisation → ne voit pas
-assert.ok(!seesSuivi(ctxResp, [suivi]), 'Responsable non-Coach ne voit pas le suivi sans autorisation');
+assert.ok(!(await seesSuivi(ctxResp, [suivi])), 'Responsable non-Coach ne voit pas le suivi sans autorisation');
 // corps pastoral → voit (règle de confidentialité existante préservée)
-assert.ok(seesSuivi(ctxMinistre, [suivi]), 'corps pastoral voit les rapports confidentiels');
+assert.ok(await seesSuivi(ctxMinistre, [suivi]), 'corps pastoral voit les rapports confidentiels');
 // exception nominative : SpecialAuthorization à m4 → ouvre le suivi de son périmètre
-applyWrite('special_authorizations', [{ id: 'sa_suivi', memberId: 'm4', capability: 'consulter_rapports_suivi_membre', branchId: 'church', grantedById: 'm3', createdAt: '2026-01-01' }]);
-assert.ok(seesSuivi(ctxResp, [suivi]), 'SpecialAuthorization ouvre le suivi au non-Coach (§5)');
+await applyWrite('special_authorizations', [{ id: 'sa_suivi', memberId: 'm4', capability: 'consulter_rapports_suivi_membre', branchId: 'church', grantedById: 'm3', createdAt: '2026-01-01' }]);
+assert.ok(await seesSuivi(ctxResp, [suivi]), 'SpecialAuthorization ouvre le suivi au non-Coach (§5)');
 // bornée au périmètre : un suivi d'un membre HORS scope reste invisible
-assert.ok(!filterReadable('reports', ctxResp, [suiviM5]).some((r: any) => r.id === 'rep_suivi5'), 'autorisation bornée au périmètre (sujet hors scope invisible)');
+assert.ok(!(await filterReadable('reports', ctxResp, [suiviM5])).some((r: any) => r.id === 'rep_suivi5'), 'autorisation bornée au périmètre (sujet hors scope invisible)');
 // une autorisation portant sur une AUTRE capacité ne donne pas accès (remplace la précédente)
-applyWrite('special_authorizations', [{ id: 'sa_other', memberId: 'm4', capability: 'autre_chose', branchId: 'church', grantedById: 'm3', createdAt: '2026-01-01' }]);
-assert.ok(!seesSuivi(ctxResp, [suivi]), 'autorisation d\'une autre capacité ne donne pas accès');
+await applyWrite('special_authorizations', [{ id: 'sa_other', memberId: 'm4', capability: 'autre_chose', branchId: 'church', grantedById: 'm3', createdAt: '2026-01-01' }]);
+assert.ok(!(await seesSuivi(ctxResp, [suivi])), 'autorisation d\'une autre capacité ne donne pas accès');
 
 // S4 — émission de notification vers autrui réservée à l'encadrement.
-assert.throws(
+await assert.rejects(
   () => assertCanWrite('notifications', ctxSimple, [{ id: 'n1', targetMemberId: 'm3', title: 'x' }]),
   (e: any) => e instanceof GuardError && e.status === 403,
   'notification vers autrui rejetée pour simple membre (S4)',
 );
-assertCanWrite('notifications', ctxSimple, [{ id: 'n2', targetMemberId: 'm5', title: 'x' }]); // la sienne → OK
-assertCanWrite('notifications', ctxResp, [{ id: 'n3', targetMemberId: 'm3', title: 'x' }]); // encadrement → OK
+await assertCanWrite('notifications', ctxSimple, [{ id: 'n2', targetMemberId: 'm5', title: 'x' }]); // la sienne → OK
+await assertCanWrite('notifications', ctxResp, [{ id: 'n3', targetMemberId: 'm3', title: 'x' }]); // encadrement → OK
 
 // S2 — lecture filtrée par rôle réel (le confidentiel et la PII ne sont plus envoyés).
 const reportSet = [
@@ -177,25 +177,25 @@ const reportSet = [
   { id: 'r_conf', targetBranch: 'church', confidential: true },
 ];
 assert.ok(
-  !filterReadable('reports', ctxSimple, reportSet).some((r: any) => r.confidential),
+  !(await filterReadable('reports', ctxSimple, reportSet)).some((r: any) => r.confidential),
   'rapport confidentiel masqué au simple membre (S2)',
 );
 assert.ok(
-  filterReadable('reports', buildContext('m3')!, reportSet).some((r: any) => r.confidential),
+  (await filterReadable('reports', (await buildContext('m3'))!, reportSet)).some((r: any) => r.confidential),
   'corps pastoral (Ministre) voit le confidentiel (S2)',
 );
 assert.deepEqual(
-  filterReadable('members', ctxSimple, allMembers).map((m: any) => m.id),
+  (await filterReadable('members', ctxSimple, allMembers)).map((m: any) => m.id),
   ['m5'],
   'simple membre ne lit que sa propre fiche (S2)',
 );
 assert.equal(
-  filterReadable('members', buildContext('m2')!, allMembers).length,
+  (await filterReadable('members', (await buildContext('m2'))!, allMembers)).length,
   allMembers.length,
   'Pasteur (périmètre global) lit tous les membres (S2)',
 );
 assert.deepEqual(
-  filterReadable('admins', ctxSimple, admins as any),
+  await filterReadable('admins', ctxSimple, admins as any),
   [],
   'liste admins invisible au simple membre (S2)',
 );
@@ -209,12 +209,12 @@ assert.deepEqual(
     { id: 'e_g', title: 'G', type: '80/20', date: '2026-07-17', branch: 'global', scope: 'both', closed: false },
   ];
   assert.deepEqual(
-    filterReadable('events', ctxSimple, evSet).map((e: any) => e.id),
+    (await filterReadable('events', ctxSimple, evSet)).map((e: any) => e.id),
     ['e_c', 'e_g'],
     'membre mono-branche (church) ne lit pas les events light (lot 4)',
   );
   assert.equal(
-    filterReadable('events', buildContext('m2')!, evSet).length,
+    (await filterReadable('events', (await buildContext('m2'))!, evSet)).length,
     3,
     'Pasteur (multi-branche) lit les events des 2 branches (lot 4)',
   );
@@ -225,7 +225,7 @@ assert.deepEqual(
 {
   const old = { id: 'r_old', reportType: 'rapport_service', targetBranch: 'church', date: '2020-01-05', confidential: false, content: {} };
   const recent = { id: 'r_new', reportType: 'rapport_service', targetBranch: 'church', date: '2026-06-29', confidential: false, content: {} };
-  const ids = filterReadable('reports', buildContext('m2')!, [old, recent]).map((r: any) => r.id);
+  const ids = (await filterReadable('reports', (await buildContext('m2'))!, [old, recent])).map((r: any) => r.id);
   assert.deepEqual(ids, ['r_new'], 'rapport de plus de 24 mois archivé (non servi)');
 }
 
@@ -233,9 +233,9 @@ assert.deepEqual(
 // #3 notifications personnelles filtrées par destinataire.
 {
   const audits = [{ id: 'a1', operatorId: 'mem_sa', actionType: 'PASSWORD_RESET_ISSUED' }];
-  assert.deepEqual(filterReadable('audits', ctxSimple, audits), [], "journal d'audit invisible au simple membre (#2)");
-  assert.equal(filterReadable('audits', ctxResp, audits).length, 0, "journal d'audit invisible au Responsable (hors encadrement supérieur) (#2)");
-  assert.equal(filterReadable('audits', ctxSA, audits).length, 1, 'Super Admin lit le journal d\'audit (#2)');
+  assert.deepEqual(await filterReadable('audits', ctxSimple, audits), [], "journal d'audit invisible au simple membre (#2)");
+  assert.equal((await filterReadable('audits', ctxResp, audits)).length, 0, "journal d'audit invisible au Responsable (hors encadrement supérieur) (#2)");
+  assert.equal((await filterReadable('audits', ctxSA, audits)).length, 1, 'Super Admin lit le journal d\'audit (#2)');
 
   const notifs = [
     { id: 'n_broadcast', title: 'B' },                    // sans cible → tout le monde
@@ -243,12 +243,12 @@ assert.deepEqual(
     { id: 'n_other', targetMemberId: 'm3', title: 'O' },  // destinée à un autre
   ];
   assert.deepEqual(
-    filterReadable('notifications', ctxSimple, notifs).map((n: any) => n.id),
+    (await filterReadable('notifications', ctxSimple, notifs)).map((n: any) => n.id),
     ['n_broadcast', 'n_mine'],
     'simple membre : notif personnelle d\'un autre masquée (#3)',
   );
   assert.equal(
-    filterReadable('notifications', ctxResp, notifs).length,
+    (await filterReadable('notifications', ctxResp, notifs)).length,
     3,
     'encadrement voit toutes les notifications pour supervision (#3)',
   );

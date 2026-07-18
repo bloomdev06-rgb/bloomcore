@@ -1,0 +1,307 @@
+// BloomCore — schéma relationnel PostgreSQL (M6).
+//
+// Cible : « relationnel fidèle à l'app actuelle », pas au §2 idéalisé (qui n'a
+// pas de place pour healthKPIs, le flux Nouveau/ADN, les sections de dept, les
+// rapports GDC… → §2-littéral serait LOSSY et casserait le cahier des charges).
+//
+// Modèle : document-par-ligne (comme aujourd'hui : une ligne par item) MAIS sur
+// Postgres avec (a) colonnes promues indexées pour les requêtes relationnelles,
+// (b) `data` jsonb = objet complet (source de vérité, non lossy), (c) une vraie
+// table `DepartmentMembership` projetée depuis Member.departments (requêtes
+// d'appartenance). Le reste des champs schemaless reste dans `data`.
+//
+// Les valeurs d'enum ne sont PAS des enums Prisma : canonicalize() (M5) reste le
+// point d'application au boundary d'écriture ; des enums DB rejetteraient toute
+// donnée legacy et rendraient la migration fragile. Colonnes String + index.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ─────────────────────────── Collections (document-par-ligne) ───────────────────────────
+
+model Member {
+  id               String  @id
+  branch           String?
+  level            String?
+  integrationState String?
+  bloomBusId       String?
+  deletedAt        String?
+  updatedAt        String?
+  data             Json
+  memberships      DepartmentMembership[]
+
+  @@index([branch])
+  @@index([level])
+  @@index([integrationState])
+  @@index([bloomBusId])
+  @@index([deletedAt])
+}
+
+// Projection relationnelle de Member.departments ({deptId: fonction}) + deptSections.
+// Source de vérité = Member.data.departments ; reconstruite à chaque upsert de membre.
+// Donne les requêtes d'appartenance (qui est dans le dept X, membres de fonction Y).
+model DepartmentMembership {
+  id           String  @id // `${memberId}::${departmentId}`
+  memberId     String
+  departmentId String
+  function     String
+  sectionId    String?
+  member       Member  @relation(fields: [memberId], references: [id], onDelete: Cascade)
+
+  @@unique([memberId, departmentId])
+  @@index([departmentId])
+  @@index([function])
+}
+
+model Event {
+  id        String   @id
+  branch    String?
+  type      String?
+  date      String?
+  closed    Boolean?
+  deletedAt String?
+  updatedAt String?
+  data      Json
+
+  @@index([branch])
+  @@index([date])
+  @@index([closed])
+  @@index([deletedAt])
+}
+
+model Report {
+  id           String  @id
+  branch       String? // targetBranch
+  reportType   String?
+  departmentId String?
+  eventId      String?
+  date         String?
+  deletedAt    String?
+  updatedAt    String?
+  data         Json
+
+  @@index([branch])
+  @@index([reportType])
+  @@index([departmentId])
+  @@index([eventId])
+  @@index([date])
+  @@index([deletedAt])
+}
+
+// Journal append-only (jamais de deletedAt/DELETE).
+model Audit {
+  id         String  @id
+  branch     String?
+  actionType String?
+  entity     String?
+  timestamp  String?
+  data       Json
+
+  @@index([branch])
+  @@index([actionType])
+  @@index([entity])
+  @@index([timestamp])
+}
+
+model Notification {
+  id             String   @id
+  branch         String?
+  targetMemberId String?
+  read           Boolean?
+  deletedAt      String?
+  updatedAt      String?
+  data           Json
+
+  @@index([branch])
+  @@index([targetMemberId])
+  @@index([deletedAt])
+}
+
+model Ministry {
+  id        String  @id
+  branch    String?
+  deletedAt String?
+  updatedAt String?
+  data      Json
+
+  @@index([branch])
+  @@index([deletedAt])
+}
+
+model Department {
+  id           String  @id
+  branch       String?
+  type         String?
+  ministryId   String?
+  deletedAt    String?
+  updatedAt    String?
+  data         Json
+
+  @@index([branch])
+  @@index([ministryId])
+  @@index([type])
+  @@index([deletedAt])
+}
+
+model Activity {
+  id           String  @id
+  departmentId String?
+  deletedAt    String?
+  updatedAt    String?
+  data         Json
+
+  @@index([departmentId])
+  @@index([deletedAt])
+}
+
+model Project {
+  id        String  @id
+  branch    String?
+  scope     String?
+  ministryId String?
+  deletedAt String?
+  updatedAt String?
+  data      Json
+
+  @@index([branch])
+  @@index([scope])
+  @@index([deletedAt])
+}
+
+model BloomBus {
+  id        String  @id
+  deletedAt String?
+  updatedAt String?
+  data      Json
+
+  @@index([deletedAt])
+}
+
+model Certification {
+  id        String  @id
+  memberId  String?
+  deletedAt String?
+  updatedAt String?
+  data      Json
+
+  @@index([memberId])
+  @@index([deletedAt])
+}
+
+model IntegrationReport {
+  id        String  @id
+  memberId  String?
+  deletedAt String?
+  updatedAt String?
+  data      Json
+
+  @@index([memberId])
+  @@index([deletedAt])
+}
+
+model FormDefinition {
+  id        String  @id
+  deletedAt String?
+  updatedAt String?
+  data      Json
+
+  @@index([deletedAt])
+}
+
+model Delegation {
+  id        String  @id
+  deletedAt String?
+  updatedAt String?
+  data      Json
+
+  @@index([deletedAt])
+}
+
+model AdminAccount {
+  id        String  @id
+  deletedAt String?
+  updatedAt String?
+  data      Json
+
+  @@index([deletedAt])
+}
+
+model CapabilityOverride {
+  id        String  @id
+  branch    String?
+  deletedAt String?
+  updatedAt String?
+  data      Json
+
+  @@index([branch])
+  @@index([deletedAt])
+}
+
+model SpecialAuthorization {
+  id        String  @id
+  branch    String?
+  deletedAt String?
+  updatedAt String?
+  data      Json
+
+  @@index([branch])
+  @@index([deletedAt])
+}
+
+// ─────────────────────────── KV + tables auxiliaires (portées de db.ts) ───────────────────────────
+
+model Kv {
+  key  String @id
+  data Json
+}
+
+model Credential {
+  memberId     String @id
+  passwordHash String
+  pwdVersion   Int    @default(0)
+}
+
+model Token {
+  token     String  @id
+  memberId  String
+  purpose   String
+  expiresAt BigInt
+  usedAt    BigInt?
+
+  @@index([memberId])
+}
+
+model SyncOp {
+  opId      String @id
+  appliedAt String
+}
+
+model WebhookEvent {
+  id         Int     @id @default(autoincrement())
+  source     String
+  receivedAt String
+  payload    String
+  signature  String? @unique
+  processed  Boolean @default(false)
+}
+
+model Outbox {
+  id        Int     @id @default(autoincrement())
+  dedupeKey String? @unique
+  channel   String
+  recipient String
+  subject   String
+  body      String
+  status    String  @default("simulated")
+  createdAt String
+  sentAt    String?
+  error     String?
+
+  @@index([status])
+}

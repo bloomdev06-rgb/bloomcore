@@ -1,7 +1,7 @@
 // Garde-fous d'écriture — le "journal inviolable" et le soft-delete du cahier
 // des charges, appliqués côté serveur sans changer le contrat frontend
 // (PUT whole-array). Appelé par PUT /:name et POST /sync/batch.
-import { getCollection, appendToCollection, mergeCollection } from './db.ts';
+import { getCollection, appendToCollection, mergeCollection } from './datastore.ts';
 import { parseReportPayload } from '../packages/shared/schemas/report.ts';
 import { canonicalize } from '../packages/shared/migrate.ts';
 
@@ -90,7 +90,7 @@ export function validateItems(name: string, incoming: any[]): void {
   }
 }
 
-export function applyWrite(
+export async function applyWrite(
   name: string,
   incoming: any[],
   asOf?: string,
@@ -98,12 +98,12 @@ export function applyWrite(
   // parce qu'il les supprime, mais parce qu'un client scopé ne les a jamais reçus. On les
   // PRÉSERVE (pas de tombstone-by-omission). Vide (défaut) = comportement whole-array LWW.
   preserve: Set<string> = new Set(),
-): { added: any[]; changed: any[]; conflicts: string[] } {
+): Promise<{ added: any[]; changed: any[]; conflicts: string[] }> {
   validateItems(name, incoming); // frontière de confiance (#12) — avant toute écriture
   // M5 — normalise toute écriture vers les valeurs snake_case §3. Linchpin offline-first :
   // un vieux client envoyant d'anciennes valeurs les voit converties ici → jamais réintroduites.
   incoming = incoming.map((it) => canonicalize(name, it));
-  const stored = getCollection(name);
+  const stored = await getCollection(name);
   const storedById = new Map(stored.map((s) => [String(s.id), s]));
   const incomingById = new Map(incoming.map((it) => [String(it.id), it]));
 
@@ -115,7 +115,7 @@ export function applyWrite(
       }
     }
     const added = incoming.filter((it) => !storedById.has(String(it.id)));
-    appendToCollection(name, added);
+    await appendToCollection(name, added);
     return { added, changed: [], conflicts: [] };
   }
 
@@ -158,7 +158,7 @@ export function applyWrite(
     }
   }
 
-  mergeCollection(name, toWrite);
+  await mergeCollection(name, toWrite);
 
   const added = incoming.filter((it) => !storedById.has(String(it.id)));
   const changed = incoming.filter((it) => {
@@ -172,8 +172,8 @@ export function applyWrite(
 
 // Lecture filtrée : les tombstones sont invisibles par défaut (sauf audits,
 // append-only donc jamais tombstonés, et sauf includeDeleted pour la corbeille).
-export function readCollection(name: string, includeDeleted = false): any[] {
-  const items = getCollection(name);
+export async function readCollection(name: string, includeDeleted = false): Promise<any[]> {
+  const items = await getCollection(name);
   if (name === 'audits' || includeDeleted) return items;
   return items.filter((it) => !it.deletedAt);
 }

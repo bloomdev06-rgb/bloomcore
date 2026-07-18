@@ -13,10 +13,12 @@
     "build": "vite build",
     "preview": "vite preview",
     "clean": "rm -rf dist server/*.db",
+    "postinstall": "prisma generate",
     "lint": "tsc --noEmit && eslint src",
     "test": "tsx server/auth.check.ts && tsx server/rbac.check.ts && tsx server/guards.check.ts && tsx server/sync.check.ts && tsx src/data/kpi.check.ts && tsx src/data/reportLock.check.ts && tsx src/data/adn.check.ts && tsx src/data/events.check.ts && tsx src/data/notificationRules.check.ts && tsx src/data/scope.check.ts && tsx src/data/week.check.ts && tsx src/data/completude.check.ts && tsx packages/shared/schemas/report.check.ts && tsx packages/shared/migrate.check.ts && tsx src/data/permissions.check.ts"
   },
   "dependencies": {
+    "@prisma/client": "^6.19.3",
     "@tailwindcss/vite": "^4.1.14",
     "@types/leaflet": "^1.9.21",
     "@vitejs/plugin-react": "^5.0.4",
@@ -27,6 +29,7 @@
     "leaflet": "^1.9.4",
     "lucide-react": "^0.546.0",
     "motion": "^12.23.24",
+    "prisma": "^6.19.3",
     "react": "^19.0.1",
     "react-dom": "^19.0.1",
     "react-leaflet": "^5.0.0",

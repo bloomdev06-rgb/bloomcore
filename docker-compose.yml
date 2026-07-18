@@ -19,14 +19,37 @@ services:
       # si servi depuis un autre domaine. Le déploiement mono-service (même origine) n'en a pas besoin.
       CORS_ORIGINS: ${CORS_ORIGINS:-}
       APP_URL: ${APP_URL:-http://localhost:4000}
-      # SQLite persisté sur le volume nommé ci-dessous (survit aux redéploiements).
+      # M6 — backend Postgres. L'entrypoint applique `prisma migrate deploy` au boot,
+      # puis le serveur importe une fois les données SQLite existantes (migrateFromSqlite,
+      # gardé par le flag _m6_migrated). Absent → mode SQLite legacy inchangé.
+      DATABASE_URL: postgresql://postgres:${POSTGRES_PASSWORD:-bloom}@db:5432/bloomcore?schema=public
+      # SQLite persisté sur le volume nommé ci-dessous — tables auxiliaires
+      # (credentials/tokens/…) même en mode Postgres.
       BLOOMCORE_DB: /data/bloomcore.db
       # Défini UNIQUEMENT pour un environnement de test/démo : seed des credentials + des
       # 18 profils de test (mem_test_*). Laisser vide pour une vraie prod (activation requise).
       SEED_DEMO_PASSWORD: ${SEED_DEMO_PASSWORD:-}
     volumes:
       - bloomcore-data:/data
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-bloom}
+      POSTGRES_DB: bloomcore
+    volumes:
+      - bloomcore-pg:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d bloomcore"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
     restart: unless-stopped
 
 volumes:
   bloomcore-data:
+  bloomcore-pg:
