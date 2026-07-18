@@ -672,6 +672,9 @@ export default function App() {
             simulatedRole={simulatedRole}
             permissionMatrix={permissionMatrix}
             onTogglePermission={handleTogglePermission}
+            members={members}
+            operator={operator}
+            onAddAuditLog={handleAddAuditLog}
           />
         );
       case 'accounts':

@@ -1,7 +1,8 @@
 import React, { useState } from 'react';
-import { Shield, Check, X, Sliders, AlertCircle, Info, UserCheck, Plus, GitBranch } from 'lucide-react';
-import { PermissionMatrix, Branch, Delegation } from '../types';
+import { Shield, Check, X, Sliders, Info, UserCheck, Plus, GitBranch } from 'lucide-react';
+import { PermissionMatrix, Branch, Delegation, Member, CapabilityOverride, SpecialAuthorization, AuditLog, CapabilityOverrideSubject } from '../types';
 import { load, save } from '../data';
+import { DEFAULT_OPERATOR_NAME } from '../data/operator';
 import { motion, AnimatePresence } from 'motion/react';
 
 interface GovernanceViewProps {
@@ -9,7 +10,19 @@ interface GovernanceViewProps {
   onTogglePermission: (capability: string, role: string) => void;
   activeBranch: Branch;
   simulatedRole: string;
+  members?: Member[];
+  operator?: Member;
+  onAddAuditLog?: (log: AuditLog) => void;
 }
+
+// Valeurs d'axe pour les surcharges (§2.6) — DOIVENT correspondre aux valeurs stockées
+// aujourd'hui (sinon l'override ne matche personne). Convergence snake_case = jalon M5.
+const OVERRIDE_SUBJECT_VALUES: Record<CapabilityOverrideSubject, string[]> = {
+  level: ['Nouveau', 'Stagiaire', 'Boss', 'Leader', 'Coach'],
+  function: ['Responsable', 'Adjoint', 'Trésorier', 'Responsable de section', 'Membre', 'Capitaine de Bus', 'Responsable de Zone', 'Responsable de Commune'],
+  cursus: ['Aucun', 'Appelé', 'Serviteur', "Gagneur d'âme", 'Assistant Pasteur', 'Pasteur Assistant', 'Pasteur Titulaire'],
+};
+const SUBJECT_TYPE_LABEL: Record<CapabilityOverrideSubject, string> = { level: 'Niveau', function: 'Fonction', cursus: 'Cursus' };
 
 const containerVariants = {
   hidden: { opacity: 0 },
@@ -30,12 +43,16 @@ export default function GovernanceView({
   permissionMatrix,
   onTogglePermission,
   activeBranch,
-  simulatedRole
+  simulatedRole,
+  members = [],
+  operator,
+  onAddAuditLog,
 }: GovernanceViewProps) {
   const isChurch = activeBranch === 'church';
 
   const capabilitiesList = [
     { key: 'consulter_rapports_de_vie', label: 'Consulter les Rapports de Vie Spirituelle (Suivi)', desc: 'Autorise l\'accès aux curseurs de dévotion individuels des membres.' },
+    { key: 'consulter_rapports_suivi_membre', label: 'Consulter les rapports de suivi des membres (§240)', desc: 'Autorise un non-Coach à voir les rapports de suivi (rapport_suivi_coach) des membres de son périmètre.' },
     { key: 'consulter_situation_financiere', label: 'Consulter la Situation Financière', desc: 'Autorise la lecture des informations professionnelles et des tranches d\'offrandes.' },
     { key: 'consulter_historique_presence', label: 'Consulter l\'Historique de Présence', desc: 'Permet de voir le taux d\'assiduité aux cultes du dimanche.' },
     { key: 'modifier_jalons_bapteme_integration', label: 'Modifier les Jalons de Baptême/Intégration', desc: 'Donne l\'autorisation de diplômer un nouveau et de valider les étapes d\'immersion.' },
@@ -66,18 +83,64 @@ export default function GovernanceView({
   const roles = ROLE_ORDER.filter(r => presentRoles.has(r));
   // §11.2 — config réservée à Admin / Pasteur Principal / Super Admin (pas 'Pasteur' générique).
   const canEditGov = ['Admin', 'Pasteur Principal', 'Super Admin'].includes(simulatedRole);
-  const capLabel = (key: string) => capabilitiesList.find(c => c.key === key)?.label ?? key;
+  const capLabel = (key: string) => allCapabilities.find(c => c.key === key)?.label ?? key;
+  const memberName = (id: string) => {
+    const m = members.find(mm => mm.id === id);
+    return m ? `${m.firstName} ${m.lastName}` : id;
+  };
+  const audit = (actionType: string, details: string) => onAddAuditLog?.({
+    id: `aud_${Date.now()}`, timestamp: new Date().toISOString(), actionType,
+    operatorName: operator ? `${operator.firstName} ${operator.lastName}` : DEFAULT_OPERATOR_NAME,
+    operatorId: operator?.id ?? 'mem_1', details,
+    branch: activeBranch === 'global' ? undefined : activeBranch,
+  });
+  const branchMembers = members.filter(m => !(m as any).deletedAt && (activeBranch === 'global' || m.branch === activeBranch));
 
-  // ponytail: local state, no persistence yet — wire to ./data + audit log when the backend lands.
-  const [specials, setSpecials] = useState<{ member: string; capability: string }[]>([
-    { member: 'Marie Koffi', capability: 'consulter_situation_financiere' },
-  ]);
-  const [newMember, setNewMember] = useState('');
-  const [newCap, setNewCap] = useState(capabilitiesList[0].key);
+  // §2.6/§5 — autorisations spéciales (exceptions nominatives), collection réelle synchronisée.
+  const [specialAuths, setSpecialAuths] = useState<SpecialAuthorization[]>(() => load('bc_special_authorizations', [] as SpecialAuthorization[]));
+  React.useEffect(() => { save('bc_special_authorizations', specialAuths); }, [specialAuths]);
+  const [saMemberId, setSaMemberId] = useState('');
+  const [saCap, setSaCap] = useState(capabilitiesList[0].key);
+  const activeSpecials = specialAuths.filter(s => !s.deletedAt);
   const addSpecial = () => {
-    if (!newMember.trim()) return;
-    setSpecials(prev => [{ member: newMember.trim(), capability: newCap }, ...prev]);
-    setNewMember('');
+    if (!saMemberId) return;
+    const item: SpecialAuthorization = {
+      id: `sa_${Date.now()}`, memberId: saMemberId, capability: saCap,
+      branchId: activeBranch === 'global' ? null : activeBranch,
+      grantedById: operator?.id ?? 'mem_1', createdAt: new Date().toISOString(),
+    };
+    setSpecialAuths(prev => [item, ...prev]);
+    audit('SPECIAL_AUTH_GRANTED', `Autorisation « ${capLabel(saCap)} » accordée à ${memberName(saMemberId)}`);
+    setSaMemberId('');
+  };
+  const removeSpecial = (id: string) => {
+    const s = specialAuths.find(x => x.id === id);
+    setSpecialAuths(prev => prev.filter(x => x.id !== id));
+    if (s) audit('SPECIAL_AUTH_REVOKED', `Autorisation « ${capLabel(s.capability)} » retirée à ${memberName(s.memberId)}`);
+  };
+
+  // §2.6/§11.2 — surcharges de capacités (matrice dynamique par classe × branche).
+  const [overrides, setOverrides] = useState<CapabilityOverride[]>(() => load('bc_capability_overrides', [] as CapabilityOverride[]));
+  React.useEffect(() => { save('bc_capability_overrides', overrides); }, [overrides]);
+  const [ovSubjectType, setOvSubjectType] = useState<CapabilityOverrideSubject>('level');
+  const [ovSubjectValue, setOvSubjectValue] = useState(OVERRIDE_SUBJECT_VALUES.level[0]);
+  const [ovCap, setOvCap] = useState(capabilitiesList[0].key);
+  const [ovBranch, setOvBranch] = useState<Branch>(activeBranch === 'global' ? 'church' : activeBranch);
+  const [ovEnabled, setOvEnabled] = useState(true);
+  const activeOverrides = overrides.filter(o => !o.deletedAt);
+  const onSubjectTypeChange = (t: CapabilityOverrideSubject) => { setOvSubjectType(t); setOvSubjectValue(OVERRIDE_SUBJECT_VALUES[t][0]); };
+  const addOverride = () => {
+    const item: CapabilityOverride = {
+      id: `co_${Date.now()}`, subjectType: ovSubjectType, subjectValue: ovSubjectValue,
+      branchId: ovBranch, capability: ovCap, enabled: ovEnabled,
+    };
+    setOverrides(prev => [item, ...prev]);
+    audit('CAPABILITY_OVERRIDE_SET', `Surcharge : ${ovEnabled ? 'accorde' : 'révoque'} « ${capLabel(ovCap)} » pour ${SUBJECT_TYPE_LABEL[ovSubjectType]}=${ovSubjectValue} (${ovBranch})`);
+  };
+  const removeOverride = (id: string) => {
+    const o = overrides.find(x => x.id === id);
+    setOverrides(prev => prev.filter(x => x.id !== id));
+    if (o) audit('CAPABILITY_OVERRIDE_REMOVED', `Surcharge « ${capLabel(o.capability)} » (${SUBJECT_TYPE_LABEL[o.subjectType]}=${o.subjectValue}) supprimée`);
   };
 
   // §11.3 — délégation par un Responsable dans son département. On ne délègue JAMAIS
@@ -207,39 +270,83 @@ export default function GovernanceView({
         </div>
       </motion.div>
 
-      {/* Special authorizations */}
+      {/* §2.6/§11.2 — Surcharges de capacités (matrice dynamique par classe × branche) */}
+      <motion.div variants={rowVariants} className="bg-white border border-bc-border shadow-sm rounded-[2rem] p-6">
+        <h3 className="text-sm font-ui font-bold text-bc-text flex items-center gap-2 mb-1">
+          <Sliders size={16} /> Surcharges de capacités
+        </h3>
+        <p className="text-xs text-bc-text-secondary mb-4">Ajuster une capacité pour toute une classe (niveau, fonction ou cursus), par branche — accorde ou révoque par-dessus la matrice de base.</p>
+
+        {canEditGov && (
+          <div className="flex flex-wrap gap-2 items-center mb-4">
+            <select value={ovSubjectType} onChange={e => onSubjectTypeChange(e.target.value as CapabilityOverrideSubject)} className="border border-bc-border rounded-full px-3 py-2 text-xs bg-white">
+              {(['level', 'function', 'cursus'] as CapabilityOverrideSubject[]).map(t => <option key={t} value={t}>{SUBJECT_TYPE_LABEL[t]}</option>)}
+            </select>
+            <select value={ovSubjectValue} onChange={e => setOvSubjectValue(e.target.value)} className="border border-bc-border rounded-full px-3 py-2 text-xs bg-white">
+              {OVERRIDE_SUBJECT_VALUES[ovSubjectType].map(v => <option key={v} value={v}>{v}</option>)}
+            </select>
+            <select value={ovCap} onChange={e => setOvCap(e.target.value)} className="border border-bc-border rounded-full px-3 py-2 text-xs bg-white">
+              {capabilitiesList.map(c => <option key={c.key} value={c.key}>{c.label}</option>)}
+            </select>
+            <select value={ovBranch} onChange={e => setOvBranch(e.target.value as Branch)} className="border border-bc-border rounded-full px-3 py-2 text-xs bg-white">
+              <option value="church">Bloom Church</option>
+              <option value="light">Bloom Light</option>
+            </select>
+            <select value={ovEnabled ? '1' : '0'} onChange={e => setOvEnabled(e.target.value === '1')} className="border border-bc-border rounded-full px-3 py-2 text-xs bg-white">
+              <option value="1">Accorde</option>
+              <option value="0">Révoque</option>
+            </select>
+            <button onClick={addOverride} className="flex items-center gap-1.5 bg-bc-green text-white rounded-full px-4 py-2 text-xs font-bold hover:opacity-90 active-scale">
+              <Plus size={14} /> Ajouter
+            </button>
+          </div>
+        )}
+
+        <div className="space-y-2">
+          {activeOverrides.length === 0 && <p className="text-xs text-bc-text-secondary italic">Aucune surcharge.</p>}
+          {activeOverrides.map(o => (
+            <div key={o.id} className="flex items-center justify-between bg-bc-canvas/40 border border-bc-border rounded-full px-4 py-2 text-xs">
+              <span>
+                <span className={`font-bold ${o.enabled ? 'text-bc-green' : 'text-bc-danger'}`}>{o.enabled ? 'Accorde' : 'Révoque'}</span>
+                {' '}« {capLabel(o.capability)} » — {SUBJECT_TYPE_LABEL[o.subjectType]} <span className="font-bold text-bc-text">{o.subjectValue}</span> · {o.branchId === 'church' ? 'Church' : 'Light'}
+              </span>
+              {canEditGov && (
+                <button onClick={() => removeOverride(o.id)} className="text-bc-text-secondary hover:text-bc-danger active-scale"><X size={14} /></button>
+              )}
+            </div>
+          ))}
+        </div>
+      </motion.div>
+
+      {/* §2.6/§5 — Autorisations spéciales (exceptions nominatives) */}
       <motion.div variants={rowVariants} className="bg-white border border-bc-border shadow-sm rounded-[2rem] p-6">
         <h3 className="text-sm font-ui font-bold text-bc-text flex items-center gap-2 mb-1">
           <UserCheck size={16} /> Autorisations spéciales
         </h3>
-        <p className="text-xs text-bc-text-secondary mb-4">Accorder une capacité à un membre nommément (exception à la matrice).</p>
+        <p className="text-xs text-bc-text-secondary mb-4">Accorder une capacité à un membre nommément (exception à la matrice), dans la branche active.</p>
 
         {canEditGov && (
           <div className="flex flex-wrap gap-2 items-center mb-4">
-            <input
-              value={newMember}
-              onChange={e => setNewMember(e.target.value)}
-              placeholder="Nom du membre"
-              className="flex-1 min-w-[160px] border border-bc-border rounded-full px-3 py-2 text-xs focus:outline-none focus:border-bc-green"
-            />
-            <select value={newCap} onChange={e => setNewCap(e.target.value)} className="border border-bc-border rounded-full px-3 py-2 text-xs bg-white">
+            <select value={saMemberId} onChange={e => setSaMemberId(e.target.value)} className="flex-1 min-w-[160px] border border-bc-border rounded-full px-3 py-2 text-xs bg-white">
+              <option value="">— Choisir un membre —</option>
+              {branchMembers.map(m => <option key={m.id} value={m.id}>{m.firstName} {m.lastName}</option>)}
+            </select>
+            <select value={saCap} onChange={e => setSaCap(e.target.value)} className="border border-bc-border rounded-full px-3 py-2 text-xs bg-white">
               {capabilitiesList.map(c => <option key={c.key} value={c.key}>{c.label}</option>)}
             </select>
-            <button onClick={addSpecial} className="flex items-center gap-1.5 bg-bc-green text-white rounded-full px-4 py-2 text-xs font-bold hover:opacity-90 active-scale">
+            <button onClick={addSpecial} disabled={!saMemberId} className="flex items-center gap-1.5 bg-bc-green text-white rounded-full px-4 py-2 text-xs font-bold hover:opacity-90 active-scale disabled:opacity-40">
               <Plus size={14} /> Accorder
             </button>
           </div>
         )}
 
         <div className="space-y-2">
-          {specials.length === 0 && <p className="text-xs text-bc-text-secondary italic">Aucune autorisation spéciale.</p>}
-          {specials.map((s, i) => (
-            <div key={i} className="flex items-center justify-between bg-bc-canvas/40 border border-bc-border rounded-full px-4 py-2 text-xs">
-              <span><span className="font-bold text-bc-text">{s.member}</span> — {capLabel(s.capability)}</span>
+          {activeSpecials.length === 0 && <p className="text-xs text-bc-text-secondary italic">Aucune autorisation spéciale.</p>}
+          {activeSpecials.map(s => (
+            <div key={s.id} className="flex items-center justify-between bg-bc-canvas/40 border border-bc-border rounded-full px-4 py-2 text-xs">
+              <span><span className="font-bold text-bc-text">{memberName(s.memberId)}</span> — {capLabel(s.capability)}{s.branchId ? '' : ' · toutes branches'}</span>
               {canEditGov && (
-                <button onClick={() => setSpecials(prev => prev.filter((_, j) => j !== i))} className="text-bc-text-secondary hover:text-bc-danger active-scale">
-                  <X size={14} />
-                </button>
+                <button onClick={() => removeSpecial(s.id)} className="text-bc-text-secondary hover:text-bc-danger active-scale"><X size={14} /></button>
               )}
             </div>
           ))}
