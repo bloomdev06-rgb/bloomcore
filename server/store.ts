@@ -159,10 +159,63 @@ export async function consumeToken(token: string, now: number): Promise<{ member
   return { memberId: row.memberId, purpose: row.purpose };
 }
 
+// --- Tables auxiliaires : sync_ops / webhook_events / outbox (Prisma async, miroir de db.ts) ---
+const isUniqueViolation = (e: unknown): boolean => (e as { code?: string })?.code === 'P2002';
+
+export async function syncOpSeen(opId: string): Promise<boolean> {
+  return !!(await prisma.syncOp.findUnique({ where: { opId } }));
+}
+export async function markSyncOp(opId: string, appliedAt: string): Promise<void> {
+  try {
+    await prisma.syncOp.create({ data: { opId, appliedAt } });
+  } catch (e) {
+    if (!isUniqueViolation(e)) throw e; // déjà marqué (idempotent)
+  }
+}
+
+export async function insertWebhookEvent(source: string, receivedAt: string, payload: string, signature: string): Promise<{ id: number; inserted: boolean }> {
+  try {
+    const row = await prisma.webhookEvent.create({ data: { source, receivedAt, payload, signature } });
+    return { id: row.id, inserted: true };
+  } catch (e) {
+    if (isUniqueViolation(e)) return { id: 0, inserted: false }; // rejeu : signature déjà vue
+    throw e;
+  }
+}
+export async function markWebhookProcessed(id: number): Promise<void> {
+  await prisma.webhookEvent.update({ where: { id }, data: { processed: true } });
+}
+
+export async function insertOutboxIfAbsent(
+  dedupeKey: string, channel: string, recipient: string, subject: string, body: string, status: string, createdAt: string,
+): Promise<{ inserted: boolean }> {
+  try {
+    await prisma.outbox.create({ data: { dedupeKey, channel, recipient, subject, body, status, createdAt } });
+    return { inserted: true };
+  } catch (e) {
+    if (isUniqueViolation(e)) return { inserted: false }; // dedupe_key déjà présent
+    throw e;
+  }
+}
+export async function listPendingOutbox(limit: number): Promise<{ id: number; channel: string; recipient: string; subject: string; body: string }[]> {
+  return prisma.outbox.findMany({
+    where: { status: 'pending' },
+    orderBy: { id: 'asc' },
+    take: limit,
+    select: { id: true, channel: true, recipient: true, subject: true, body: true },
+  });
+}
+export async function markOutboxSent(id: number, sentAt: string): Promise<void> {
+  await prisma.outbox.update({ where: { id }, data: { status: 'sent', sentAt } });
+}
+export async function markOutboxFailed(id: number, error: string): Promise<void> {
+  await prisma.outbox.update({ where: { id }, data: { status: 'failed', error } });
+}
+
 // One-shot migration from the old SQLite blob store into Postgres. Canonicalizes
 // every item (M5 snake_case) at the boundary. Replaces target collections via
 // setCollection → idempotent for a fresh/rerun target.
-export async function migrateFromSqlite(sqlitePath: string): Promise<{ collections: Record<string, number>; kv: string[]; credentials: number; tokens: number }> {
+export async function migrateFromSqlite(sqlitePath: string): Promise<{ collections: Record<string, number>; kv: string[]; credentials: number; tokens: number; syncOps: number; webhooks: number; outbox: number }> {
   const sdb = new DatabaseSync(sqlitePath);
   try {
     const collections: Record<string, number> = {};
@@ -200,7 +253,19 @@ export async function migrateFromSqlite(sqlitePath: string): Promise<{ collectio
         update: {},
       });
     }
-    return { collections, kv, credentials: creds.length, tokens: toks.length };
+    // Tables auxiliaires — copie brute. createMany + skipDuplicates gère les UNIQUE
+    // (op_id / signature / dedupe_key). Les id autoincrémentés sont omis → PG les
+    // réassigne (drainOutbox retrouve les 'pending' par statut, pas par id). Sans ça :
+    // notifications 'pending' perdues, idempotence /sync et anti-rejeu réinitialisés.
+    const syncOps = sdb.prepare('SELECT op_id, applied_at FROM sync_ops').all() as { op_id: string; applied_at: string }[];
+    if (syncOps.length) await prisma.syncOp.createMany({ data: syncOps.map((r) => ({ opId: r.op_id, appliedAt: r.applied_at })), skipDuplicates: true });
+    const webhooks = sdb.prepare('SELECT source, received_at, payload, signature, processed FROM webhook_events').all() as
+      { source: string; received_at: string; payload: string; signature: string | null; processed: number }[];
+    if (webhooks.length) await prisma.webhookEvent.createMany({ data: webhooks.map((r) => ({ source: r.source, receivedAt: r.received_at, payload: r.payload, signature: r.signature, processed: !!r.processed })), skipDuplicates: true });
+    const outbox = sdb.prepare('SELECT dedupe_key, channel, recipient, subject, body, status, created_at, sent_at, error FROM outbox').all() as
+      { dedupe_key: string | null; channel: string; recipient: string; subject: string; body: string; status: string; created_at: string; sent_at: string | null; error: string | null }[];
+    if (outbox.length) await prisma.outbox.createMany({ data: outbox.map((r) => ({ dedupeKey: r.dedupe_key, channel: r.channel, recipient: r.recipient, subject: r.subject, body: r.body, status: r.status, createdAt: r.created_at, sentAt: r.sent_at, error: r.error })), skipDuplicates: true });
+    return { collections, kv, credentials: creds.length, tokens: toks.length, syncOps: syncOps.length, webhooks: webhooks.length, outbox: outbox.length };
   } finally {
     sdb.close();
   }

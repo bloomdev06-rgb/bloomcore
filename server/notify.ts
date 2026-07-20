@@ -3,7 +3,7 @@
 // qui SIMULENT l'envoi (console + outbox) tant que les clés .env sont absentes.
 // Brancher un vrai transport = remplir le corps d'UN adapter, l'interface est figée.
 import { Member, AppNotification, AppSettings, NotifChannels } from '../src/types.ts';
-import { db } from './db.ts';
+import { insertOutboxIfAbsent, listPendingOutbox, markOutboxSent, markOutboxFailed } from './datastore.ts';
 
 type Channel = 'email' | 'sms' | 'whatsapp';
 
@@ -26,16 +26,12 @@ function maskRecipient(to: string): string {
   return to.length > 4 ? `***${to.slice(-4)}` : '***';
 }
 
-function send(channel: Channel, member: Member, subject: string, body: string, dedupeKey: string): void {
+async function send(channel: Channel, member: Member, subject: string, body: string, dedupeKey: string): Promise<void> {
   const to = recipientAddress(channel, member);
   if (!to) return;
   const status = transportConfigured(channel) ? 'pending' : 'simulated';
-  const inserted = db
-    .prepare(
-      'INSERT OR IGNORE INTO outbox (dedupe_key, channel, recipient, subject, body, status, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
-    )
-    .run(dedupeKey, channel, to, subject, body, status, new Date().toISOString());
-  if ((inserted as any).changes > 0 && status === 'simulated') {
+  const { inserted } = await insertOutboxIfAbsent(dedupeKey, channel, to, subject, body, status, new Date().toISOString());
+  if (inserted && status === 'simulated') {
     console.log(`[notify:${channel}→${maskRecipient(to)}] ${subject}`);
   }
   // status 'pending' est consommé par drainOutbox() (appelé par le scheduler).
@@ -83,18 +79,16 @@ async function deliver(channel: Channel, to: string, subject: string, body: stri
 // Worker : draine les lignes outbox 'pending' et tente l'envoi réel. Idempotent
 // (statut → 'sent'/'failed'), appelé périodiquement par le scheduler.
 export async function drainOutbox(limit = 50): Promise<{ sent: number; failed: number }> {
-  const rows = db
-    .prepare("SELECT id, channel, recipient, subject, body FROM outbox WHERE status = 'pending' ORDER BY id LIMIT ?")
-    .all(limit) as any[];
+  const rows = await listPendingOutbox(limit);
   let sent = 0;
   let failed = 0;
   for (const row of rows) {
     try {
-      await deliver(row.channel, row.recipient, row.subject, row.body);
-      db.prepare("UPDATE outbox SET status = 'sent', sent_at = ? WHERE id = ?").run(new Date().toISOString(), row.id);
+      await deliver(row.channel as Channel, row.recipient, row.subject, row.body);
+      await markOutboxSent(row.id, new Date().toISOString());
       sent++;
     } catch (e) {
-      db.prepare("UPDATE outbox SET status = 'failed', error = ? WHERE id = ?").run(String((e as Error).message).slice(0, 300), row.id);
+      await markOutboxFailed(row.id, String((e as Error).message).slice(0, 300));
       failed++;
     }
   }
@@ -116,7 +110,7 @@ function triggerChannelsFor(n: AppNotification, settings: AppSettings | null): N
 // Destinataires : targetMemberId si présent, sinon les membres de la branche.
 // Canaux = canaux du déclencheur ∩ préférences du membre (Mon Profil).
 // dedupe_key = notifId:channel:memberId → idempotent (restart, re-PUT, scheduler).
-export function dispatch(newNotifs: AppNotification[], members: Member[], settings: AppSettings | null): void {
+export async function dispatch(newNotifs: AppNotification[], members: Member[], settings: AppSettings | null): Promise<void> {
   for (const n of newNotifs) {
     const recipients = n.targetMemberId
       ? members.filter((m) => m.id === n.targetMemberId)
@@ -126,7 +120,7 @@ export function dispatch(newNotifs: AppNotification[], members: Member[], settin
       const prefs = m.notifChannels ?? DEFAULT_CHANNELS;
       for (const channel of ['email', 'sms', 'whatsapp'] as Channel[]) {
         if (triggerChannels[channel] && prefs[channel]) {
-          send(channel, m, n.title, n.message, `${n.id}:${channel}:${m.id}`);
+          await send(channel, m, n.title, n.message, `${n.id}:${channel}:${m.id}`);
         }
       }
     }

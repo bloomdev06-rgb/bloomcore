@@ -11,8 +11,7 @@ import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import express from 'express';
 import compression from 'compression';
-import { db } from './db.ts';
-import { getCollection, setCollection, appendToCollection, getKv, setKv, getCredential } from './datastore.ts';
+import { getCollection, setCollection, appendToCollection, getKv, setKv, getCredential, syncOpSeen, markSyncOp, insertWebhookEvent, markWebhookProcessed } from './datastore.ts';
 import { hashPassword, verifyPassword, signToken, verifyToken, createOneTimeToken, consumeOneTimeToken, upsertCredentials, requireSecret, usingInsecureSecret, resolveBindHost } from './auth.ts';
 import { ensureSeeded } from './seed.ts';
 import { runBootMigration } from './bootMigrate.ts';
@@ -160,7 +159,7 @@ const isProd = IS_PROD;
 async function issueAuthLink(member: any, purpose: 'activate' | 'reset'): Promise<string> {
   const token = await createOneTimeToken(member.id, purpose);
   const label = purpose === 'activate' ? 'Activation de votre compte BloomCore' : 'Réinitialisation de votre mot de passe BloomCore';
-  dispatch(
+  await dispatch(
     [{
       id: `notif_auth_${purpose}_${member.id}_${Date.now()}`,
       timestamp: new Date().toISOString(),
@@ -311,7 +310,7 @@ app.put('/api/v1/:name', requireAuth, async (req, res) => {
       // Fan-out multicanal des notifications nouvellement créées (in-app déjà
       // réel côté client ; email/SMS/WhatsApp via adapters, simulés sans clés).
       if (name === 'notifications' && added.length) {
-        dispatch(added, await readCollection('members'), await getKv('settings'));
+        await dispatch(added, await readCollection('members'), await getKv('settings'));
         poke(); // cloche/alertes en direct (§7)
       }
       // Spec : "compte créé à l'enrôlement, le membre définit son mot de passe
@@ -343,15 +342,13 @@ app.post('/api/v1/sync/batch', requireAuth, async (req, res) => {
   const skipped: string[] = [];
   const errors: { opId: string; error: string }[] = [];
   const conflicts: string[] = [];
-  const seen = db.prepare('SELECT 1 FROM sync_ops WHERE op_id = ?');
-  const mark = db.prepare('INSERT INTO sync_ops (op_id, applied_at) VALUES (?, ?)');
   for (const op of ops) {
     const { opId, name, value, asOf } = op ?? {};
     if (!opId || !name) {
       errors.push({ opId: String(opId ?? '?'), error: 'opId et name requis' });
       continue;
     }
-    if (seen.get(opId)) {
+    if (await syncOpSeen(opId)) {
       skipped.push(opId);
       continue;
     }
@@ -368,7 +365,7 @@ app.post('/api/v1/sync/batch', requireAuth, async (req, res) => {
       } else {
         throw new GuardError(404, 'unknown collection');
       }
-      mark.run(opId, new Date().toISOString());
+      await markSyncOp(opId, new Date().toISOString());
       applied.push(opId);
     } catch (e) {
       // Une op en erreur n'avorte pas le batch — le client garde sa file pour elle.
@@ -401,15 +398,13 @@ app.post('/api/v1/webhooks/academy', async (req, res) => {
   }
   // S6 — anti-rejeu : la signature est déterministe (payload+ts) et infalsifiable sans le
   // secret. La colonne UNIQUE rejette tout rejeu dans (ou hors de) la fenêtre de 5 min.
-  const ins = db.prepare('INSERT OR IGNORE INTO webhook_events (source, received_at, payload, signature) VALUES (?, ?, ?, ?)').run(
-    'academy', new Date().toISOString(), raw.toString('utf8'), expected,
-  );
-  if ((ins as any).changes === 0) return res.status(409).json({ error: 'événement déjà reçu (rejeu)' });
+  const ins = await insertWebhookEvent('academy', new Date().toISOString(), raw.toString('utf8'), expected);
+  if (!ins.inserted) return res.status(409).json({ error: 'événement déjà reçu (rejeu)' });
   // Traitement : consomme le payload puis marque processed=1. En cas d'échec, on laisse
   // processed=0 pour inspection/rejeu manuel (la ligne est déjà stockée, pas re-signable).
   try {
     await processAcademyEvent(JSON.parse(raw.toString('utf8')));
-    db.prepare('UPDATE webhook_events SET processed = 1 WHERE id = ?').run((ins as any).lastInsertRowid);
+    await markWebhookProcessed(ins.id);
   } catch (e) {
     console.error('[webhook] traitement échoué (payload conservé):', (e as Error).message);
   }

@@ -29,7 +29,7 @@ export async function runSweep(now: Date = new Date()): Promise<number> {
   const fresh = derived.filter((n) => !existing.has(n.id));
   if (fresh.length) {
     await appendToCollection('notifications', fresh);
-    dispatch(fresh, members, settings);
+    await dispatch(fresh, members, settings);
     poke(); // alertes d'intégration en direct (§7) — sinon visibles au prochain bootstrap
   }
   return fresh.length;

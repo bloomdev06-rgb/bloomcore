@@ -196,3 +196,44 @@ export function consumeToken(token: string, now: number): { memberId: string; pu
   db.prepare('UPDATE tokens SET used_at = ? WHERE token = ?').run(now, token);
   return { memberId: row.member_id, purpose: row.purpose };
 }
+
+// --- Tables auxiliaires : sync_ops / webhook_events / outbox (backend SQLite sync) ---
+
+// sync_ops — idempotence de la file offline (/sync/batch).
+export function syncOpSeen(opId: string): boolean {
+  return !!db.prepare('SELECT 1 FROM sync_ops WHERE op_id = ?').get(opId);
+}
+export function markSyncOp(opId: string, appliedAt: string): void {
+  db.prepare('INSERT OR IGNORE INTO sync_ops (op_id, applied_at) VALUES (?, ?)').run(opId, appliedAt);
+}
+
+// webhook_events — anti-rejeu (signature UNIQUE) + stockage payload.
+export function insertWebhookEvent(source: string, receivedAt: string, payload: string, signature: string): { id: number; inserted: boolean } {
+  const res = db.prepare('INSERT OR IGNORE INTO webhook_events (source, received_at, payload, signature) VALUES (?, ?, ?, ?)').run(
+    source, receivedAt, payload, signature,
+  );
+  return { id: Number(res.lastInsertRowid), inserted: res.changes > 0 };
+}
+export function markWebhookProcessed(id: number): void {
+  db.prepare('UPDATE webhook_events SET processed = 1 WHERE id = ?').run(id);
+}
+
+// outbox — file de notifications hors-app (dedupe_key UNIQUE).
+export type OutboxRow = { id: number; channel: string; recipient: string; subject: string; body: string };
+export function insertOutboxIfAbsent(
+  dedupeKey: string, channel: string, recipient: string, subject: string, body: string, status: string, createdAt: string,
+): { inserted: boolean } {
+  const res = db.prepare(
+    'INSERT OR IGNORE INTO outbox (dedupe_key, channel, recipient, subject, body, status, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
+  ).run(dedupeKey, channel, recipient, subject, body, status, createdAt);
+  return { inserted: res.changes > 0 };
+}
+export function listPendingOutbox(limit: number): OutboxRow[] {
+  return db.prepare("SELECT id, channel, recipient, subject, body FROM outbox WHERE status = 'pending' ORDER BY id LIMIT ?").all(limit) as OutboxRow[];
+}
+export function markOutboxSent(id: number, sentAt: string): void {
+  db.prepare("UPDATE outbox SET status = 'sent', sent_at = ? WHERE id = ?").run(sentAt, id);
+}
+export function markOutboxFailed(id: number, error: string): void {
+  db.prepare("UPDATE outbox SET status = 'failed', error = ? WHERE id = ?").run(error, id);
+}

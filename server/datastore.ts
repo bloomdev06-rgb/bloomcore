@@ -20,6 +20,14 @@ import {
   countCredentials as dbCountCredentials,
   insertToken as dbInsertToken,
   consumeToken as dbConsumeToken,
+  syncOpSeen as dbSyncOpSeen,
+  markSyncOp as dbMarkSyncOp,
+  insertWebhookEvent as dbInsertWebhookEvent,
+  markWebhookProcessed as dbMarkWebhookProcessed,
+  insertOutboxIfAbsent as dbInsertOutboxIfAbsent,
+  listPendingOutbox as dbListPendingOutbox,
+  markOutboxSent as dbMarkOutboxSent,
+  markOutboxFailed as dbMarkOutboxFailed,
 } from './db.ts';
 
 export const usePostgres = !!process.env.DATABASE_URL;
@@ -90,4 +98,49 @@ export async function insertToken(token: string, memberId: string, purpose: stri
 export async function consumeToken(token: string, now: number): Promise<{ memberId: string; purpose: string } | null> {
   const b = await backend();
   return b ? b.consumeToken(token, now) : dbConsumeToken(token, now);
+}
+
+// --- Tables auxiliaires : sync_ops / webhook_events / outbox ---
+export async function syncOpSeen(opId: string): Promise<boolean> {
+  const b = await backend();
+  return b ? b.syncOpSeen(opId) : dbSyncOpSeen(opId);
+}
+
+export async function markSyncOp(opId: string, appliedAt: string): Promise<void> {
+  const b = await backend();
+  return b ? b.markSyncOp(opId, appliedAt) : dbMarkSyncOp(opId, appliedAt);
+}
+
+export async function insertWebhookEvent(source: string, receivedAt: string, payload: string, signature: string): Promise<{ id: number; inserted: boolean }> {
+  const b = await backend();
+  return b ? b.insertWebhookEvent(source, receivedAt, payload, signature) : dbInsertWebhookEvent(source, receivedAt, payload, signature);
+}
+
+export async function markWebhookProcessed(id: number): Promise<void> {
+  const b = await backend();
+  return b ? b.markWebhookProcessed(id) : dbMarkWebhookProcessed(id);
+}
+
+export async function insertOutboxIfAbsent(
+  dedupeKey: string, channel: string, recipient: string, subject: string, body: string, status: string, createdAt: string,
+): Promise<{ inserted: boolean }> {
+  const b = await backend();
+  return b
+    ? b.insertOutboxIfAbsent(dedupeKey, channel, recipient, subject, body, status, createdAt)
+    : dbInsertOutboxIfAbsent(dedupeKey, channel, recipient, subject, body, status, createdAt);
+}
+
+export async function listPendingOutbox(limit: number): Promise<{ id: number; channel: string; recipient: string; subject: string; body: string }[]> {
+  const b = await backend();
+  return b ? b.listPendingOutbox(limit) : dbListPendingOutbox(limit);
+}
+
+export async function markOutboxSent(id: number, sentAt: string): Promise<void> {
+  const b = await backend();
+  return b ? b.markOutboxSent(id, sentAt) : dbMarkOutboxSent(id, sentAt);
+}
+
+export async function markOutboxFailed(id: number, error: string): Promise<void> {
+  const b = await backend();
+  return b ? b.markOutboxFailed(id, error) : dbMarkOutboxFailed(id, error);
 }
