@@ -5,7 +5,7 @@ import { useDepartments, useBusLines, useProjects, load, resolveCapability, labe
 import { DEFAULT_OPERATOR_NAME } from '../data/operator';
 import { isRed } from '../data/kpi';
 import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend } from 'recharts';
-import { X, Edit, Phone, Mail, Compass, ShieldAlert, Activity, User, Briefcase, Calendar, MapPin, Database, ArrowRight, Clock, CheckCircle2, Coins } from 'lucide-react';
+import { X, Edit, Phone, Mail, Compass, ShieldAlert, Activity, User, Briefcase, Calendar, MapPin, Database, ArrowRight, ArrowUpCircle, Clock, CheckCircle2, Coins } from 'lucide-react';
 import { HealthSmiley } from './ui/HealthSmiley';
 import { Avatar } from './ui/Avatar';
 import { PhotoLightbox } from './ui/PhotoLightbox';
@@ -50,6 +50,17 @@ interface Member360ViewProps {
 
 export default function Member360View({ member, onClose, onEdit, onUpdate, reports = [], onAddReport, simulatedRole, audits = [], operator, permissionMatrix, forms = [] }: Member360ViewProps) {
   const canManage = ['Pasteur Principal', 'Pasteur', 'Ministre', 'Responsable', 'Coach', 'Admin', 'Super Admin'].includes(simulatedRole);
+
+  // §6.2 — progression du niveau communautaire (nouveau→stagiaire→boss→leader→coach).
+  const levelIdx = COMMUNITY_LEVELS.indexOf(member.level);
+  const nextLevel = onUpdate && levelIdx >= 0 && levelIdx < COMMUNITY_LEVELS.length - 1 ? COMMUNITY_LEVELS[levelIdx + 1] : null;
+  const promoteLevel = () => {
+    if (!nextLevel) return;
+    const updated = { ...member, level: nextLevel as Member['level'], ...(nextLevel === 'boss' ? { hasPassedToBossForm: true } : {}) };
+    onUpdate?.(updated);
+    // §6.3 — le passage au niveau Boss lève la fiche membre complète (édition pré-remplie).
+    if (nextLevel === 'boss') onEdit(updated);
+  };
   // P1.4 — dept_bapteme's step labels read live from FormBuilder's fd_bapteme FormDef when
   // present, falling back to the static PARCOURS_STEPS catalog otherwise.
   const baptemeForm = forms.find((f) => f.id === 'fd_bapteme');
@@ -432,7 +443,17 @@ export default function Member360View({ member, onClose, onEdit, onUpdate, repor
               {activeTab === 'evolution' && (
                 <div className="space-y-6 max-w-2xl">
                   <div className="bg-white p-6 rounded-2xl border border-bc-border shadow-sm">
-                    <h4 className="font-ui font-bold text-bc-text mb-4">Niveau Communautaire</h4>
+                    <div className="flex items-center justify-between mb-4">
+                      <h4 className="font-ui font-bold text-bc-text">Niveau Communautaire</h4>
+                      {canManage && nextLevel && (
+                        <button
+                          onClick={promoteLevel}
+                          className="px-3 py-1.5 bg-bc-green text-white rounded-full text-xs font-ui font-bold hover:opacity-90 active-scale flex items-center gap-1.5"
+                        >
+                          <ArrowUpCircle size={14} /> Promouvoir → {labelFor(nextLevel)}
+                        </button>
+                      )}
+                    </div>
                     <Stepper steps={COMMUNITY_LEVELS} current={member.level} />
                   </div>
 
