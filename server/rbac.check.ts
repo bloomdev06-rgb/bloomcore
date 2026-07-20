@@ -254,4 +254,40 @@ assert.deepEqual(
   );
 }
 
+// --- §13.2 — confidentialité des champs de santé : masquage lecture + repinçage écriture
+//     + application SERVEUR de la matrice dynamique (révocation par override) ---
+{
+  await applyWrite('members', [superAdmin, pasteur, ministre, resp, simple,
+    baseMember({ id: 'm6', departments: { d1: 'membre' }, healthKPIs: { spirituel: 3, social: 3, financier: 7, physique: 3, presenceCulte: 4, presenceService: 4 } }),
+    baseMember({ id: 'm8', departments: { d1: 'Coach' } })]);
+  // Responsable a la cap finances, Coach non ; présence accordée aux deux.
+  setKv('permissions', {
+    view_members: { Responsable: true, Coach: true },
+    consulter_situation_financiere: { Responsable: true },
+    consulter_historique_presence: { Responsable: true, Coach: true },
+    inscrire_formations_certifications: { Responsable: true },
+  });
+  const readM6 = async (mid: string) =>
+    (await filterReadable('members', (await buildContext(mid))!, await readCollection('members'))).find((m: any) => m.id === 'm6');
+  assert.equal((await readM6('m4')).healthKPIs.financier, 7, 'Responsable avec cap : financier visible');
+  const coachM6 = await readM6('m8');
+  assert.equal(coachM6.healthKPIs.financier, undefined, 'Coach sans cap : financier MASQUÉ (§13.2)');
+  assert.equal(coachM6.healthKPIs.presenceCulte, 4, 'Coach avec cap présence : présence visible');
+
+  // Repinçage écriture : le Coach met financier=99 sur m6 → restauré à la valeur stockée (7).
+  const tampered = { ...(await readCollection('members')).find((m: any) => m.id === 'm6'), healthKPIs: { spirituel: 3, social: 3, financier: 99, physique: 3, presenceCulte: 4, presenceService: 4 } };
+  await assertCanWrite('members', (await buildContext('m8'))!, [baseMember({ id: 'm8', departments: { d1: 'Coach' } }), tampered]);
+  assert.equal(tampered.healthKPIs.financier, 7, 'financier repincé à la valeur stockée (Coach sans cap) — ni effacement ni falsification');
+
+  // Matrice dynamique enforced serveur : un override qui RÉVOQUE la cap certifs bloque l'écriture.
+  await assertCanWrite('certifications', (await buildContext('m4'))!, [{ id: 'cert_ok', memberId: 'm6' }]); // cap présente → OK
+  await applyWrite('capability_overrides', [{ id: 'ovr_cert', subjectType: 'function', subjectValue: 'responsable', branchId: 'church', capability: 'inscrire_formations_certifications', enabled: false }]);
+  const ctxM4 = (await buildContext('m4'))!;
+  await assert.rejects(
+    () => assertCanWrite('certifications', ctxM4, [{ id: 'cert_ko', memberId: 'm6' }]),
+    (e: any) => e instanceof GuardError && e.status === 403,
+    'override de révocation appliqué côté serveur (avant : ignoré, cap UI-only)',
+  );
+}
+
 console.log('rbac.check OK');

@@ -2,8 +2,8 @@
 // qui n'est qu'un commutateur de démo côté client). Réutilise les modules purs
 // du frontend (permissions.ts, scope.ts) pour que client et serveur ne puissent
 // pas diverger sur la sémantique des capacités et du scope.
-import { Member, Ministry, PermissionMatrix, Delegation, AdminAccount, Department, BloomBusEntity, SpecialAuthorization } from '../src/types.ts';
-import { hasCapability } from '../src/data/permissions.ts';
+import { Member, Ministry, PermissionMatrix, Delegation, AdminAccount, Department, BloomBusEntity, SpecialAuthorization, CapabilityOverride } from '../src/types.ts';
+import { resolveCapability } from '../src/data/permissions.ts';
 import { inMemberScope, canFillReportFor, bloomBusRoleOf, MULTI_BRANCH_ROLES } from '../src/data/scope.ts';
 import { isBusReportLocked } from '../src/data/reportLock.ts';
 import { getKv } from './datastore.ts';
@@ -67,12 +67,28 @@ export async function buildContext(memberId: string): Promise<RbacContext | null
 
 const hasAny = (roles: string[], allowed: string[]) => roles.some((r) => allowed.includes(r));
 
-// Capacité accordée si N'IMPORTE LEQUEL des rôles résolus la détient dans la
-// matrice live (kv permissions), ou via une délégation ciblant l'opérateur.
+// Capacité accordée si N'IMPORTE LEQUEL des rôles résolus la détient — via `resolveCapability`
+// (matrice live ⊕ CapabilityOverride ⊕ SpecialAuthorization ⊕ délégation), la MÊME logique que
+// le client. Sans règle dynamique, identique à hasCapability ; avec, les RÉVOCATIONS de la
+// matrice dynamique sont désormais appliquées côté serveur (avant : seulement en UI, cf. audit).
 async function hasCapAnyRole(ctx: RbacContext, capability: string): Promise<boolean> {
   const matrix = (await getKv('permissions') ?? {}) as PermissionMatrix;
   const delegations = await readCollection('delegations') as Delegation[];
-  return ctx.roles.some((role) => hasCapability(matrix, capability, role, ctx.member.id, delegations));
+  const overrides = await readCollection('capability_overrides') as CapabilityOverride[];
+  const specialAuths = await readCollection('special_authorizations') as SpecialAuthorization[];
+  return ctx.roles.some((role) =>
+    resolveCapability(matrix, capability, ctx.member, role, delegations, overrides, specialAuths),
+  );
+}
+
+// §13.2 — champs de santé confidentiels de la fiche membre, gardés par capacité (miroir exact
+// de Member360View). Un opérateur qui ne détient pas la capacité ne les voit ni ne les écrit
+// (masquage lecture + repinçage écriture). Retourne la liste des champs healthKPIs à protéger.
+async function protectedHealthFields(ctx: RbacContext): Promise<string[]> {
+  const blocked: string[] = [];
+  if (!(await hasCapAnyRole(ctx, 'consulter_situation_financiere'))) blocked.push('financier');
+  if (!(await hasCapAnyRole(ctx, 'consulter_historique_presence'))) blocked.push('presenceCulte', 'presenceService');
+  return blocked;
 }
 
 // Items ajoutés ou modifiés par rapport au stocké (le scoping ne s'applique
@@ -151,9 +167,12 @@ export async function assertCanWrite(name: string, ctx: RbacContext, incoming: a
 
     case 'delegations': {
       if (!hasAny(roles, STAFF_ROLES)) throw new GuardError(403, 'delegations: réservé aux Responsables et plus');
-      // Interdiction spec (§11.3) : le rapport spirituel Bloom Bus n'est jamais délégable.
-      if (incoming.some((d: Delegation) => d.right === 'rapport_bloom_bus_member')) {
-        throw new GuardError(400, 'delegations: rapport_bloom_bus_member est interdit de délégation');
+      // Interdiction spec (§11.3) : le rapport spirituel n'est jamais délégable. On bloque les DEUX
+      // clés (l'ancienne `rapport_bloom_bus_member` ET `consulter_rapports_de_vie`, celle exclue des
+      // DELEGABLE_CAPS de l'UI) pour que le garde serveur reflète exactement la règle métier.
+      const NON_DELEGABLE = new Set(['rapport_bloom_bus_member', 'consulter_rapports_de_vie']);
+      if (incoming.some((d: Delegation) => NON_DELEGABLE.has(d.right))) {
+        throw new GuardError(400, 'delegations: le rapport spirituel/de vie n\'est jamais délégable');
       }
       return;
     }
@@ -183,7 +202,8 @@ export async function assertCanWrite(name: string, ctx: RbacContext, incoming: a
       // en modifiant les champs privilégiés de SA PROPRE fiche (`departments` alimente
       // resolveRoles → escalade de rôle). Les responsables gèrent bien ces champs sur les
       // AUTRES membres (target.id ≠ self, non bloqué ici) — jamais sur eux-mêmes.
-      const selfBefore = (await readCollection(name, true)).find((s: any) => String(s.id) === String(member.id));
+      const storedById = new Map((await readCollection(name, true)).map((s: any) => [String(s.id), s]));
+      const selfBefore = storedById.get(String(member.id));
       if (selfBefore) {
         for (const item of await touchedItems(name, incoming)) {
           if (String(item.id) !== String(member.id)) continue;
@@ -192,6 +212,20 @@ export async function assertCanWrite(name: string, ctx: RbacContext, incoming: a
               throw new GuardError(403, `members: champ privilégié '${f}' non modifiable sur votre propre fiche`);
             }
           }
+        }
+      }
+      // §13.2 — repinçage symétrique du masquage lecture : un opérateur qui ne VOIT pas les champs
+      // de santé confidentiels (financier/présence, selon sa capacité) ne peut pas les ÉCRIRE. On
+      // restaure la valeur stockée sur chaque membre existant modifié → un PUT (whole-array ou
+      // delta) d'un opérateur qui les a reçus masqués ne peut ni les effacer ni les falsifier.
+      // (full-scope est déjà sorti plus haut ; ne concerne donc que l'encadrement intermédiaire.)
+      const blockedFields = await protectedHealthFields(ctx);
+      if (blockedFields.length) {
+        for (const item of await touchedItems(name, incoming)) {
+          const stored = storedById.get(String((item as any).id));
+          if (!stored) continue; // création : aucune valeur antérieure à préserver
+          (item as any).healthKPIs = { ...((item as any).healthKPIs ?? {}) };
+          for (const f of blockedFields) (item as any).healthKPIs[f] = stored.healthKPIs?.[f];
         }
       }
       return;
@@ -267,8 +301,15 @@ export async function assertCanWrite(name: string, ctx: RbacContext, incoming: a
       return;
     }
 
-    case 'integration_reports':
     case 'certifications':
+      // §10 — inscription formations/certifications réservée aux habilités par la capacité
+      // (par défaut Responsable+ ; PAS Coach). Enforce la capacité fine (avant : UI seule).
+      if (!(await hasCapAnyRole(ctx, 'inscrire_formations_certifications'))) {
+        throw new GuardError(403, 'certifications: capacité inscrire_formations_certifications requise');
+      }
+      return;
+
+    case 'integration_reports':
     case 'projects':
     case 'bus_lines':
       // Données opérationnelles (projets, lignes Bloom Bus) — écriture réservée à l'encadrement.
@@ -365,17 +406,29 @@ export async function filterReadable(name: string, ctx: RbacContext, items: any[
 
     case 'members': {
       if (fullScope) return items;
+      // §13.2 — masque les champs de santé confidentiels non autorisés (financier/présence) sur
+      // CHAQUE fiche renvoyée. Symétrique du repinçage en écriture (assertCanWrite members) : ce
+      // qu'un opérateur ne voit pas, il ne peut pas l'écrire. (full-scope voit tout, sorti ci-dessus.)
+      const blocked = await protectedHealthFields(ctx);
+      const mask = (m: any) => {
+        if (!blocked.length) return m;
+        const hk = { ...(m.healthKPIs ?? {}) };
+        for (const f of blocked) delete hk[f];
+        return { ...m, healthKPIs: hk };
+      };
       const scopeEntry = SCOPE_ROLE_ORDER.find(([r]) => roles.includes(r));
       // Aucun rôle de périmètre (simple membre) : inMemberScope fait du fail-open,
       // donc on court-circuite ici — il ne voit que sa propre fiche.
-      if (!scopeEntry) return items.filter((m) => m.id === member.id);
+      if (!scopeEntry) return items.filter((m) => m.id === member.id).map(mask);
       const departments = await readCollection('departments') as Department[];
       const ministries = await readCollection('ministries') as Ministry[];
       const busLines = await readCollection('bus_lines') as BloomBusEntity[];
-      return items.filter((m) =>
-        m.id === member.id ||
-        inMemberScope(member, m as Member, scopeEntry[1], busLines, departments, ministries),
-      );
+      return items
+        .filter((m) =>
+          m.id === member.id ||
+          inMemberScope(member, m as Member, scopeEntry[1], busLines, departments, ministries),
+        )
+        .map(mask);
     }
 
     case 'admins':
