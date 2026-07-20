@@ -331,7 +331,7 @@ export default function Member360View({ member, onClose, onEdit, onUpdate, repor
                       </div>
                       <p className="text-sm font-bold text-bc-text">{member.firstName} {member.lastName}</p>
                       <p className="text-xs text-bc-text-secondary mt-1">Né(e) le: {member.birthDate}</p>
-                      <p className="text-xs text-bc-text-secondary">Sexe: {member.gender === 'H' ? 'Homme' : 'Femme'} <span className="mx-1">•</span> Nationalité: Ivoirienne</p>
+                      <p className="text-xs text-bc-text-secondary">Sexe: {member.gender === 'H' ? 'Homme' : 'Femme'} <span className="mx-1">•</span> Nationalité: {member.nationality || 'Non renseignée'}</p>
                     </div>
 
                     <div className="bg-white p-4 rounded-2xl border border-bc-border shadow-sm">
@@ -363,7 +363,7 @@ export default function Member360View({ member, onClose, onEdit, onUpdate, repor
                         </div>
                         <div>
                           <p className="text-xs text-bc-text-secondary">Contact d'urgence</p>
-                          <p className="font-bold text-bc-danger">01 02 03 04 05</p>
+                          <p className="font-bold text-bc-danger">{member.emergencyContact || member.phoneParent || 'Non renseigné'}</p>
                         </div>
                       </div>
                     </div>
@@ -380,7 +380,7 @@ export default function Member360View({ member, onClose, onEdit, onUpdate, repor
                         </div>
                         <div>
                           <p className="text-xs text-bc-text-secondary">Quartier</p>
-                          <p className="font-bold text-bc-text">Riviera Palmeraie</p>
+                          <p className="font-bold text-bc-text">{member.neighborhood || member.gps?.commune || 'Non renseigné'}</p>
                         </div>
                         <div>
                           <p className="text-xs text-bc-text-secondary">Coordonnées GPS</p>

@@ -14,7 +14,9 @@ interface FormationsViewProps {
   permissionMatrix: PermissionMatrix;
 }
 
-interface Certification { id: string; memberId: string; memberName: string; formation: string; date: string }
+// Deux sources : saisie manuelle ({memberName, formation, date}) et École Bloom via webhook
+// ({courseTitle, certifiedAt, source:'ecole_bloom', level}). `norm` réconcilie les deux formes.
+interface Certification { id: string; memberId: string; memberName?: string; formation?: string; date?: string; courseTitle?: string; certifiedAt?: string; source?: string; level?: string }
 
 const FORMATIONS = [
   "Fondements de la foi (Eden 0)",
@@ -34,7 +36,18 @@ export default function FormationsView({ members = [], activeBranch, simulatedRo
   useEffect(() => { save('bc_certifications', certs); }, [certs]);
 
   const scoped = members.filter(m => activeBranch === 'global' || m.branch === activeBranch);
-  const countFor = (f: string) => certs.filter(c => c.formation === f).length;
+  // Réconcilie les 2 formes (manuelle / École Bloom) vers une vue d'affichage unique.
+  const norm = (c: Certification) => {
+    const m = members.find(x => x.id === c.memberId);
+    return {
+      ...c,
+      formation: c.formation ?? c.courseTitle ?? 'Formation',
+      memberName: c.memberName ?? (m ? `${m.firstName} ${m.lastName}` : '—'),
+      date: c.date ?? c.certifiedAt ?? '',
+      source: c.source ?? 'manuel',
+    };
+  };
+  const countFor = (f: string) => certs.filter(c => (c.formation ?? c.courseTitle) === f).length;
 
   const addCertification = () => {
     const m = members.find(x => x.id === memberId);
@@ -96,7 +109,7 @@ export default function FormationsView({ members = [], activeBranch, simulatedRo
           </p>
         ) : (
           <div className="divide-y divide-bc-border max-h-80 overflow-y-auto">
-            {certs.map(c => (
+            {certs.map(norm).map(c => (
               <div key={c.id} className="py-3 flex items-center justify-between">
                 <div className="flex items-center gap-3">
                   <div className="w-8 h-8 rounded-full bg-[color:var(--accent-2)]/20 flex items-center justify-center">
@@ -104,7 +117,10 @@ export default function FormationsView({ members = [], activeBranch, simulatedRo
                   </div>
                   <div>
                     <p className="text-sm font-bold text-bc-text">{c.memberName}</p>
-                    <p className="text-[10px] text-bc-text-secondary">{c.formation}</p>
+                    <p className="text-[10px] text-bc-text-secondary">
+                      {c.formation}
+                      {c.source === 'ecole_bloom' && <span className="ml-1.5 text-bc-green font-bold">· École Bloom</span>}
+                    </p>
                   </div>
                 </div>
                 <span className="text-[10px] text-bc-text-secondary font-bold">{c.date}</span>
@@ -128,7 +144,7 @@ export default function FormationsView({ members = [], activeBranch, simulatedRo
               </span>
             </div>
             <p className="text-xs text-bc-text-secondary mt-1">
-              La synchronisation automatique avec l'école externe (webhook, certificats importés) arrive en Phase 2 (Abidjan, découplage). D'ici là, la saisie manuelle ci-dessus fait foi.
+              Les certificats poussés par l'École Bloom (webhook) apparaissent déjà dans la liste ci-dessus (badge « École Bloom »). La synchronisation complète bidirectionnelle (portail, réconciliation) arrive en Phase 2. D'ici là, la saisie manuelle fait foi.
             </p>
           </div>
         </div>

@@ -71,6 +71,9 @@ export default function MemberFormModal({
   const [lastName, setLastName] = useState("");
   const [phone, setPhone] = useState("");
   const [phoneParent, setPhoneParent] = useState("");
+  const [emergencyContact, setEmergencyContact] = useState("");
+  const [nationality, setNationality] = useState("");
+  const [neighborhood, setNeighborhood] = useState("");
   const [email, setEmail] = useState("");
   const [gender, setGender] = useState<"H" | "F">("H");
   const [birthDate, setBirthDate] = useState("");
@@ -107,6 +110,9 @@ export default function MemberFormModal({
       setLastName(member.lastName);
       setPhone(member.phone);
       setPhoneParent(member.phoneParent || "");
+      setEmergencyContact(member.emergencyContact || "");
+      setNationality(member.nationality || "");
+      setNeighborhood(member.neighborhood || "");
       setEmail(member.email || "");
       setGender(member.gender);
       setBirthDate(member.birthDate);
@@ -272,6 +278,9 @@ export default function MemberFormModal({
         lastName,
         phone,
         phoneParent,
+        emergencyContact: emergencyContact || undefined,
+        nationality: nationality || undefined,
+        neighborhood: neighborhood || undefined,
         email,
         gender,
         birthDate,
@@ -297,6 +306,9 @@ export default function MemberFormModal({
         lastName,
         phone,
         phoneParent,
+        emergencyContact: emergencyContact || undefined,
+        nationality: nationality || undefined,
+        neighborhood: neighborhood || undefined,
         email,
         gender,
         birthDate,
@@ -420,6 +432,18 @@ export default function MemberFormModal({
                 placeholder="+225..."
                 className="w-full border border-bc-border rounded-full px-3 py-2 text-xs focus:outline-none focus:border-bc-green"
               />
+            </div>
+            <div>
+              <label className="block text-xs font-bold text-bc-text mb-1">Contact d'urgence</label>
+              <input type="text" value={emergencyContact} onChange={(e) => setEmergencyContact(e.target.value)} placeholder="Nom + téléphone" className="w-full border border-bc-border rounded-full px-3 py-2 text-xs focus:outline-none focus:border-bc-green" />
+            </div>
+            <div>
+              <label className="block text-xs font-bold text-bc-text mb-1">Nationalité</label>
+              <input type="text" value={nationality} onChange={(e) => setNationality(e.target.value)} placeholder="Ex. Ivoirienne" className="w-full border border-bc-border rounded-full px-3 py-2 text-xs focus:outline-none focus:border-bc-green" />
+            </div>
+            <div>
+              <label className="block text-xs font-bold text-bc-text mb-1">Quartier</label>
+              <input type="text" value={neighborhood} onChange={(e) => setNeighborhood(e.target.value)} placeholder="Ex. Riviera Palmeraie" className="w-full border border-bc-border rounded-full px-3 py-2 text-xs focus:outline-none focus:border-bc-green" />
             </div>
           </div>
 

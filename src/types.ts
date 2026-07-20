@@ -67,6 +67,9 @@ export interface Member {
   firstName: string;
   phone: string;
   phoneParent?: string;
+  emergencyContact?: string; // §2.1 — personne à contacter en cas d'urgence (nom + tél.), distinct de phoneParent
+  nationality?: string; // §2.1 — nationalité
+  neighborhood?: string; // §2.1 — quartier (précision dans la commune GPS)
   email: string;
   gender: 'H' | 'F';
   birthDate: string;
