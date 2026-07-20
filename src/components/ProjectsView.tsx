@@ -57,7 +57,11 @@ export default function ProjectsView({ activeBranch, simulatedRole, events = [],
         (p) =>
           (p.scope === 'transverse' || p.scope === 'ministere' || activeBranch === 'global' || (p.scope === 'branche' && p.branch === activeBranch)) &&
           (filterStatus === 'all' || p.status === filterStatus) &&
-          (filterScope === 'all' || p.scope === filterScope) &&
+          // Portée : le stockage est canonique (transverse/branche/ministere + p.branch).
+          (filterScope === 'all'
+            || (filterScope === 'transverse' && p.scope === 'transverse')
+            || (filterScope === 'ministere' && p.scope === 'ministere')
+            || ((filterScope === 'church' || filterScope === 'light') && p.scope === 'branche' && p.branch === filterScope)) &&
           (filterPmo === 'all' || p.pmo === filterPmo),
       ),
     [projects, activeBranch, filterStatus, filterScope, filterPmo],
@@ -295,10 +299,10 @@ export default function ProjectsView({ activeBranch, simulatedRole, events = [],
         </select>
         <select value={filterScope} onChange={(e) => setFilterScope(e.target.value)} className="border border-bc-border rounded-full px-3 py-2 text-xs bg-white">
           <option value="all">Toutes les portées</option>
-          <option value="church">Église</option>
-          <option value="light">Light</option>
-          <option value="both">2 branches</option>
-          <option value="ministry">Ministère</option>
+          <option value="transverse">Transverse</option>
+          <option value="church">Bloom Church</option>
+          <option value="light">Bloom Light</option>
+          <option value="ministere">Ministère</option>
         </select>
         {pmoOptions.length > 0 && (
           <select value={filterPmo} onChange={(e) => setFilterPmo(e.target.value)} className="border border-bc-border rounded-full px-3 py-2 text-xs bg-white">

@@ -665,6 +665,7 @@ export default function App() {
             simulatedRole={simulatedRole}
             members={members}
             onUpdateMember={handleUpdateMember}
+            onAddReport={handleAddReport}
             operator={operator}
           />
         );

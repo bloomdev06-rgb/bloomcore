@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Branch, Member, PastoralCursus } from '../types';
+import { Branch, Member, PastoralCursus, Report } from '../types';
 import { Heart, User, ArrowUpCircle, FileText, Share2, Search, PenLine, LayoutList, Network, X } from 'lucide-react';
 import { useBusLines, useDepartments, useMinistries, labelFor } from '../data';
 import { inMemberScope } from '../data/scope';
@@ -13,6 +13,7 @@ interface CursusViewProps {
   simulatedRole: string;
   members: Member[];
   onUpdateMember: (m: Member) => void;
+  onAddReport?: (r: Report) => void;
   operator?: Member;
 }
 
@@ -22,7 +23,7 @@ const nextCursus = (c: PastoralCursus): PastoralCursus => CURSUS_ORDER[Math.min(
 const isTop = (c: PastoralCursus) => CURSUS_ORDER.indexOf(c) === CURSUS_ORDER.length - 1;
 
 
-export default function CursusView({ activeBranch, simulatedRole, members = [], onUpdateMember, operator }: CursusViewProps) {
+export default function CursusView({ activeBranch, simulatedRole, members = [], onUpdateMember, onAddReport, operator }: CursusViewProps) {
   const busLines = useBusLines();
   const departments = useDepartments();
   const ministries = useMinistries();
@@ -33,6 +34,31 @@ export default function CursusView({ activeBranch, simulatedRole, members = [], 
 
   // Spec (Onglet 8) : promotions validées uniquement par le Pasteur Principal.
   const canManage = simulatedRole === 'Pasteur Principal';
+
+  // §8.2 — mon mentor (niveau directement supérieur) et rédaction d'un rapport pastoral
+  // confidentiel sur un filleul confié (mentorId === moi).
+  const myMentor = operator?.mentorId ? members.find((m) => m.id === operator.mentorId) : undefined;
+  const myFilleuls = operator ? members.filter((m) => m.mentorId === operator.id) : [];
+  const [writingReport, setWritingReport] = useState(false);
+  const [reportTargetId, setReportTargetId] = useState('');
+  const [reportNotes, setReportNotes] = useState('');
+  const submitPastoralReport = (e: React.FormEvent) => {
+    e.preventDefault();
+    const target = members.find((m) => m.id === reportTargetId);
+    if (!target || !reportNotes.trim() || !operator) return;
+    onAddReport?.({
+      id: `rep_pastoral_${operator.id}_${target.id}_${Date.now()}`,
+      authorId: operator.id,
+      authorName: `${operator.firstName} ${operator.lastName}`,
+      authorRole: simulatedRole,
+      targetBranch: target.branch,
+      date: new Date().toISOString().split('T')[0],
+      reportType: 'rapport_pastoral',
+      confidential: true,
+      content: { memberId: target.id, notes: reportNotes.trim() },
+    });
+    setReportNotes(''); setReportTargetId(''); setWritingReport(false);
+  };
 
   // Branche de la personne connectée — la liste ne montre qu'elle ; l'organigramme
   // montre les 2 branches et met celle-ci en avant.
@@ -224,15 +250,15 @@ export default function CursusView({ activeBranch, simulatedRole, members = [], 
                 <User size={20} className="text-bc-text-secondary" />
               </div>
               <div>
-                <h4 className="text-sm font-bold text-bc-text">Rév. Pasteur Principal</h4>
-                <p className="text-xs text-bc-text-secondary">Pasteur Titulaire</p>
+                <h4 className="text-sm font-bold text-bc-text">{myMentor ? `${myMentor.firstName} ${myMentor.lastName}` : 'Aucun mentor assigné'}</h4>
+                <p className="text-xs text-bc-text-secondary">{myMentor ? labelFor(myMentor.pastoralCursus) : '—'}</p>
               </div>
             </div>
 
             <div className="mt-6 border-t border-bc-border pt-4">
               <h4 className="text-xs font-bold text-bc-text mb-2">Mon statut actuel</h4>
               <div className="inline-flex px-3 py-1 bg-bc-green text-white text-xs font-bold rounded-full">
-                Pasteur Assistant
+                {operator ? labelFor(operator.pastoralCursus) : '—'}
               </div>
             </div>
           </div>
@@ -244,7 +270,11 @@ export default function CursusView({ activeBranch, simulatedRole, members = [], 
                 <User size={18} className="text-bc-text" />
                 <h3 className="font-ui font-bold text-bc-text">Membres du Cursus (Filleuls / Pairs)</h3>
               </div>
-              <button className={`px-4 py-1.5 text-white rounded-full text-xs font-bold ${'bg-bc-green'} hover:opacity-90 transition-opacity flex items-center gap-1.5`}>
+              <button
+                onClick={() => { setReportTargetId(myFilleuls[0]?.id ?? filteredMembers[0]?.id ?? ''); setWritingReport(true); }}
+                disabled={!operator || (myFilleuls.length === 0 && filteredMembers.length === 0)}
+                className="px-4 py-1.5 text-white rounded-full text-xs font-bold bg-bc-green hover:opacity-90 transition-opacity flex items-center gap-1.5 disabled:opacity-40 active-scale"
+              >
                 <PenLine size={14} /> Rédiger rapport pastoral
               </button>
             </div>
@@ -316,6 +346,31 @@ export default function CursusView({ activeBranch, simulatedRole, members = [], 
             <button onClick={() => setPromoting(null)} className="px-4 py-2 border border-bc-border text-bc-text-secondary rounded-full text-xs hover:bg-bc-canvas active-scale">Annuler</button>
             <button onClick={confirmPromotion} className="px-5 py-2 bg-bc-green text-white rounded-full text-xs font-ui font-bold hover:opacity-90 active-scale">Confirmer la promotion</button>
           </div>
+        </Modal>
+      )}
+
+      {writingReport && (
+        <Modal open={writingReport} onClose={() => setWritingReport(false)} title="Rapport pastoral" icon={<PenLine size={20} className="text-bc-green" />} maxWidth="max-w-md">
+          <form onSubmit={submitPastoralReport} className="space-y-4">
+            <p className="text-xs text-bc-text-secondary">Rapport confidentiel sur un filleul confié (visible du corps pastoral).</p>
+            <div>
+              <label className="text-xs font-bold text-bc-text mb-1 block">Filleul concerné</label>
+              <select value={reportTargetId} onChange={(e) => setReportTargetId(e.target.value)} className="w-full border border-bc-border rounded-xl px-3 py-2 text-sm bg-white" required>
+                <option value="">Choisir…</option>
+                {(myFilleuls.length ? myFilleuls : filteredMembers).map((m) => (
+                  <option key={m.id} value={m.id}>{m.firstName} {m.lastName} — {labelFor(m.pastoralCursus)}</option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="text-xs font-bold text-bc-text mb-1 block">Observations</label>
+              <textarea value={reportNotes} onChange={(e) => setReportNotes(e.target.value)} rows={5} className="w-full border border-bc-border rounded-xl px-3 py-2 text-sm bg-white resize-none" placeholder="Suivi spirituel, progression, points d'attention…" required />
+            </div>
+            <div className="flex gap-3 justify-end pt-3 border-t border-bc-border">
+              <button type="button" onClick={() => setWritingReport(false)} className="px-4 py-2 border border-bc-border text-bc-text-secondary rounded-full text-xs hover:bg-bc-canvas active-scale">Annuler</button>
+              <button type="submit" disabled={!reportTargetId || !reportNotes.trim()} className="px-5 py-2 bg-bc-green text-white rounded-full text-xs font-ui font-bold hover:opacity-90 active-scale disabled:opacity-40">Enregistrer</button>
+            </div>
+          </form>
         </Modal>
       )}
     </div>
