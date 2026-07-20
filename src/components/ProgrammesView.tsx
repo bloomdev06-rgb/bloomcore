@@ -94,11 +94,22 @@ export default function ProgrammesView({
     setEnrollSearch('');
   };
 
+  // §9.1 — chaque étape a son propre validateur (seed fd_bapteme). Un opérateur peut valider une
+  // étape s'il porte le rôle validateur de CETTE étape, ou s'il est une autorité supérieure.
+  const OVERRIDE_VALIDATORS = ['Pasteur', 'Pasteur Principal', 'Ministre', 'Admin', 'Super Admin'];
+  const canValidateStep = (stepValidator?: string) =>
+    !stepValidator || simulatedRole === stepValidator || OVERRIDE_VALIDATORS.includes(simulatedRole);
+
   // Avancer / reculer l'état d'un candidat. Dernière étape validée → baptisé (via département).
   const moveStep = (m: Member, dir: 1 | -1) => {
     const i = stepIndex(m.currentStepId);
     const next = i + dir;
     if (next < 0) return;
+    // Validation en avant : seul le validateur de l'étape courante (ou une autorité) peut la valider.
+    if (dir === 1 && !canValidateStep(steps[i]?.validator)) {
+      toast.error(`Seul un(e) « ${steps[i]?.validator} » (ou une autorité supérieure) peut valider l'étape « ${steps[i]?.label} ».`);
+      return;
+    }
     if (next >= steps.length) {
       onUpdateMember({
         ...m,

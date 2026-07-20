@@ -769,6 +769,17 @@ export default function App() {
         </main>
       </div>
 
+      {/* §14.3 — bouton flottant ADN (mobile) : accès rapide à la fiche d'accueil des nouveaux.
+          Caché sur desktop (la sidebar porte déjà l'onglet) et masqué si déjà sur l'onglet ADN. */}
+      {canView(permissionMatrix, 'adn', simulatedRole) && activeTab !== 'adn' && (
+        <button
+          onClick={() => setActiveTab('adn')}
+          className="md:hidden fixed bottom-6 right-6 z-40 w-14 h-14 rounded-full bg-bc-green text-white shadow-lg shadow-bc-green/30 flex items-center justify-center active-scale ease-out-spring"
+          aria-label="Accueil ADN — enregistrer un nouveau"
+        >
+          <UserCheck size={22} />
+        </button>
+      )}
 
       {showCreateDept && (
         <CreateDepartmentModal
