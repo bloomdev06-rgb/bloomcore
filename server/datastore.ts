@@ -14,6 +14,12 @@ import {
   appendToCollection as dbAppendToCollection,
   getKv as dbGetKv,
   setKv as dbSetKv,
+  getCredential as dbGetCredential,
+  upsertCredential as dbUpsertCredential,
+  insertCredentialIfAbsent as dbInsertCredentialIfAbsent,
+  countCredentials as dbCountCredentials,
+  insertToken as dbInsertToken,
+  consumeToken as dbConsumeToken,
 } from './db.ts';
 
 export const usePostgres = !!process.env.DATABASE_URL;
@@ -53,4 +59,35 @@ export async function getKv<T>(key: string): Promise<T | null> {
 export async function setKv(key: string, value: unknown): Promise<void> {
   const b = await backend();
   return b ? b.setKv(key, value) : dbSetKv(key, value);
+}
+
+// --- Auth : credentials + tokens (mêmes sélecteurs de backend que ci-dessus) ---
+export async function getCredential(memberId: string): Promise<{ password_hash: string; pwd_version: number } | null> {
+  const b = await backend();
+  return b ? b.getCredential(memberId) : dbGetCredential(memberId);
+}
+
+export async function upsertCredential(memberId: string, passwordHash: string): Promise<void> {
+  const b = await backend();
+  return b ? b.upsertCredential(memberId, passwordHash) : dbUpsertCredential(memberId, passwordHash);
+}
+
+export async function insertCredentialIfAbsent(memberId: string, passwordHash: string): Promise<void> {
+  const b = await backend();
+  return b ? b.insertCredentialIfAbsent(memberId, passwordHash) : dbInsertCredentialIfAbsent(memberId, passwordHash);
+}
+
+export async function countCredentials(): Promise<number> {
+  const b = await backend();
+  return b ? b.countCredentials() : dbCountCredentials();
+}
+
+export async function insertToken(token: string, memberId: string, purpose: string, expiresAt: number): Promise<void> {
+  const b = await backend();
+  return b ? b.insertToken(token, memberId, purpose, expiresAt) : dbInsertToken(token, memberId, purpose, expiresAt);
+}
+
+export async function consumeToken(token: string, now: number): Promise<{ memberId: string; purpose: string } | null> {
+  const b = await backend();
+  return b ? b.consumeToken(token, now) : dbConsumeToken(token, now);
 }

@@ -1,8 +1,7 @@
 // First-run seeding, reusing the exact same seed data the frontend already
 // uses (src/mockData.ts) so the API and the offline/localStorage fallback
 // never disagree about "what's in the demo data".
-import { db } from './db.ts';
-import { getCollection, setCollection, getKv, setKv } from './datastore.ts';
+import { getCollection, setCollection, getKv, setKv, getCredential, insertCredentialIfAbsent, countCredentials } from './datastore.ts';
 import { hashPassword } from './auth.ts';
 import { isLegacySeedEventId } from '../src/data/events.ts';
 import {
@@ -84,12 +83,11 @@ export async function ensureSeeded(): Promise<void> {
   for (const [key, seed] of Object.entries(KV_SEEDS)) {
     if ((await getKv(key)) === null) await setKv(key, seed);
   }
-  const row = db.prepare('SELECT COUNT(*) as n FROM credentials').get() as { n: number };
-  if (row.n === 0 && DEMO_PASSWORD) {
-    const insert = db.prepare('INSERT OR IGNORE INTO credentials (member_id, password_hash) VALUES (?, ?)');
-    for (const m of INITIAL_MEMBERS) insert.run(m.id, hashPassword(DEMO_PASSWORD));
-    for (const id of testData.credentialMemberIds) insert.run(id, hashPassword(DEMO_PASSWORD)); // ministres de test
-  } else if (row.n === 0) {
+  const credCount = await countCredentials();
+  if (credCount === 0 && DEMO_PASSWORD) {
+    for (const m of INITIAL_MEMBERS) await insertCredentialIfAbsent(m.id, hashPassword(DEMO_PASSWORD));
+    for (const id of testData.credentialMemberIds) await insertCredentialIfAbsent(id, hashPassword(DEMO_PASSWORD)); // ministres de test
+  } else if (credCount === 0) {
     console.log('[seed] production sans SEED_DEMO_PASSWORD → aucun credential seedé, activation requise.');
   }
 
@@ -123,9 +121,9 @@ export async function ensureSeeded(): Promise<void> {
     await setCollection('reports', [...keepReports, ...testData.reports]);
     await setCollection('ministries', curMinistries);
     if (DEMO_PASSWORD) {
-      const hasCred = db.prepare('SELECT 1 FROM credentials WHERE member_id = ?');
-      const insertCred = db.prepare('INSERT OR IGNORE INTO credentials (member_id, password_hash) VALUES (?, ?)');
-      for (const id of testData.credentialMemberIds) if (!hasCred.get(id)) insertCred.run(id, hashPassword(DEMO_PASSWORD));
+      for (const id of testData.credentialMemberIds) {
+        if (!(await getCredential(id))) await insertCredentialIfAbsent(id, hashPassword(DEMO_PASSWORD));
+      }
     }
     console.log(`[seed] jeu de test Bloom Bus rafraîchi : ${testData.members.length} membres, ${testData.reports.length} rapports.`);
   }
@@ -207,9 +205,7 @@ async function reconcileSeedMembers(): Promise<void> {
   if (addedMembers) console.log(`[seed] ${addedMembers} membre(s) seed ajouté(s).`);
   await reconcileMissingById('admins', INITIAL_ADMINS);
 
-  const hasCred = db.prepare('SELECT 1 FROM credentials WHERE member_id = ?');
-  const insertCred = db.prepare('INSERT OR IGNORE INTO credentials (member_id, password_hash) VALUES (?, ?)');
   for (const m of INITIAL_MEMBERS) {
-    if (!hasCred.get(m.id)) insertCred.run(m.id, hashPassword(DEMO_PASSWORD));
+    if (!(await getCredential(m.id))) await insertCredentialIfAbsent(m.id, hashPassword(DEMO_PASSWORD));
   }
 }

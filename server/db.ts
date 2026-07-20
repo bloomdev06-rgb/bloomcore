@@ -154,3 +154,45 @@ export function setKv(key: string, value: unknown): void {
     .prepare('INSERT INTO kv (key, data) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET data = excluded.data')
     .run(key, JSON.stringify(value));
 }
+
+// --- Auth : credentials + tokens à usage unique (backend SQLite sync) ---
+// Le hachage reste dans auth.ts (db.ts ne doit pas importer auth.ts → cycle) :
+// ces fonctions reçoivent un hash déjà calculé.
+export function getCredential(memberId: string): { password_hash: string; pwd_version: number } | null {
+  return (db.prepare('SELECT password_hash, pwd_version FROM credentials WHERE member_id = ?').get(memberId) as
+    | { password_hash: string; pwd_version: number }
+    | undefined) ?? null;
+}
+
+// Changement de mot de passe : ON CONFLICT ++pwd_version (révoque les tokens antérieurs, #11).
+export function upsertCredential(memberId: string, passwordHash: string): void {
+  db.prepare(
+    `INSERT INTO credentials (member_id, password_hash, pwd_version) VALUES (?, ?, 0)
+     ON CONFLICT(member_id) DO UPDATE SET password_hash = excluded.password_hash, pwd_version = pwd_version + 1`,
+  ).run(memberId, passwordHash);
+}
+
+// Seed : n'écrase jamais un credential existant, ne touche pas pwd_version.
+export function insertCredentialIfAbsent(memberId: string, passwordHash: string): void {
+  db.prepare('INSERT OR IGNORE INTO credentials (member_id, password_hash) VALUES (?, ?)').run(memberId, passwordHash);
+}
+
+export function countCredentials(): number {
+  return (db.prepare('SELECT COUNT(*) as n FROM credentials').get() as { n: number }).n;
+}
+
+export function insertToken(token: string, memberId: string, purpose: string, expiresAt: number): void {
+  db.prepare('INSERT INTO tokens (token, member_id, purpose, expires_at) VALUES (?, ?, ?, ?)').run(
+    token, memberId, purpose, expiresAt,
+  );
+}
+
+// Consomme un token (usage unique) — null si inconnu, expiré ou déjà utilisé.
+export function consumeToken(token: string, now: number): { memberId: string; purpose: string } | null {
+  const row = db.prepare('SELECT member_id, purpose, expires_at, used_at FROM tokens WHERE token = ?').get(token) as
+    | { member_id: string; purpose: string; expires_at: number; used_at: number | null }
+    | undefined;
+  if (!row || row.used_at || now > row.expires_at) return null;
+  db.prepare('UPDATE tokens SET used_at = ? WHERE token = ?').run(now, token);
+  return { memberId: row.member_id, purpose: row.purpose };
+}

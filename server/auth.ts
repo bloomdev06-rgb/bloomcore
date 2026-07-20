@@ -46,8 +46,8 @@ export function verifyPassword(password: string, stored: string): boolean {
   return candidate.length === expected.length && timingSafeEqual(candidate, expected);
 }
 
-export function signToken(memberId: string): string {
-  const payload = JSON.stringify({ sub: memberId, pv: passwordVersion(memberId), exp: Date.now() + TOKEN_TTL_MS });
+export async function signToken(memberId: string): Promise<string> {
+  const payload = JSON.stringify({ sub: memberId, pv: await passwordVersion(memberId), exp: Date.now() + TOKEN_TTL_MS });
   const body = Buffer.from(payload).toString('base64url');
   const sig = createHmac('sha256', TOKEN_SECRET).update(body).digest('base64url');
   return `${body}.${sig}`;
@@ -55,49 +55,37 @@ export function signToken(memberId: string): string {
 
 // Version du mot de passe d'un membre (0 si aucun credential). Incrémentée à chaque
 // changement de mot de passe → invalide tous les tokens émis avant (voir verifyToken).
-export function passwordVersion(memberId: string): number {
-  const row = db.prepare('SELECT pwd_version FROM credentials WHERE member_id = ?').get(memberId) as
-    | { pwd_version: number }
-    | undefined;
-  return row?.pwd_version ?? 0;
+export async function passwordVersion(memberId: string): Promise<number> {
+  return (await getCredential(memberId))?.pwd_version ?? 0;
 }
 
 // --- Tokens à usage unique (activation 48h / réinitialisation 1h) ---
-import { db } from './db.ts';
+// Accès DB via le sélecteur de backend (SQLite legacy ou Postgres M6).
+import { getCredential, upsertCredential, insertToken, consumeToken } from './datastore.ts';
 
 const PURPOSE_TTL_MS: Record<string, number> = {
   activate: 48 * 60 * 60 * 1000,
   reset: 1 * 60 * 60 * 1000,
 };
 
-export function createOneTimeToken(memberId: string, purpose: 'activate' | 'reset'): string {
+export async function createOneTimeToken(memberId: string, purpose: 'activate' | 'reset'): Promise<string> {
   const token = randomBytes(24).toString('base64url');
-  db.prepare('INSERT INTO tokens (token, member_id, purpose, expires_at) VALUES (?, ?, ?, ?)').run(
-    token, memberId, purpose, Date.now() + PURPOSE_TTL_MS[purpose],
-  );
+  await insertToken(token, memberId, purpose, Date.now() + PURPOSE_TTL_MS[purpose]);
   return token;
 }
 
 // Consomme le token (usage unique) — null si inconnu, expiré ou déjà utilisé.
-export function consumeOneTimeToken(token: string): { memberId: string; purpose: string } | null {
-  const row = db.prepare('SELECT member_id, purpose, expires_at, used_at FROM tokens WHERE token = ?').get(token) as
-    | { member_id: string; purpose: string; expires_at: number; used_at: number | null }
-    | undefined;
-  if (!row || row.used_at || Date.now() > row.expires_at) return null;
-  db.prepare('UPDATE tokens SET used_at = ? WHERE token = ?').run(Date.now(), token);
-  return { memberId: row.member_id, purpose: row.purpose };
+export async function consumeOneTimeToken(token: string): Promise<{ memberId: string; purpose: string } | null> {
+  return consumeToken(token, Date.now());
 }
 
-export function upsertCredentials(memberId: string, password: string): void {
+export async function upsertCredentials(memberId: string, password: string): Promise<void> {
   // Changement de mot de passe (UPDATE) → pwd_version++ : révoque tous les tokens antérieurs.
   // Première définition (INSERT à l'activation) → version 0, aucune session à invalider.
-  db.prepare(
-    `INSERT INTO credentials (member_id, password_hash, pwd_version) VALUES (?, ?, 0)
-     ON CONFLICT(member_id) DO UPDATE SET password_hash = excluded.password_hash, pwd_version = pwd_version + 1`,
-  ).run(memberId, hashPassword(password));
+  await upsertCredential(memberId, hashPassword(password));
 }
 
-export function verifyToken(token: string): string | null {
+export async function verifyToken(token: string): Promise<string | null> {
   const [body, sig] = token.split('.');
   if (!body || !sig) return null;
   const expected = createHmac('sha256', TOKEN_SECRET).update(body).digest('base64url');
@@ -109,8 +97,8 @@ export function verifyToken(token: string): string | null {
     if (Date.now() > exp) return null;
     // Révocation au changement de mot de passe (#11) : un token émis avant le dernier
     // changement porte une pv obsolète. ponytail: 1 lecture DB par requête, OK à cette
-    // échelle (SQLite synchrone) ; mettre en cache si le débit l'exige un jour.
-    if ((pv ?? 0) !== passwordVersion(sub as string)) return null;
+    // échelle ; mettre en cache si le débit l'exige un jour.
+    if ((pv ?? 0) !== await passwordVersion(sub as string)) return null;
     return sub as string;
   } catch {
     return null;

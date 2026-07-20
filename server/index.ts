@@ -12,7 +12,7 @@ import { fileURLToPath } from 'node:url';
 import express from 'express';
 import compression from 'compression';
 import { db } from './db.ts';
-import { getCollection, setCollection, appendToCollection, getKv, setKv } from './datastore.ts';
+import { getCollection, setCollection, appendToCollection, getKv, setKv, getCredential } from './datastore.ts';
 import { hashPassword, verifyPassword, signToken, verifyToken, createOneTimeToken, consumeOneTimeToken, upsertCredentials, requireSecret, usingInsecureSecret, resolveBindHost } from './auth.ts';
 import { ensureSeeded } from './seed.ts';
 import { runBootMigration } from './bootMigrate.ts';
@@ -79,7 +79,7 @@ const KV_KEYS = new Set(['permissions', 'settings']);
 async function requireAuth(req: express.Request, res: express.Response, next: express.NextFunction) {
   const header = req.headers.authorization;
   const token = header?.startsWith('Bearer ') ? header.slice(7) : null;
-  const memberId = token ? verifyToken(token) : null;
+  const memberId = token ? await verifyToken(token) : null;
   if (!memberId) return res.status(401).json({ error: 'unauthorized' });
   // Contexte RBAC complet (membre + rôles résolus depuis les données).
   const ctx = await buildContext(memberId);
@@ -140,16 +140,14 @@ app.post('/api/v1/auth/login', async (req, res) => {
   const key = loginKey(req, id);
   if (loginLocked(key)) return res.status(429).json({ error: 'trop de tentatives, réessayez plus tard' });
   const member = await findByIdentifier(id);
-  const cred = member
-    ? (db.prepare('SELECT password_hash FROM credentials WHERE member_id = ?').get(member.id) as { password_hash: string } | undefined)
-    : undefined;
+  const cred = member ? await getCredential(member.id) : null;
   const ok = verifyPassword(password, cred?.password_hash ?? DUMMY_HASH);
   if (!member || !cred || !ok) {
     loginFail(key);
     return res.status(401).json({ error: 'invalid credentials' });
   }
   loginFails.delete(key);
-  res.json({ token: signToken(member.id), member });
+  res.json({ token: await signToken(member.id), member });
 });
 
 // Activation / réinitialisation — envoi simulé via les adapters (trigger 17 :
@@ -160,7 +158,7 @@ const APP_URL = process.env.APP_URL || 'http://localhost:3000';
 const isProd = IS_PROD;
 
 async function issueAuthLink(member: any, purpose: 'activate' | 'reset'): Promise<string> {
-  const token = createOneTimeToken(member.id, purpose);
+  const token = await createOneTimeToken(member.id, purpose);
   const label = purpose === 'activate' ? 'Activation de votre compte BloomCore' : 'Réinitialisation de votre mot de passe BloomCore';
   dispatch(
     [{
@@ -194,29 +192,27 @@ app.post('/api/v1/auth/complete', async (req, res) => {
   const { token, password } = req.body ?? {};
   if (!token || !password) return res.status(400).json({ error: 'token and password required' });
   if (String(password).length < 8) return res.status(400).json({ error: 'mot de passe trop court (min 8)' });
-  const consumed = consumeOneTimeToken(String(token));
+  const consumed = await consumeOneTimeToken(String(token));
   if (!consumed) return res.status(401).json({ error: 'token invalide, expiré ou déjà utilisé' });
-  upsertCredentials(consumed.memberId, String(password));
+  await upsertCredentials(consumed.memberId, String(password));
   const member = (await readCollection('members')).find((m) => m.id === consumed.memberId);
-  res.json({ token: signToken(consumed.memberId), member });
+  res.json({ token: await signToken(consumed.memberId), member });
 });
 
-app.post('/api/v1/auth/change-password', requireAuth, (req, res) => {
+app.post('/api/v1/auth/change-password', requireAuth, async (req, res) => {
   const { current, next } = req.body ?? {};
   if (!current || !next) return res.status(400).json({ error: 'current and next required' });
   if (String(next).length < 8) return res.status(400).json({ error: 'mot de passe trop court (min 8)' });
   const memberId = (req as any).memberId as string;
-  const cred = db.prepare('SELECT password_hash FROM credentials WHERE member_id = ?').get(memberId) as
-    | { password_hash: string }
-    | undefined;
+  const cred = await getCredential(memberId);
   if (!cred || !verifyPassword(String(current), cred.password_hash)) {
     return res.status(401).json({ error: 'mot de passe actuel incorrect' });
   }
-  upsertCredentials(memberId, String(next));
+  await upsertCredentials(memberId, String(next));
   // pwd_version vient d'être incrémentée → l'ancien token de CE client est aussi invalidé.
   // On lui en émet un frais (pv à jour) pour que sa session survive ; les autres appareils
   // (tokens à l'ancienne pv) sont déconnectés — c'est l'effet recherché.
-  res.json({ ok: true, token: signToken(memberId) });
+  res.json({ ok: true, token: await signToken(memberId) });
 });
 
 app.post('/api/v1/auth/admin-reset', requireAuth, async (req, res) => {
@@ -262,9 +258,9 @@ app.get('/api/v1/bootstrap', requireAuth, async (req, res) => {
 // → token en query (même contrainte que /uploads). Doit rester AVANT /:name pour
 // ne pas être capturé comme nom de collection. 'no-transform' fait sauter la
 // compression gzip globale (sinon le flux est bufferisé et jamais envoyé).
-app.get('/api/v1/stream', (req, res) => {
+app.get('/api/v1/stream', async (req, res) => {
   const token = typeof req.query.token === 'string' ? req.query.token : null;
-  if (!token || !verifyToken(token)) return res.status(401).json({ error: 'unauthorized' });
+  if (!token || !(await verifyToken(token))) return res.status(401).json({ error: 'unauthorized' });
   res.setHeader('Content-Type', 'text/event-stream');
   res.setHeader('Cache-Control', 'no-cache, no-transform');
   res.setHeader('Connection', 'keep-alive');
@@ -462,11 +458,11 @@ fs.mkdirSync(UPLOAD_DIR, { recursive: true });
 // appartenir à plusieurs membres), scoper est donc infaisable — toute session valide lit.
 // `immutable` retiré : le cache reste révocable (le token expire en 12h).
 // ponytail: auth-only ; passer à des URLs signées expirantes si un jour exposé au public.
-app.use('/uploads', (req, res, next) => {
+app.use('/uploads', async (req, res, next) => {
   const header = req.headers.authorization;
   const token = (header?.startsWith('Bearer ') ? header.slice(7) : null)
     ?? (typeof req.query.token === 'string' ? req.query.token : null);
-  if (!token || !verifyToken(token)) return res.status(401).json({ error: 'unauthorized' });
+  if (!token || !(await verifyToken(token))) return res.status(401).json({ error: 'unauthorized' });
   next();
 }, express.static(UPLOAD_DIR, { maxAge: '1y' }));
 

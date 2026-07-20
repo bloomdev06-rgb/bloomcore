@@ -123,10 +123,46 @@ export async function setKv(key: string, value: unknown): Promise<void> {
   await prisma.kv.upsert({ where: { key }, create: { key, data: value as any }, update: { data: value as any } });
 }
 
+// --- Auth : credentials + tokens (backend Postgres async, miroir de db.ts) ---
+export async function getCredential(memberId: string): Promise<{ password_hash: string; pwd_version: number } | null> {
+  const c = await prisma.credential.findUnique({ where: { memberId } });
+  return c ? { password_hash: c.passwordHash, pwd_version: c.pwdVersion } : null;
+}
+
+export async function upsertCredential(memberId: string, passwordHash: string): Promise<void> {
+  await prisma.credential.upsert({
+    where: { memberId },
+    create: { memberId, passwordHash, pwdVersion: 0 },
+    update: { passwordHash, pwdVersion: { increment: 1 } },
+  });
+}
+
+export async function insertCredentialIfAbsent(memberId: string, passwordHash: string): Promise<void> {
+  // upsert avec update:{} = INSERT OR IGNORE (ne touche pas un credential existant).
+  await prisma.credential.upsert({ where: { memberId }, create: { memberId, passwordHash }, update: {} });
+}
+
+export async function countCredentials(): Promise<number> {
+  return prisma.credential.count();
+}
+
+export async function insertToken(token: string, memberId: string, purpose: string, expiresAt: number): Promise<void> {
+  await prisma.token.create({ data: { token, memberId, purpose, expiresAt: BigInt(expiresAt) } });
+}
+
+// ponytail: findUnique+update non-atomique (comme la version SQLite) ; OK en mono-instance
+// Coolify. Passer à un updateMany gardé (where usedAt:null) si un jour multi-instance.
+export async function consumeToken(token: string, now: number): Promise<{ memberId: string; purpose: string } | null> {
+  const row = await prisma.token.findUnique({ where: { token } });
+  if (!row || row.usedAt || now > Number(row.expiresAt)) return null;
+  await prisma.token.update({ where: { token }, data: { usedAt: BigInt(now) } });
+  return { memberId: row.memberId, purpose: row.purpose };
+}
+
 // One-shot migration from the old SQLite blob store into Postgres. Canonicalizes
 // every item (M5 snake_case) at the boundary. Replaces target collections via
 // setCollection → idempotent for a fresh/rerun target.
-export async function migrateFromSqlite(sqlitePath: string): Promise<{ collections: Record<string, number>; kv: string[] }> {
+export async function migrateFromSqlite(sqlitePath: string): Promise<{ collections: Record<string, number>; kv: string[]; credentials: number; tokens: number }> {
   const sdb = new DatabaseSync(sqlitePath);
   try {
     const collections: Record<string, number> = {};
@@ -144,7 +180,27 @@ export async function migrateFromSqlite(sqlitePath: string): Promise<{ collectio
       await setKv(key, JSON.parse(data));
       kv.push(key);
     }
-    return { collections, kv };
+    // Tables auth — copie brute (aucune canonicalisation). SANS ça, personne ne peut
+    // se reconnecter après le cutover : les hashs restent dans l'ancien SQLite.
+    const creds = sdb.prepare('SELECT member_id, password_hash, pwd_version FROM credentials').all() as
+      { member_id: string; password_hash: string; pwd_version: number }[];
+    for (const c of creds) {
+      await prisma.credential.upsert({
+        where: { memberId: c.member_id },
+        create: { memberId: c.member_id, passwordHash: c.password_hash, pwdVersion: c.pwd_version ?? 0 },
+        update: { passwordHash: c.password_hash, pwdVersion: c.pwd_version ?? 0 },
+      });
+    }
+    const toks = sdb.prepare('SELECT token, member_id, purpose, expires_at, used_at FROM tokens').all() as
+      { token: string; member_id: string; purpose: string; expires_at: number; used_at: number | null }[];
+    for (const t of toks) {
+      await prisma.token.upsert({
+        where: { token: t.token },
+        create: { token: t.token, memberId: t.member_id, purpose: t.purpose, expiresAt: BigInt(t.expires_at), usedAt: t.used_at == null ? null : BigInt(t.used_at) },
+        update: {},
+      });
+    }
+    return { collections, kv, credentials: creds.length, tokens: toks.length };
   } finally {
     sdb.close();
   }
