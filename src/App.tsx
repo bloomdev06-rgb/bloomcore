@@ -672,7 +672,7 @@ export default function App() {
       case 'ministeres':
         return <MinisteresView activeBranch={activeBranch} simulatedRole={simulatedRole} members={members} reports={reports} operator={operator} departments={departments} onUpdateDepartments={setDepartments} onAddAuditLog={handleAddAuditLog} />;
       case 'departments':
-        return <DepartmentsView activeBranch={activeBranch} simulatedRole={simulatedRole} members={members} reports={reports} events={events} audits={audits} permissionMatrix={permissionMatrix} forms={forms} departments={departments} onUpdateDepartments={setDepartments} onUpdateMember={handleUpdateMember} onAddMember={handleAddMember} busLines={busLines} onAddReport={handleAddReport} onAddAuditLog={handleAddAuditLog} selectedDept={selectedDept} setSelectedDept={setSelectedDept} operatorId={operator?.id} onOpenQuickNewForm={() => setActiveTab('adn')} />;
+        return <DepartmentsView activeBranch={activeBranch} simulatedRole={simulatedRole} members={members} reports={reports} events={events} audits={audits} permissionMatrix={permissionMatrix} forms={forms} departments={departments} onUpdateDepartments={setDepartments} onUpdateMember={handleUpdateMember} onAddMember={handleAddMember} busLines={busLines} onAddReport={handleAddReport} onAddEvent={handleAddEvent} onAddAuditLog={handleAddAuditLog} selectedDept={selectedDept} setSelectedDept={setSelectedDept} operatorId={operator?.id} onOpenQuickNewForm={() => setActiveTab('adn')} />;
       case 'formations':
         return <FormationsView activeBranch={activeBranch} simulatedRole={simulatedRole} members={members} operator={operator} permissionMatrix={permissionMatrix} />;
       case 'programs':

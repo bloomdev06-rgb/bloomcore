@@ -29,6 +29,7 @@ interface DepartmentsViewProps {
   members?: Member[];
   reports?: Report[];
   events?: Event[];
+  onAddEvent?: (e: Event) => void;
   audits?: AuditLog[];
   permissionMatrix?: PermissionMatrix;
   forms?: FormDef[];
@@ -70,7 +71,7 @@ const specialFn = (d?: Department): SpecialFunction | undefined => {
   return undefined;
 };
 
-export default function DepartmentsView({ activeBranch, simulatedRole, members = [], reports = [], events = [], audits = [], permissionMatrix, forms = [], departments, onUpdateDepartments, onUpdateMember, onAddMember, busLines = [], onAddReport, onAddAuditLog, selectedDept: selectedDeptProp, setSelectedDept: setSelectedDeptProp, operatorId, onOpenQuickNewForm }: DepartmentsViewProps) {
+export default function DepartmentsView({ activeBranch, simulatedRole, members = [], reports = [], events = [], onAddEvent, audits = [], permissionMatrix, forms = [], departments, onUpdateDepartments, onUpdateMember, onAddMember, busLines = [], onAddReport, onAddAuditLog, selectedDept: selectedDeptProp, setSelectedDept: setSelectedDeptProp, operatorId, onOpenQuickNewForm }: DepartmentsViewProps) {
   const INITIAL_MINISTRIES = useMinistries();
   // B3 — départements = source unique dans App (prop). Créations/sections via onUpdateDepartments.
   const [show360Member, setShow360Member] = useState<Member | null>(null);
@@ -125,6 +126,29 @@ export default function DepartmentsView({ activeBranch, simulatedRole, members =
     setNewActTitle('');
   };
   const removeActivity = (id: string) => setActivities(prev => prev.filter(a => a.id !== id));
+
+  // §7.2 — création d'un événement (portée large) depuis l'agenda du département : le dept en est
+  // l'organisateur, la branche/portée héritent du département.
+  const [newEvtTitle, setNewEvtTitle] = useState('');
+  const [newEvtDate, setNewEvtDate] = useState('');
+  const [newEvtType, setNewEvtType] = useState('Séminaire');
+  const createDeptEvent = () => {
+    const dept = departments.find(d => d.id === selectedDept);
+    if (!newEvtTitle.trim() || !newEvtDate || !dept || !onAddEvent) return;
+    const branch: Branch = dept.branch ?? 'church';
+    onAddEvent({
+      id: `evt_dept_${selectedDept}_${Date.now()}`,
+      title: newEvtTitle.trim(),
+      type: newEvtType.trim() || 'Événement',
+      date: newEvtDate,
+      branch,
+      scope: branch === 'global' ? 'both' : branch,
+      organizer: selectedDept,
+      closed: false,
+    });
+    onAddAuditLog?.({ id: `aud_evt_${Date.now()}`, timestamp: new Date().toISOString(), actionType: 'EVENT_CREATED', entity: 'event', details: `Événement « ${newEvtTitle.trim()} » créé depuis l'agenda du département`, operatorId: operatorId ?? '', operatorName: '', branch });
+    setNewEvtTitle(''); setNewEvtDate('');
+  };
 
   // Spec (Onglet 4) : créer un département = Pasteur Principal / Admin / Super Admin.
   const canAdmin = ['Pasteur Principal', 'Admin', 'Super Admin'].includes(simulatedRole);
@@ -932,6 +956,19 @@ export default function DepartmentsView({ activeBranch, simulatedRole, members =
                         <input value={newActDay} onChange={e => setNewActDay(e.target.value)} placeholder="Jour" className="min-w-0 flex-1 border border-bc-border rounded-full px-2 py-1.5 text-xs focus:outline-none focus:border-bc-green" />
                         <input value={newActTime} onChange={e => setNewActTime(e.target.value)} placeholder="Heure" className="w-16 border border-bc-border rounded-full px-2 py-1.5 text-xs focus:outline-none focus:border-bc-green" />
                         <button onClick={addActivity} disabled={!newActTitle.trim()} className="px-3 py-1.5 bg-bc-green text-white rounded-full text-xs font-bold disabled:opacity-40 shrink-0 active-scale"><Plus size={13} /></button>
+                      </div>
+                    </div>
+                  )}
+                  {onAddEvent && (
+                    <div className="mt-4 pt-4 border-t border-bc-border">
+                      <p className="text-xs font-bold text-bc-text mb-2 flex items-center gap-1.5"><Calendar size={13} /> Créer un événement (audience large)</p>
+                      <div className="grid grid-cols-1 sm:grid-cols-4 gap-2">
+                        <input value={newEvtTitle} onChange={e => setNewEvtTitle(e.target.value)} placeholder="Titre de l'événement…" className="sm:col-span-2 border border-bc-border rounded-full px-3 py-1.5 text-xs focus:outline-none focus:border-bc-green" />
+                        <input type="date" value={newEvtDate} onChange={e => setNewEvtDate(e.target.value)} className="border border-bc-border rounded-full px-3 py-1.5 text-xs focus:outline-none focus:border-bc-green" />
+                        <div className="flex gap-2">
+                          <input value={newEvtType} onChange={e => setNewEvtType(e.target.value)} placeholder="Type" className="min-w-0 flex-1 border border-bc-border rounded-full px-2 py-1.5 text-xs focus:outline-none focus:border-bc-green" />
+                          <button onClick={createDeptEvent} disabled={!newEvtTitle.trim() || !newEvtDate} className="px-3 py-1.5 bg-bc-green text-white rounded-full text-xs font-bold disabled:opacity-40 shrink-0 active-scale"><Plus size={13} /></button>
+                        </div>
                       </div>
                     </div>
                   )}
