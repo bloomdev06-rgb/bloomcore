@@ -17,8 +17,10 @@ WORKDIR /app
 ENV NODE_ENV=production \
     BLOOMCORE_DB=/data/bloomcore.db
 # /data doit exister avant l'ouverture SQLite (db.ts ne crée pas le dossier). Sans volume
-# monté → base éphémère dans cette couche ; avec volume → persistée. Les tables auxiliaires
-# (credentials/tokens/…) restent en SQLite sur /data même en mode Postgres.
+# monté → base éphémère dans cette couche ; avec volume → persistée. En mode Postgres
+# (DATABASE_URL défini), TOUTES les données runtime vont en PG (domaine, KV, credentials,
+# tokens, sync_ops, webhook_events, outbox) ; le SQLite /data ne sert plus que de source
+# lue UNE fois au boot pour la migration blob→PG, puis reste gelé (backup de l'instant).
 RUN mkdir -p /data
 # prisma/ AVANT npm ci (idem build) : postinstall `prisma generate` génère le client.
 # prisma est désormais une dependency → inclus par --omit=dev.

@@ -26,8 +26,10 @@ Générer un secret fort : `openssl rand -hex 32` (ou
 > de forger un token Super Admin.
 
 ## Déploiement sur Coolify (recommandé : mode Docker Compose)
-1. Ressource → **Build Pack : Docker Compose** → `docker-compose.yml` du repo, branche `main`.
+1. Ressource → **Build Pack : Docker Compose** → `docker-compose.yml` du repo, branche `m6-relational`.
    Coolify dérive alors service / port `4000` / volume `/data` / healthcheck depuis git.
+   (Le déploiement se fait **directement depuis `m6-relational`** — cette branche est un
+   sur-ensemble de `main` ; `main` n'est jamais utilisé comme cible de déploiement.)
 2. **Environment Variables** (une seule fois, persistent entre redeploys) :
    `AUTH_SECRET`, `ACADEMY_WEBHOOK_SECRET`, `APP_URL=https://<domaine>`, `SEED_DEMO_PASSWORD=bloom2026`.
 3. **Domains** : `https://<domaine>` (Coolify gère le TLS).
@@ -54,10 +56,11 @@ Le `docker-compose.yml` embarque un service `db` (Postgres 16) et branche déjà
 
 Le backend de données est à double implémentation (`server/datastore.ts`) : **si
 `DATABASE_URL` est défini → Postgres (Prisma), sinon → SQLite legacy** (mode
-historique inchangé). Les données domaine (membres, événements, rapports…) vont
-en Postgres ; les tables auxiliaires (`credentials`, `tokens`, `sync_ops`,
-`webhook_events`, `outbox`) **restent en SQLite sur `/data`** pour l'instant
-(follow-up documenté).
+historique inchangé). En mode Postgres, **toutes** les données runtime vont en PG :
+données domaine (membres, événements, rapports…), KV, **et** les tables
+auxiliaires (`credentials`, `tokens`, `sync_ops`, `webhook_events`, `outbox`).
+Plus aucune écriture runtime ne touche SQLite ; le fichier `/data/*.db` ne sert
+plus que de **source lue une fois au boot** (migration) puis de backup gelé.
 
 ### Mise en place sur Coolify
 1. **Ajouter une ressource PostgreSQL** dans le **même projet** que l'app.
@@ -71,12 +74,14 @@ en Postgres ; les tables auxiliaires (`credentials`, `tokens`, `sync_ops`,
 1. L'entrypoint lance `prisma migrate deploy` → crée le schéma (24 modèles) à
    partir de `prisma/migrations/` (committées).
 2. Le serveur lance une **migration one-shot** `migrateFromSqlite` : il importe
-   les données SQLite existantes du volume `/data` dans Postgres, en
-   canonicalisant chaque item (M5 snake_case). **Idempotent**, gardée par le flag
-   `_m6_migrated` (KV Postgres) → ne s'exécute qu'une fois. Si aucun SQLite
-   n'existe sur `/data` (déploiement neuf), rien à migrer → `ensureSeeded` seed.
+   dans Postgres les données SQLite existantes du volume `/data` — données domaine
+   (canonicalisées M5 snake_case) + KV **+ `credentials`, `tokens`, `sync_ops`,
+   `webhook_events`, `outbox`**. **Idempotent**, gardée par le flag `_m6_migrated`
+   (KV Postgres) → ne s'exécute qu'une fois. Si aucun SQLite n'existe sur `/data`
+   (déploiement neuf), rien à migrer → `ensureSeeded` seed.
 3. `ensureSeeded` complète ensuite ce qui manque.
 
 > Sans `DATABASE_URL` : mode SQLite legacy, aucune de ces étapes ne tourne.
-> Note : `credentials`/`tokens` restent en SQLite sur `/data` — garder le volume
-> `/data` persistant même en mode Postgres.
+> Important : garder le volume `/data` **persistant et monté** — c'est la source lue
+> au 1er boot Postgres (et le backup gelé de l'instant du cutover). Sans lui, la
+> migration n'a rien à importer.
