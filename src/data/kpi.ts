@@ -1,6 +1,6 @@
 // Pure KPI/period helpers reused across dashboards (Accueil, Ministères, Bloom Bus…).
 import { Member, Project, Report } from '../types';
-import { mondayOf, weekId } from './week';
+import { mondayOf, weekId, weekOffset } from './week';
 
 export type Period = 'week' | 'month' | 'quarter' | 'year' | 'custom';
 // Une période nommée, ou un range explicite (option "Personnalisé" du sélecteur).
@@ -51,20 +51,48 @@ export function dominantHealthLevel(members: Member[], axis: keyof Member['healt
   return dominantLevel(members.map((m) => m.healthKPIs[axis]));
 }
 
-// KPIS.md "au rouge" — deux clauses (D5) : (1) en attente de validation > 7j, OU
-// (2) en cours d'intégration mais sans contact/suivi > 7j. L'horloge de la clause 2
-// démarre à l'enregistrement et se réinitialise à chaque contact (lastContact).
-export function isRed(m: Member, now: Date = new Date()): boolean {
+// §5.2 — seuil de la 5e dimension "présence culte" : nombre d'absences consécutives au culte
+// qui fait passer le membre au rouge. Ajustable (promouvable en AppSettings si un réglage
+// runtime devient nécessaire).
+export const PRESENCE_CULTE_ABSENCE_THRESHOLD = 2;
+
+// Absences consécutives au culte à partir de la dernière semaine TERMINÉE (S-1) en remontant.
+// Présent une semaine = il existe un rapport_bloom_bus_member du membre pour cette semaine avec
+// `content.culte` renseigné ; une semaine sans rapport compte donc comme une absence.
+// ponytail: on n'évalue que les membres déjà suivis par le bus (au moins un rapport) — sinon
+// une absence de données (nouveau rattaché) serait comptée à tort comme une absence réelle.
+export function consecutiveCulteAbsences(m: Member, busReports: Report[], now: Date = new Date()): number {
+  const mine = busReports.filter((r) => r.reportType === 'rapport_bloom_bus_member' && r.content?.memberId === m.id);
+  if (mine.length === 0) return 0;
+  const present = new Set(mine.filter((r) => r.content?.culte).map((r) => weekId(r.weekOf ?? r.date)));
+  let streak = 0;
+  let wk = weekOffset(weekId(now), -1);
+  // Cap au seuil : on ne cherche qu'à savoir si l'on atteint ≥ seuil, inutile de remonter plus loin.
+  while (streak < PRESENCE_CULTE_ABSENCE_THRESHOLD && !present.has(wk)) {
+    streak++;
+    wk = weekOffset(wk, -1);
+  }
+  return streak;
+}
+
+// KPIS.md "au rouge" — clauses (D5) : (1) en attente de validation > 7j, OU (2) en cours
+// d'intégration mais sans contact/suivi > 7j (horloge démarrée à l'enregistrement, remise à
+// zéro à chaque contact via lastContact), OU (3, §5.2) membre rattaché à un bus absent au culte
+// ≥ PRESENCE_CULTE_ABSENCE_THRESHOLD semaines consécutives. La clause 3 n'est évaluée que si
+// les rapports bus sont fournis (busReports) et que le membre a un bus rattaché.
+export function isRed(m: Member, now: Date = new Date(), busReports?: Report[]): boolean {
   const cutoff = now.getTime() - 7 * 24 * 60 * 60 * 1000;
   const pendingTooLong =
     m.integrationState === 'en_attente' &&
     !!m.integrationDateRegistered &&
     new Date(m.integrationDateRegistered).getTime() < cutoff;
-  // Clause 2 : membre en pipeline (En attente/Suivi) dont le dernier contact remonte à > 7j.
   const followed = m.integrationState === 'en_attente' || m.integrationState === 'suivi';
   const lastTouch = m.lastContact || m.integrationDateRegistered;
   const staleContact = followed && !!lastTouch && new Date(lastTouch).getTime() < cutoff;
-  return pendingTooLong || staleContact;
+  const culteAbsent =
+    !!busReports && !!m.bloomBusId &&
+    consecutiveCulteAbsences(m, busReports, now) >= PRESENCE_CULTE_ABSENCE_THRESHOLD;
+  return pendingTooLong || staleContact || culteAbsent;
 }
 
 // KPIS.md §5 — T_mob_bus = (Σ présents au départ / Σ membres rattachés) × 100, sur la période.

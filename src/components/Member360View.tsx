@@ -153,7 +153,7 @@ export default function Member360View({ member, onClose, onEdit, onUpdate, repor
     { key: 'Physique', color: 'var(--color-bc-danger)' },
   ];
 
-  const isAtRisk = isRed(member);
+  const isAtRisk = isRed(member, undefined, reports);
 
   // createPortal vers document.body : sinon l'overlay `fixed` est capté par un ancêtre avec
   // `filter`/`transform` (l'animation de page dans App.tsx laisse `filter: blur(0px)`), ce qui

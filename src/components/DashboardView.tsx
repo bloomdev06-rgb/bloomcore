@@ -107,7 +107,7 @@ export default function DashboardView({ activeBranch, simulatedRole, members = [
   const branchReports = scopedReports.filter(r => activeBranch === 'global' || r.targetBranch === activeBranch);
   const branchEvents = events.filter(e => activeBranch === 'global' || e.branch === activeBranch || e.branch === 'global');
   const waitingCount = branchMembers.filter(m => m.integrationState === 'en_attente').length;
-  const redCount = branchMembers.filter(m => isRed(m)).length;
+  const redCount = branchMembers.filter(m => isRed(m, undefined, reports)).length;
   const pendingReceptionsCount = branchMembers.filter(m => m.integrationState === 'en_attente' && m.receptionValidated === false).length;
   // Actif = a servi ≥ 1 fois sur la période du sélecteur.
   const activeCount = activeMemberIds(branchReports, effectivePeriod).size;

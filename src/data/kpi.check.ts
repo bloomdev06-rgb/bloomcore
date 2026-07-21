@@ -4,6 +4,7 @@ import {
   periodRange, levelToPercent, dominantHealthLevel, isRed, busMobilisationRate,
   moissonTotal, moissonBySource, busVisitesTotal, busPresenceCulteTotal, busActivitesTotal, activeBusIds, activeMemberIds, Period,
   pendingFollowUps, periodHealthLevels, periodWindows, healthEvolutionSeries,
+  consecutiveCulteAbsences, PRESENCE_CULTE_ABSENCE_THRESHOLD,
 } from './kpi';
 import { Member, Report } from '../types';
 
@@ -177,5 +178,32 @@ assert.deepEqual([...activeMemberIds(deptReports, 'week', nowRed)].sort(), ['mem
   assert.strictEqual(series[1].Physique, 2.5, 'valeur absente comptée 0 dans la moyenne');
   assert.deepStrictEqual(healthEvolutionSeries([]), [], 'aucun rapport → série vide');
 }
+
+// §5.2 — 5e dimension présence culte : rouge à ≥ 2 absences consécutives sur les dernières
+// semaines TERMINÉES. now = mardi 30/6 → S-1 = semaine du 22/6, S-2 = du 15/6, S-3 = du 8/6.
+assert.equal(PRESENCE_CULTE_ABSENCE_THRESHOLD, 2);
+const culteMember = (over: Partial<Member> = {}): Member =>
+  ({ id: 'mA', integrationState: 'integre', bloomBusId: 'bus_1', ...over } as Member);
+const rep = (memberId: string, weekOf: string, culte: string | null): Report =>
+  ({ reportType: 'rapport_bloom_bus_member', date: weekOf, weekOf, content: { memberId, culte } } as Report);
+
+// Présent la dernière semaine terminée (S-1) → 0 absence consécutive → pas rouge.
+assert.equal(consecutiveCulteAbsences(culteMember(), [rep('mA', '2026-06-22', 'culte')], nowRed), 0);
+assert.equal(isRed(culteMember(), nowRed, [rep('mA', '2026-06-22', 'culte')]), false);
+// Présent seulement en S-3 → absent S-1 et S-2 → 2 absences → rouge.
+const absentReports = [rep('mA', '2026-06-08', 'culte')];
+assert.equal(consecutiveCulteAbsences(culteMember(), absentReports, nowRed), 2);
+assert.equal(isRed(culteMember(), nowRed, absentReports), true);
+// Absent S-1 mais présent S-2 → 1 seule absence consécutive → pas rouge.
+assert.equal(consecutiveCulteAbsences(culteMember(), [rep('mA', '2026-06-15', 'culte')], nowRed), 1);
+assert.equal(isRed(culteMember(), nowRed, [rep('mA', '2026-06-15', 'culte')]), false);
+// Rapport présent mais content.culte vide = absence.
+assert.equal(consecutiveCulteAbsences(culteMember(), [rep('mA', '2026-06-22', null), rep('mA', '2026-06-08', 'culte')], nowRed), 2);
+// Aucun suivi bus du membre → non jugé absent (données absentes ≠ absence réelle).
+assert.equal(consecutiveCulteAbsences(culteMember(), [rep('autre', '2026-06-22', null)], nowRed), 0);
+assert.equal(isRed(culteMember(), nowRed, [rep('autre', '2026-06-22', null)]), false);
+// Rétrocompat : sans busReports, ou sans bloomBusId, la clause 3 n'est pas évaluée.
+assert.equal(isRed(culteMember(), nowRed), false);
+assert.equal(isRed(culteMember({ bloomBusId: undefined }), nowRed, absentReports), false);
 
 console.log('kpi.check OK');

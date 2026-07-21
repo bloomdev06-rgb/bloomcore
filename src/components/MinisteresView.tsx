@@ -233,7 +233,7 @@ export default function MinisteresView({ activeBranch, simulatedRole, members, r
     const ministryMoisson = moissonBySource(ministryReports, effectivePeriod);
     const ministryOj = ojTotal(ministryReports, effectivePeriod);
     const ministryFollowUps = pendingFollowUps(ministryReports);
-    const ministryRedCount = ministryMembers.filter(m => isRed(m)).length;
+    const ministryRedCount = ministryMembers.filter(m => isRed(m, undefined, reports)).length;
     const ministryGrowthData = weeklyGrowthSeries(ministryMembers, ministryReports, effectivePeriod);
     const ministryActivities = load('bc_activities', activitiesSeed).filter(a => mDeptIds.includes(a.departmentId));
     const ministryProjects = allProjects.filter(p => p.status === 'En cours' && p.scope === 'ministere' && p.ministryId === selected.id);

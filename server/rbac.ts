@@ -4,7 +4,7 @@
 // pas diverger sur la sémantique des capacités et du scope.
 import { Member, Ministry, PermissionMatrix, Delegation, AdminAccount, Department, BloomBusEntity, SpecialAuthorization, CapabilityOverride } from '../src/types.ts';
 import { resolveCapability } from '../src/data/permissions.ts';
-import { inMemberScope, canFillReportFor, bloomBusRoleOf, MULTI_BRANCH_ROLES } from '../src/data/scope.ts';
+import { inMemberScope, canFillReportFor, busInScope, fullBloomBusAccess, bloomBusRoleOf, MULTI_BRANCH_ROLES } from '../src/data/scope.ts';
 import { isBusReportLocked } from '../src/data/reportLock.ts';
 import { getKv } from './datastore.ts';
 import { GuardError, readCollection, canonical } from './guards.ts';
@@ -380,8 +380,52 @@ export async function filterReadable(name: string, ctx: RbacContext, items: any[
           };
         }
       }
+      // §8.1 — cascade de visibilité par FILIÈRE pour les rapports NON confidentiels : un rapport
+      // ne remonte qu'à la hiérarchie de sa filière. Rapport Bloom Bus → hiérarchie Bloom Bus
+      // (capitaine/zone/commune/responsable du bus visé) ; rapport de département → hiérarchie du
+      // département (fonction supervisrice dans CE département, ou ministre de tutelle). Le corps
+      // pastoral / full-scope voient tout ; l'auteur voit toujours le sien. Ainsi un Responsable de
+      // dépt ne voit PAS les rapports Bloom Bus de ses membres s'il n'est pas dans la filière bus.
+      const scopeRole = SCOPE_ROLE_ORDER.find(([r]) => roles.includes(r))?.[1] ?? 'Membre';
+      const SUP_DEPT_FNS = new Set(['responsable', 'adjoint', 'responsable_section']);
+      let allMembers: Member[] = [];
+      let deptsAll: Department[] = [];
+      let minsAll: Ministry[] = [];
+      let busAll: BloomBusEntity[] = [];
+      if (!fullScope && !pastoralCorps) {
+        allMembers = await readCollection('members') as Member[];
+        deptsAll = await readCollection('departments') as Department[];
+        minsAll = await readCollection('ministries') as Ministry[];
+        busAll = await readCollection('bus_lines') as BloomBusEntity[];
+      }
+      const canSeeNonConfidential = (r: any): boolean => {
+        if (fullScope || pastoralCorps) return true;
+        if (r.authorId && r.authorId === member.id) return true;
+        const isBus = r.reportType === 'rapport_bloom_bus_member'
+          || r.reportType === 'rapport_bloom_bus_life' || r.departmentId === 'dept_bloom_bus';
+        if (isBus) {
+          if (r.reportType === 'rapport_bloom_bus_member' && r.content?.memberId) {
+            const subject = allMembers.find((m) => m.id === r.content.memberId);
+            return !!subject && canFillReportFor(member, subject, scopeRole, allMembers, busAll, deptsAll);
+          }
+          if (r.content?.busId) {
+            const bus = busAll.find((b) => b.id === r.content.busId);
+            return !!bus && busInScope(member, bus, scopeRole, busAll, deptsAll);
+          }
+          return fullBloomBusAccess(member, scopeRole, deptsAll);
+        }
+        if (r.departmentId) {
+          const fn = member.departments?.[r.departmentId];
+          if (fn && SUP_DEPT_FNS.has(fn)) return true;
+          const dept = deptsAll.find((d) => d.id === r.departmentId);
+          return !!dept && minsAll.some((mi) => mi.id === dept.ministryId && mi.tuteurId === member.id);
+        }
+        // ponytail: rapport sans filière identifiable (ni bus ni département) → visibilité branche
+        // conservée, faute de hiérarchie à remonter. Resserrer si un type non catégorisé émerge.
+        return true;
+      };
       let out = items.filter((r) => {
-        if (!r.confidential) return true;
+        if (!r.confidential) return canSeeNonConfidential(r);
         if (pastoralCorps) return true;
         if (r.reportType === 'rapport_suivi_coach' && r.content?.memberId
             && (isCoach || suiviAuths.length) && suiviSubjectInScope(r.content.memberId)) return true;

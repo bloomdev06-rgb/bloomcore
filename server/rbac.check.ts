@@ -290,4 +290,36 @@ assert.deepEqual(
   );
 }
 
+// --- §8.1 — cascade de visibilité LECTURE des rapports par FILIÈRE (bus vs département) ---
+{
+  await applyWrite('departments', [
+    { id: 'd1', name: 'D1', ministryId: 'min1', type: 'normal' },
+    { id: 'd2', name: 'D2', ministryId: 'min1', type: 'normal' },
+    { id: 'dept_bloom_bus', name: 'Bloom Bus', ministryId: 'min1', type: 'normal', specialFunction: 'bloom_bus' },
+  ]);
+  await applyWrite('bus_lines', [{ id: 'bus1', name: 'B1', commune: 'Cocody', zone: 'Est' }] as any);
+  await applyWrite('members', [
+    superAdmin, pasteur, ministre,
+    baseMember({ id: 'm4', departments: { d1: 'responsable' } }),
+    baseMember({ id: 'mBus', departments: { d1: 'membre' }, bloomBusId: 'bus1' }),
+    baseMember({ id: 'mCap', departments: { dept_bloom_bus: 'capitaine' }, bloomBusId: 'bus1' }),
+    baseMember({ id: 'mOut', departments: { d2: 'responsable' } }),
+  ]);
+
+  const deptReport = { id: 'r_dept', reportType: 'rapport_service', departmentId: 'd1', confidential: false, targetBranch: 'church', date: '2026-07-15', authorId: 'mem_sa', content: {} };
+  // Rapport Bloom Bus rempli par le membre lui-même (authorId=mBus) → teste la visibilité par
+  // filière, pas le raccourci "auteur voit le sien".
+  const busReport = { id: 'r_bus', reportType: 'rapport_bloom_bus_member', departmentId: 'dept_bloom_bus', confidential: false, targetBranch: 'church', date: '2026-07-15', authorId: 'mBus', content: { memberId: 'mBus' } };
+  const sees = async (mid: string, r: any) => (await filterReadable('reports', (await buildContext(mid))!, [r])).some((x: any) => x.id === r.id);
+
+  // Rapport de département → hiérarchie du département.
+  assert.ok(await sees('m4', deptReport), 'Responsable du dépt voit le rapport de son département');
+  assert.ok(!(await sees('mOut', deptReport)), 'Responsable d’un AUTRE dépt ne voit pas le rapport (cascade dépt)');
+  assert.ok(await sees('m3', deptReport), 'Ministre (corps pastoral) voit le rapport de département');
+
+  // Rapport Bloom Bus → hiérarchie Bloom Bus, PAS la hiérarchie département du membre.
+  assert.ok(!(await sees('m4', busReport)), 'Responsable de dépt ne voit PAS le rapport Bloom Bus de son membre (cloisonnement filière)');
+  assert.ok(await sees('mCap', busReport), 'Capitaine du bus du membre voit son rapport Bloom Bus');
+}
+
 console.log('rbac.check OK');
