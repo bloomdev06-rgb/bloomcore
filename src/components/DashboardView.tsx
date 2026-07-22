@@ -15,7 +15,6 @@ import {
 } from '../data/kpi';
 import { useBusLines, useProjects, useDepartments, useMinistries, labelFor } from '../data';
 import { dashboardScope } from '../data/scope';
-import { TrendsPanel } from './ui/TrendsPanel';
 
 interface DashboardViewProps {
   activeBranch: Branch;
@@ -538,17 +537,6 @@ export default function DashboardView({ activeBranch, simulatedRole, members = [
           </div>
         </div>
       )}
-
-      {/* §13.3 — Tendances scopées par rôle (Admin/Pasteur = global ; Responsable = son
-          département ; Ministre = ses ministères), même portée que les KPI ci-dessus. */}
-      <div>
-        <div className="flex items-center gap-2 mb-4 mt-2">
-          <TrendingUp size={22} className="text-bc-green" />
-          <h2 className="text-2xl font-ui font-extrabold tracking-tight">Tendances</h2>
-          <span className="ml-1 px-2.5 py-1 rounded-full bg-bc-green/10 text-bc-green text-xs font-bold">{scope.label}</span>
-        </div>
-        <TrendsPanel members={branchMembers} reports={branchReports} effectivePeriod={effectivePeriod} />
-      </div>
     </div>
   );
 }
