@@ -12,7 +12,7 @@ interface BadgeProps {
 
 const TONE_TEXT: Record<Tone, string> = {
   green: "text-bc-green",
-  gold: "text-bc-gold",
+  gold: "text-bc-green-dark", // charte §1.1 : doré jamais seul → texte vert foncé sur tuile dorée (contraste AA OK, ex-text-bc-gold ~2.1:1)
   cerulean: "text-bc-cerulean",
   orange: "text-bc-orange",
   purple: "text-bc-purple",

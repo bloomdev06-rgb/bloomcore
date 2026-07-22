@@ -50,6 +50,7 @@ typography:
     fontWeight: 400
 rounded:
   input: "8px"
+  control: "12px"   # rounded-xl — éléments compacts (chips filtres, mini-inputs, cellules calendrier, lignes de liste). Réconcilie CHARTE §4 --radius-card.
   tile: "16px"
   panel: "32px"
   pill: "999px"
@@ -208,10 +209,11 @@ only for true overlays (modals) or on hover/active state, never as constant card
 - **Ghost:** transparent background, green text — tertiary actions.
 - **Disabled:** Warm Grey background, gray text.
 - **Hover/Focus:** hover darkens to green-700; focus ring `0 0 0 3px rgba(0,108,103,.12)`.
-- **Correction (this session):** the app never actually implements a 12px card radius anywhere —
-  `--radius-card` was dead CSS, referenced by zero components. The real, already-consistent
-  convention (97 instances across 23 of 24 view files) is `rounded-[2rem]` (32px) for outer
-  panels/cards and `rounded-2xl` (16px) for inner tiles — see Cards/Containers below.
+- **Note (révisée 2026-07-22) :** l'échelle réelle est à **4 paliers** — `rounded-[2rem]` (32px)
+  panels, `rounded-2xl` (16px) tiles, et **`rounded-xl` (12px) pour les contrôles compacts**
+  (81 usages systématiques mesurés par l'audit design). Le 12px n'était donc PAS du CSS mort :
+  la valeur `--radius-card: 12px` de la CHARTE §4 correspond bien à cette convention `rounded-xl`.
+  Voir Cards/Containers ci-dessous pour l'échelle complète.
 
 ### Chips / Status Pills
 - **Lifecycle colors:** Nouveau (neutral gray) → En attente (orange 16%) → Suivi (cerulean 16%) →
@@ -220,10 +222,13 @@ only for true overlays (modals) or on hover/active state, never as constant card
   shape, no border.
 
 ### Cards / Containers
-- **Corner Style:** two real tiers — outer panel/section card `rounded-[2rem]` (32px), inner
-  content tile `rounded-2xl` (16px). Modals go a step larger, `rounded-[2.5rem]` (40px). Treat
-  these three as the actual scale; a lone `rounded-xl`/`rounded-3xl` inside an otherwise
-  `[2rem]`/`2xl` file is the real inconsistency to fix, not the `[2rem]` value itself.
+- **Corner Style (échelle réelle à 4 paliers, réconciliée 2026-07-22) :** outer panel/section
+  card `rounded-[2rem]` (32px) · inner content tile `rounded-2xl` (16px) · **compact control
+  `rounded-xl` (12px)** pour les petits éléments (chips de filtres, mini-inputs, cellules de
+  calendrier, lignes de liste) · modals `rounded-[2.5rem]` (40px). Le palier 12px n'est PAS une
+  dérive : l'audit design (2026-07-22) a mesuré **81 usages systématiques sur des éléments
+  compacts** — c'est une convention réelle, alignée sur `--radius-card: 12px` de la CHARTE §4.
+  La vraie inconsistance à corriger reste un `rounded-3xl` (24px) isolé, hors échelle.
 - **Background:** white surface (`--bc-surface`), dark-mode override to `#1E293B`.
 - **Shadow Strategy:** hairline border by default; card shadow only when floating above content.
 - **Border:** 1px `--bc-border`.
@@ -267,9 +272,10 @@ separate, per-user cosmetic layer, not the structural cascade.
 - **Don't** combine more than two accent colors on one screen.
 - **Don't** default to a cold B2B SaaS look or a warm-cream/beige body background "for elegance" —
   the base is white, not tinted sand.
-- **Don't** introduce a radius value outside the real three-tier scale (`rounded-2xl` tile /
-  `rounded-[2rem]` panel / `rounded-[2.5rem]` modal, plus `--radius-input`/`--radius-pill`) — a
-  one-off `rounded-xl` or `rounded-3xl` in an otherwise-consistent file is the drift to fix.
+- **Don't** introduce a radius value outside the real 4-tier scale (`rounded-xl` control 12px /
+  `rounded-2xl` tile 16px / `rounded-[2rem]` panel 32px / `rounded-[2.5rem]` modal 40px, plus
+  `--radius-input` 8px / `--radius-pill`) — a stray `rounded-3xl` (24px) or `rounded-lg`/`-md`
+  where a scale tier fits is the drift to fix. `rounded-xl` on a compact control is NOT drift.
 - **Don't** reintroduce the generic `emerald`/`amber`/`red` Tailwind literals for
   success/warning/danger — use the charter's semantic mapping (anis/orange/purple) instead.
 - **Don't** ship a "branch switch" that only changes a decorative indicator inside the switcher

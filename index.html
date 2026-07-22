@@ -7,6 +7,8 @@
     <meta name="theme-color" content="#006C67" />
     <link rel="icon" href="/icon.svg" type="image/svg+xml" />
     <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    <!-- Précharge le subset latin de Montserrat (auto-hébergé, cf. index.css) → pas de FOUC. -->
+    <link rel="preload" href="/fonts/montserrat-latin.woff2" as="font" type="font/woff2" crossorigin />
     <!-- PWA installable + offline shell. Le service worker (/sw.js) est network-first sur le
          HTML → jamais figé après déploiement (cf. commentaire dans public/sw.js). -->
     <meta name="apple-mobile-web-app-capable" content="yes" />
