@@ -3,7 +3,10 @@ import type { ButtonHTMLAttributes, ReactNode } from "react"
 import { Loader2 } from "lucide-react"
 import { cn } from "../../lib/utils"
 
-type Variant = "primary" | "secondary" | "danger"
+// Conforme CHARTE-GRAPHIQUE.md §5.1 : 5 variantes, hover→vert-700, anneau de focus,
+// cible tactile ≥48px (§4/§9). ponytail: le primitive est prêt à être adopté — les
+// ~234 <button> inline existants restent à migrer (chantier séparé, non fait ici).
+type Variant = "primary" | "secondary" | "danger" | "excellence" | "ghost"
 type Size = "sm" | "md"
 
 interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
@@ -14,14 +17,17 @@ interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
 }
 
 const VARIANT_CLASS: Record<Variant, string> = {
-  primary: "bg-bc-green text-white hover:opacity-90",
-  secondary: "border border-bc-border text-bc-text-secondary hover:bg-bc-canvas",
-  danger: "bg-bc-danger text-white hover:opacity-90",
+  primary: "bg-bc-green text-white hover:bg-bc-green-hover",
+  secondary: "border border-bc-green text-bc-green hover:bg-bc-green/5",
+  danger: "bg-bc-danger text-white hover:brightness-95",
+  excellence: "bg-bc-gold text-bc-green-dark hover:brightness-95", // doré + texte vert foncé (§1.1 : jamais doré seul)
+  ghost: "text-bc-green hover:bg-bc-green/5",
 }
 
+// md = taille par défaut, cible tactile ≥48px (terrain mobile) ; sm = contexte dense desktop.
 const SIZE_CLASS: Record<Size, string> = {
-  sm: "px-3 py-1.5 text-xs",
-  md: "px-5 py-2 text-xs",
+  sm: "min-h-[40px] px-3 py-2 text-xs",
+  md: "min-h-[48px] px-5 py-2.5 text-sm",
 }
 
 export const Button = forwardRef<HTMLButtonElement, ButtonProps>(function Button(
@@ -35,6 +41,7 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(function Button
       disabled={disabled || loading}
       className={cn(
         "inline-flex items-center justify-center gap-1.5 rounded-full font-bold whitespace-nowrap transition-colors active-scale disabled:opacity-40 disabled:pointer-events-none",
+        "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-bc-green/50 focus-visible:ring-offset-2 focus-visible:ring-offset-bc-surface",
         VARIANT_CLASS[variant],
         SIZE_CLASS[size],
         className

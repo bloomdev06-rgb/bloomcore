@@ -69,8 +69,9 @@ const ProfileView = lazyRetry(() => import('./components/ProfileView'));
 import AuthView from './components/AuthView';
 import CreateDepartmentModal from './components/CreateDepartmentModal';
 import { ToastContainer } from './components/ui/Toast';
+import { PageSkeleton } from './components/ui/Skeleton';
 
-import { UserCheck, Sparkles, X, Heart, Loader2 } from 'lucide-react';
+import { UserCheck, Sparkles, X, Heart } from 'lucide-react';
 
 export default function App() {
   // Navigation states
@@ -763,7 +764,7 @@ export default function App() {
                 transition={{ duration: 0.15, ease: 'easeOut' }}
                 className="flex-1 flex flex-col min-h-full"
               >
-                <Suspense fallback={<div className="flex-1 flex items-center justify-center py-24"><Loader2 className="animate-spin text-bc-green" size={28} /></div>}>
+                <Suspense fallback={<PageSkeleton />}>
                   {renderActiveView()}
                 </Suspense>
               </motion.div>

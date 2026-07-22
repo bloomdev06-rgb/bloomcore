@@ -106,6 +106,27 @@ html.plein-soleil {
   --accent-2: var(--color-bc-fushia);
 }
 
+/* Focus clavier visible systématique (charte §6/§9). `:where()` = spécificité 0, donc
+   tout composant (ex. Button avec son ring vert) peut surcharger sans !important.
+   Le focus SOURIS n'est pas affecté (:focus-visible only). */
+:where(a, button, input, select, textarea, summary, [tabindex]):focus-visible {
+  outline: 2px solid var(--color-bc-green);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+/* Accessibilité — prefers-reduced-motion (charte §9). framer-motion est couvert par
+   <MotionConfig reducedMotion="user"> (main.tsx) ; ce bloc neutralise les animations
+   CSS (skeleton, color-sweep) et les transitions pour la sensibilité vestibulaire. */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
 /* Custom styles */
 body {
   font-family: var(--font-sans);
