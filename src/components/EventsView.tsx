@@ -21,6 +21,7 @@ import { Modal } from './ui/Modal';
 import { Event, EventRecurrence, Branch, Report, Member, FormDef } from '../types';
 import { useProjects, useDepartments, load, save } from '../data';
 import { eventsOverlap } from '../data/events';
+import { reportTypeRail } from '../data/domainColors';
 import { toast } from './ui/Toast';
 
 const RATINGS = [
@@ -468,8 +469,12 @@ export default function EventsView({
                 {evReports.length === 0 && <p className="text-xs text-bc-text-secondary italic">Aucun rapport rattaché à cet événement.</p>}
                 {evReports.map(r => (
                   <div key={r.id} className="flex items-center justify-between text-xs bg-bc-canvas/40 border border-bc-border rounded-full px-4 py-2">
-                    <span className="font-bold text-bc-text">{r.reportType.replace(/_/g, ' ')}</span>
-                    <span className="text-bc-text-secondary">{r.authorName} · {r.date}</span>
+                    <span className="flex items-center gap-2 min-w-0">
+                      {/* point de type (Move 3) — couleur par type de rapport, cf. domainColors */}
+                      <span className={`w-2 h-2 rounded-full shrink-0 ${reportTypeRail(r.reportType)}`} />
+                      <span className="font-bold text-bc-text capitalize truncate">{r.reportType.replace(/_/g, ' ')}</span>
+                    </span>
+                    <span className="text-bc-text-secondary shrink-0 ml-2">{r.authorName} · {r.date}</span>
                   </div>
                 ))}
               </div>

@@ -34,3 +34,26 @@ const TAB_FAMILY: Record<string, keyof typeof FAMILY> = {
 export function domainStyle(tabId: string): DomainStyle {
   return FAMILY[TAB_FAMILY[tabId] ?? 'overview'];
 }
+
+// Couleur de rail/point par TYPE de rapport (Move 3 étendu). Réutilise la palette de
+// domaine : ADN=or (âmes), Bloom Bus=turquoise (terrain), culte/portiers=céruléen,
+// pastoral/coach=anis (cheminement), service=vert (socle), activité=orange, observation=neutre.
+// ponytail: classes bg littérales (JIT). Source des clés : packages/shared/enums REPORT_TYPES.
+const REPORT_TYPE_RAIL: Record<string, string> = {
+  rapport_adn: 'bg-bc-gold',
+  rapport_bloom_bus_member: 'bg-bc-turquoise',
+  rapport_bloom_bus_life: 'bg-bc-turquoise',
+  rapport_culte: 'bg-bc-cerulean',
+  rapport_portiers: 'bg-bc-cerulean',
+  rapport_pastoral: 'bg-bc-anis',
+  rapport_suivi_coach: 'bg-bc-anis',
+  rapport_service: 'bg-bc-green',
+  rapport_rsa: 'bg-bc-green',
+  rapport_activite: 'bg-bc-orange',
+  rapport_observation: 'bg-bc-warmgrey',
+};
+
+/** Classe de fond (rail/point) pour un type de rapport (fallback : neutre). */
+export function reportTypeRail(reportType: string): string {
+  return REPORT_TYPE_RAIL[reportType] ?? 'bg-bc-warmgrey';
+}
