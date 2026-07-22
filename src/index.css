@@ -94,8 +94,10 @@ html.plein-soleil {
   --color-bc-warning: #F38B36; /* = orange */
   --color-bc-danger:  #B21E28; /* = purple */
 
-  /* Ombre diffuse teintée (inspirée Veltrix) — additive, ne remplace aucun shadow-sm/md/xl existant. */
-  --shadow-soft: 0 0 13px rgba(236,236,241,.44);
+  /* Ombre douce, directionnelle + très légère teinte Vert Sarcelle (Move 4 revue couleur) :
+     un vrai relief bas au lieu du halo gris plat. Additive, ne remplace aucun shadow-sm/md/xl.
+     ~270 call sites → profondeur cohérente partout d'un seul token. */
+  --shadow-soft: 0 1px 2px rgba(15,23,42,.04), 0 8px 20px -12px rgba(0,108,103,.16);
 }
 
 @utility ease-out-spring {

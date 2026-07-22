@@ -17,7 +17,7 @@ interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
 }
 
 const VARIANT_CLASS: Record<Variant, string> = {
-  primary: "bg-bc-green text-white hover:bg-bc-green-hover",
+  primary: "bg-gradient-to-b from-bc-green to-bc-green-hover text-white shadow-[0_4px_14px_-6px_rgba(0,108,103,.5)] hover:shadow-[0_7px_20px_-6px_rgba(0,108,103,.62)]", // Move 4 : sheen vertical + ombre verte teintée (lift au survol)
   secondary: "border border-bc-green text-bc-green hover:bg-bc-green/5",
   danger: "bg-bc-danger text-white hover:brightness-95",
   excellence: "bg-bc-gold text-bc-green-dark hover:brightness-95", // doré + texte vert foncé (§1.1 : jamais doré seul)
@@ -40,7 +40,7 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(function Button
       type={type}
       disabled={disabled || loading}
       className={cn(
-        "inline-flex items-center justify-center gap-1.5 rounded-full font-bold whitespace-nowrap transition-colors active-scale disabled:opacity-40 disabled:pointer-events-none",
+        "inline-flex items-center justify-center gap-1.5 rounded-full font-bold whitespace-nowrap transition active-scale disabled:opacity-40 disabled:pointer-events-none",
         "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-bc-green/50 focus-visible:ring-offset-2 focus-visible:ring-offset-bc-surface",
         VARIANT_CLASS[variant],
         SIZE_CLASS[size],

@@ -260,6 +260,8 @@ export default function NouveauxView({ members, onUpdateMember, activeBranch, si
                     onClick={() => selectMember(m)}
                     className={`w-full flex items-center gap-3 py-3 text-left transition-colors active-scale ${selectedId === m.id ? 'bg-bc-canvas' : 'hover:bg-bc-canvas/60'} rounded-xl px-2`}
                   >
+                    {/* rail de statut (Move 3) — la couleur du cycle de vie se lit sans lire le texte */}
+                    <span className={`w-1 self-stretch rounded-full shrink-0 ${meta.bar}`} />
                     <Avatar
                       src={m.avatarUrl}
                       initials={`${m.firstName[0]}${m.lastName[0]}`}
