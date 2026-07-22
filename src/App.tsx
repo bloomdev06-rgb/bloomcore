@@ -554,7 +554,7 @@ export default function App() {
           />
         );
       case 'trends':
-        return <TrendsView members={members} reports={reports} activeBranch={activeBranch} />;
+        return <TrendsView members={members} reports={reports} activeBranch={activeBranch} simulatedRole={simulatedRole} operatorId={operator?.id} />;
       case 'members':
         return (
           <MembersView

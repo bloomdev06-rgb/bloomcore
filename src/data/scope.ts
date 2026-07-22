@@ -1,8 +1,53 @@
 // Data-scope restriction for MembersView (P4.3) — narrows which members a role
 // can see, below the page-level `view_members` gate (that gate only decides who
 // can open the tab at all).
-import { Member, BloomBusEntity, Department, Ministry } from '../types';
+import { Member, BloomBusEntity, Department, Ministry, Report } from '../types';
 import { roleForDeptFn } from '../../packages/shared/migrate';
+
+export interface DashboardScope {
+  members: Member[];
+  reports: Report[];
+  deptIds: string[] | null; // null = global (aucune restriction)
+  label: string;            // 'Global' | 'Ministère …' | 'Département …'
+}
+
+// Portée de l'accueil / des tendances selon le rôle (§13.3, PROFILS-INTERFACES) :
+// staff pastoral (FULL_SCOPE) → global ; Ministre → ses ministères (tuteurId) ; Responsable/
+// Coach/Leader → leur département. Les séries de tendances sont clés par content.memberId
+// (departmentId rarement renseigné sur les rapports Bloom Bus) → on scope les rapports par
+// MEMBRE en portée (union avec les rapports tagués d'un département en portée). Extrait de
+// DashboardView pour que l'onglet Tendances et la section Tendances de l'accueil partagent
+// exactement la même portée.
+export function dashboardScope(
+  operator: Member | undefined,
+  role: string,
+  members: Member[],
+  reports: Report[],
+  departments: Department[],
+  ministries: Ministry[],
+): DashboardScope {
+  const ownMinistry = role === 'Ministre' ? ministries.find(m => m.tuteurId === operator?.id) : undefined;
+  const homeDeptId = ROLE_HOME_DEPT[role]
+    || Object.entries(operator?.departments ?? {}).find(([, fn]) => fn === 'responsable')?.[0]
+    || Object.keys(operator?.departments ?? {})[0];
+  const deptIds: string[] | null =
+    role === 'Ministre' ? (ownMinistry ? departments.filter(d => d.ministryId === ownMinistry.id).map(d => d.id) : [])
+    : ['Responsable', 'Coach', 'Leader'].includes(role) ? (homeDeptId ? [homeDeptId] : [])
+    : null; // Pasteur/Pasteur Principal/Admin/Super Admin → toute l'église.
+
+  if (deptIds === null) return { members, reports, deptIds: null, label: 'Global' };
+
+  const deptSet = new Set(deptIds);
+  const scopedMembers = members.filter(m => Object.keys(m.departments).some(id => deptSet.has(id)));
+  const memberIdSet = new Set(scopedMembers.map(m => m.id));
+  const scopedReports = reports.filter(r =>
+    (r.departmentId && deptSet.has(r.departmentId)) ||
+    (r.content?.memberId && memberIdSet.has(r.content.memberId)));
+  const label = ownMinistry ? ownMinistry.name // les noms de ministère contiennent déjà « Ministère … »
+    : deptIds.length ? `Département ${departments.find(d => d.id === deptIds[0])?.name ?? ''}`
+    : 'Ma portée';
+  return { members: scopedMembers, reports: scopedReports, deptIds, label };
+}
 
 export const FULL_SCOPE_ROLES = ['Super Admin', 'Admin', 'Pasteur Principal', 'Pasteur'];
 // PROFILS-INTERFACES : seuls la ligne pastorale/staff et le Coach (bi-branche) ont le

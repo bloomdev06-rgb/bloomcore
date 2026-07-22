@@ -14,7 +14,8 @@ import {
   ojTotal, weeklyOjCounts,
 } from '../data/kpi';
 import { useBusLines, useProjects, useDepartments, useMinistries, labelFor } from '../data';
-import { ROLE_HOME_DEPT } from '../data/scope';
+import { dashboardScope } from '../data/scope';
+import { TrendsPanel } from './ui/TrendsPanel';
 
 interface DashboardViewProps {
   activeBranch: Branch;
@@ -90,21 +91,15 @@ export default function DashboardView({ activeBranch, simulatedRole, members = [
   const ministries = useMinistries();
   const deptName = (id?: string) => departments.find(d => d.id === id)?.name ?? '';
 
-  // §13.3 — Responsable/Coach/Leader ne voient que leur département ; Ministre, son ministère.
-  const homeDeptId = ROLE_HOME_DEPT[simulatedRole]
-    || Object.entries(operator?.departments ?? {}).find(([, fn]) => fn === 'responsable')?.[0]
-    || Object.keys(operator?.departments ?? {})[0];
+  // §13.3 — portée selon le rôle (helper partagé avec l'onglet Tendances) : Ministre → ses
+  // ministères, Responsable/Coach/Leader → leur département, staff pastoral → global. Rapports
+  // scopés par MEMBRE (les tendances sont clés par content.memberId, pas departmentId).
+  const scope = dashboardScope(operator, simulatedRole, members, reports, departments, ministries);
   const ownMinistry = simulatedRole === 'Ministre' ? ministries.find(m => m.tuteurId === operator?.id) : undefined;
-  const scopeDeptIds =
-    simulatedRole === 'Ministre' ? (ownMinistry ? departments.filter(d => d.ministryId === ownMinistry.id).map(d => d.id) : [])
-    : ['Responsable', 'Coach', 'Leader'].includes(simulatedRole) ? (homeDeptId ? [homeDeptId] : [])
-    : null; // null = pas de restriction (Pasteur/Pasteur Principal/Admin/Super Admin voient toute l'église)
+  const homeDeptId = scope.deptIds?.[0];
 
-  const scopedMembers = scopeDeptIds ? members.filter(m => scopeDeptIds.some(id => id in m.departments)) : members;
-  const scopedReports = scopeDeptIds ? reports.filter(r => r.departmentId && scopeDeptIds.includes(r.departmentId)) : reports;
-
-  const branchMembers = scopedMembers.filter(m => activeBranch === 'global' || m.branch === activeBranch);
-  const branchReports = scopedReports.filter(r => activeBranch === 'global' || r.targetBranch === activeBranch);
+  const branchMembers = scope.members.filter(m => activeBranch === 'global' || m.branch === activeBranch);
+  const branchReports = scope.reports.filter(r => activeBranch === 'global' || r.targetBranch === activeBranch);
   const branchEvents = events.filter(e => activeBranch === 'global' || e.branch === activeBranch || e.branch === 'global');
   const waitingCount = branchMembers.filter(m => m.integrationState === 'en_attente').length;
   const redCount = branchMembers.filter(m => isRed(m, undefined, reports)).length;
@@ -544,6 +539,16 @@ export default function DashboardView({ activeBranch, simulatedRole, members = [
         </div>
       )}
 
+      {/* §13.3 — Tendances scopées par rôle (Admin/Pasteur = global ; Responsable = son
+          département ; Ministre = ses ministères), même portée que les KPI ci-dessus. */}
+      <div>
+        <div className="flex items-center gap-2 mb-4 mt-2">
+          <TrendingUp size={22} className="text-bc-green" />
+          <h2 className="text-2xl font-ui font-extrabold tracking-tight">Tendances</h2>
+          <span className="ml-1 px-2.5 py-1 rounded-full bg-bc-green/10 text-bc-green text-xs font-bold">{scope.label}</span>
+        </div>
+        <TrendsPanel members={branchMembers} reports={branchReports} effectivePeriod={effectivePeriod} />
+      </div>
     </div>
   );
 }
