@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Branch, Member, Event, Report } from '../types';
-import { Users, Bus, TrendingUp, AlertCircle, Clock, X, FolderKanban, Sparkles } from 'lucide-react';
+import { Users, Bus, TrendingUp, AlertCircle, Clock, X, FolderKanban, Sparkles, Church } from 'lucide-react';
 import { AreaChart, Area, XAxis, Tooltip, ResponsiveContainer } from 'recharts';
 import { ResponsiveChart } from './ui/ResponsiveChart';
 import { PeriodSelector } from './ui/PeriodSelector';
@@ -11,7 +11,7 @@ import {
   isRed, activeMemberIds, activeBusIds, moissonBySource, pendingFollowUps,
   periodHealthLevels, projectProgress, periodRange, Period, PeriodInput,
   weeklyBaptismCounts, weeklyActiveCounts, weeklyMoissonCounts, weeklyGrowthSeries,
-  ojTotal, weeklyOjCounts,
+  ojTotal, weeklyOjCounts, weeklyCulteCounts,
 } from '../data/kpi';
 import { useBusLines, useProjects, useDepartments, useMinistries, labelFor } from '../data';
 import { dashboardScope } from '../data/scope';
@@ -115,6 +115,8 @@ export default function DashboardView({ activeBranch, simulatedRole, members = [
   const totalBusLines = useBusLines().length;
   const moisson = moissonBySource(branchReports, effectivePeriod);
   const oj = ojTotal(branchReports, effectivePeriod);
+  const culteSeries = weeklyCulteCounts(branchReports, effectivePeriod);
+  const culteTotal = culteSeries.reduce((a, b) => a + b.count, 0);
   const { from: pFrom, to: pTo } = periodRange(effectivePeriod);
   const periodBaptised = branchMembers.filter(m => m.baptismDate && new Date(m.baptismDate) >= pFrom && new Date(m.baptismDate) <= pTo);
   const baptisedViaDept = periodBaptised.filter(m => m.baptismViaDepartment).length;
@@ -290,6 +292,16 @@ export default function DashboardView({ activeBranch, simulatedRole, members = [
             <div className="text-xl font-ui font-extrabold text-bc-text tracking-tight">{oj}</div>
             <Spark data={weeklyOjCounts(branchReports, effectivePeriod)} color="var(--color-bc-cerulean)" />
             <p className="text-[9px] text-bc-text-secondary mt-1">Sur la période · rapports ADN</p>
+          </div>
+
+          <div className="bg-white p-4 rounded-2xl border border-bc-border shadow-soft hover:shadow-md transition-shadow">
+            <div className="flex items-center gap-2 text-bc-text-secondary mb-2">
+              <Church size={14} />
+              <span className="text-[9px] font-bold uppercase tracking-wider">Présence culte</span>
+            </div>
+            <div className="text-xl font-ui font-extrabold text-bc-text tracking-tight">{culteTotal}</div>
+            <Spark data={culteSeries} color="var(--color-bc-purple)" />
+            <p className="text-[9px] text-bc-text-secondary mt-1">Présences au culte · rapports Bloom Bus</p>
           </div>
 
           <button
