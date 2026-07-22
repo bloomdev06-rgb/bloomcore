@@ -44,6 +44,16 @@ const LEVEL_STYLE: Record<string, string> = {
 };
 const levelStyle = (l: string) => LEVEL_STYLE[l] ?? "bg-bc-canvas text-bc-text-secondary";
 
+// Rail de statut (Move 3) — couleur de niveau pastoral en bord gauche des lignes de liste.
+// ponytail: classes bordure-gauche LITTÉRALES (JIT), même palette que LEVEL_STYLE.
+const LEVEL_RAIL: Record<string, string> = {
+  Coach: "border-l-bc-purple",
+  Leader: "border-l-bc-fushia",
+  Boss: "border-l-bc-cerulean",
+  Stagiaire: "border-l-bc-border",
+};
+const levelRail = (l: string) => LEVEL_RAIL[l] ?? "border-l-bc-border";
+
 function downloadCsv(filename: string, rows: string[][]) {
   const cell = (v: string) => `"${(v ?? "").replace(/"/g, '""')}"`;
   const csv = rows.map((r) => r.map(cell).join(",")).join("\n");
@@ -614,7 +624,7 @@ export default function MembersView({
                       }`}
                       onClick={() => open360View(member)}
                     >
-                      <td className="px-4 py-3">
+                      <td className={`px-4 py-3 border-l-4 ${levelRail(member.level)}`}>
                         <div className="flex items-center space-x-3">
                           {isRed(member) && (
                             <span className="w-2 h-2 rounded-full bg-bc-danger shrink-0" title="Au rouge" />

@@ -155,9 +155,9 @@ export default function CulteReportView({ events, reports, operator, activeBranc
   const inputCls = 'w-full border border-bc-border rounded-full px-3 py-2 text-xs bg-white focus:outline-none focus:border-bc-green';
   const labelCls = 'block text-xs font-bold text-bc-text mb-1';
   const STATUS_UI = {
-    complet: { label: 'Complet', cls: 'bg-bc-green/10 text-bc-green border-bc-green/30' },
-    comptages: { label: 'Comptages seuls', cls: 'bg-bc-warning/10 text-bc-text border-bc-warning/30' },
-    a_remplir: { label: 'À remplir', cls: 'bg-bc-canvas text-bc-text-secondary border-bc-border' },
+    complet: { label: 'Complet', cls: 'bg-bc-green/10 text-bc-green border-bc-green/30', rail: 'bg-bc-green' },
+    comptages: { label: 'Comptages seuls', cls: 'bg-bc-warning/10 text-bc-text border-bc-warning/30', rail: 'bg-bc-warning' },
+    a_remplir: { label: 'À remplir', cls: 'bg-bc-canvas text-bc-text-secondary border-bc-border', rail: 'bg-bc-warmgrey' },
   } as const;
 
   return (
@@ -184,6 +184,8 @@ export default function CulteReportView({ events, reports, operator, activeBranc
                   onClick={() => selectEvent(ev.id)}
                   className={`w-full text-left p-3 rounded-2xl border transition-colors flex items-center justify-between gap-2 ${selectedEventId === ev.id ? 'border-bc-green bg-bc-canvas' : 'border-bc-border bg-white hover:bg-bc-canvas/40'}`}
                 >
+                  {/* rail de statut (Move 3) — complétude du rapport lisible d'un coup d'œil */}
+                  <span className={`w-1 self-stretch rounded-full shrink-0 ${st.rail}`} />
                   <div className="min-w-0">
                     <p className="text-xs font-bold text-bc-text truncate">{ev.title}</p>
                     <p className="text-[10px] text-bc-text-secondary">
