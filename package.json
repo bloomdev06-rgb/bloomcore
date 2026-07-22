@@ -15,7 +15,7 @@
     "clean": "rm -rf dist server/*.db",
     "postinstall": "prisma generate",
     "lint": "tsc --noEmit && eslint src",
-    "test": "tsx server/auth.check.ts && tsx server/rbac.check.ts && tsx server/guards.check.ts && tsx server/sync.check.ts && tsx src/data/kpi.check.ts && tsx src/data/reportLock.check.ts && tsx src/data/adn.check.ts && tsx src/data/events.check.ts && tsx src/data/notificationRules.check.ts && tsx src/data/scope.check.ts && tsx src/data/week.check.ts && tsx src/data/completude.check.ts && tsx packages/shared/schemas/report.check.ts && tsx packages/shared/migrate.check.ts && tsx src/data/permissions.check.ts"
+    "test": "tsx server/auth.check.ts && tsx server/rbac.check.ts && tsx server/guards.check.ts && tsx server/sync.check.ts && tsx src/data/kpi.check.ts && tsx src/data/reportLock.check.ts && tsx src/data/adn.check.ts && tsx src/data/events.check.ts && tsx src/data/notificationRules.check.ts && tsx src/data/scope.check.ts && tsx src/data/week.check.ts && tsx src/data/completude.check.ts && tsx packages/shared/schemas/report.check.ts && tsx packages/shared/migrate.check.ts && tsx src/data/permissions.check.ts && tsx src/data/csvImport.check.ts && tsx server/notify.check.ts"
   },
   "dependencies": {
     "@prisma/client": "^6.19.3",
@@ -38,6 +38,7 @@
     "tailwind-merge": "^3.6.0",
     "tsx": "^4.21.0",
     "vite": "^6.2.3",
+    "web-push": "^3.6.7",
     "zod": "^4.4.3"
   },
   "devDependencies": {

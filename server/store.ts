@@ -212,6 +212,21 @@ export async function markOutboxFailed(id: number, error: string): Promise<void>
   await prisma.outbox.update({ where: { id }, data: { status: 'failed', error } });
 }
 
+// --- Web Push subscriptions ---
+export async function insertPushSub(endpoint: string, memberId: string, p256dh: string, auth: string, createdAt: string): Promise<void> {
+  await prisma.pushSubscription.upsert({
+    where: { endpoint },
+    create: { endpoint, memberId, p256dh, auth, createdAt },
+    update: { memberId, p256dh, auth },
+  });
+}
+export async function listPushSubsForMember(memberId: string): Promise<{ endpoint: string; p256dh: string; auth: string }[]> {
+  return prisma.pushSubscription.findMany({ where: { memberId }, select: { endpoint: true, p256dh: true, auth: true } });
+}
+export async function deletePushSub(endpoint: string): Promise<void> {
+  await prisma.pushSubscription.deleteMany({ where: { endpoint } });
+}
+
 // One-shot migration from the old SQLite blob store into Postgres. Canonicalizes
 // every item (M5 snake_case) at the boundary. Replaces target collections via
 // setCollection → idempotent for a fresh/rerun target.

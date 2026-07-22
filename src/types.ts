@@ -151,7 +151,7 @@ export interface Member {
 }
 
 // P1.2 — canaux de notification (Réglages : déclencheurs globaux ; Mon Profil : préférences membre)
-export interface NotifChannels { app: boolean; email: boolean; sms: boolean; whatsapp: boolean }
+export interface NotifChannels { app: boolean; email: boolean; sms: boolean; whatsapp: boolean; webpush?: boolean }
 export interface NotifTrigger { id: string; label: string; delayDays: number; channels: NotifChannels }
 export interface AppSettings {
   branches: { church: { enabled: boolean; accent: string }; light: { enabled: boolean; accent: string } };

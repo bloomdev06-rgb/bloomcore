@@ -305,3 +305,14 @@ model Outbox {
 
   @@index([status])
 }
+
+// Abonnements Web Push (un membre = N appareils). endpoint UNIQUE = clé d'idempotence.
+model PushSubscription {
+  endpoint  String @id
+  memberId  String
+  p256dh    String
+  auth      String
+  createdAt String
+
+  @@index([memberId])
+}

@@ -672,6 +672,8 @@ const ALL_PROFILES = [
 
 export const VIEW_PERMISSIONS: PermissionMatrix = {
   'view_dashboard': allow(...ALL_PROFILES),
+  // Vue analytique de direction — encadrement (pas les simples membres/nouveaux).
+  'view_trends': allow(...STAFF, 'Responsable', 'Adjoint', 'Coach', 'Leader'),
   'view_members': allow(...STAFF, 'Responsable', 'Adjoint', 'Coach', 'Leader', 'Capitaine de Bus', 'Responsable de Zone', 'Responsable de Commune'),
   // Onglet visible pour les profils Responsable → Pasteur Principal (lecture de la liste +
   // départements par ministère) ; le détail d'un ministère (clic sur une carte) reste

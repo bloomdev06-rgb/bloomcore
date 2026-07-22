@@ -366,6 +366,21 @@ export function weeklyOjCounts(reports: Report[], period: PeriodInput, now: Date
   });
 }
 
+// Présences au culte par semaine : Σ rapport_bloom_bus_member dont content.culte est vrai
+// (même truthiness que consecutiveCulteAbsences). Pour la courbe Tendances.
+export function weeklyCulteCounts(reports: Report[], period: PeriodInput, now: Date = new Date()): { week: string; count: number }[] {
+  return periodWindows(period, now).map(({ week, from, to }) => {
+    let count = 0;
+    for (const r of reports) {
+      if (r.reportType !== 'rapport_bloom_bus_member' || !r.content?.culte) continue;
+      const d = new Date(r.weekOf || r.date).getTime();
+      if (d < from || d >= to) continue;
+      count++;
+    }
+    return { week, count };
+  });
+}
+
 // Accueil — split moisson ADN vs Bloom Bus sur la période (mêmes règles que moissonTotal sans scope bus).
 export function moissonBySource(reports: Report[], period: PeriodInput, now: Date = new Date()): { adn: number; bus: number } {
   const { from, to } = periodRange(period, now);

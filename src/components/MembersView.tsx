@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { labelFor } from "../data";
 import {
   Search,
@@ -16,6 +16,7 @@ import {
   LayoutGrid,
   List,
   Download,
+  Upload,
   GraduationCap,
   Trash2
 } from "lucide-react";
@@ -24,6 +25,8 @@ import { Member, Branch, CommunityLevel, PastoralCursus, Report, AuditLog, Permi
 import { useDepartments, useBusLines, useMinistries } from "../data";
 import { isRed } from "../data/kpi";
 import { inMemberScope, FULL_SCOPE_ROLES } from "../data/scope";
+import { importMembersFromCsv } from "../data/csvImport";
+import { toast } from "./ui/Toast";
 import ReportStatusBoxes from "./ReportStatusBoxes";
 import Member360View from "./Member360View";
 import MemberFormModal, { SCHOOL_LEVELS } from "./MemberFormModal";
@@ -177,6 +180,25 @@ export default function MembersView({
   const openEditForm = (member: Member) => {
     setFormMember(member);
     setShowFormModal(true);
+  };
+
+  // Import CSV : parse → validation → onAddMember par ligne (conserve audit/notif/enrichissement).
+  const importInputRef = useRef<HTMLInputElement>(null);
+  const handleImportCsv = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = ""; // permet de ré-importer le même fichier
+    if (!file) return;
+    try {
+      const text = await file.text();
+      const branch = activeBranch === "church" || activeBranch === "light" ? activeBranch : "church";
+      const { members: toAdd, errors, total } = importMembersFromCsv(text, members, branch);
+      toAdd.forEach((m) => onAddMember(m));
+      if (total === 0) toast.error("Aucune ligne de données trouvée dans le CSV.");
+      else if (errors.length === 0) toast.success(`${toAdd.length} membre(s) importé(s).`);
+      else toast.success(`${toAdd.length} importé(s), ${errors.length} ignoré(s) (ex. l.${errors[0].line} : ${errors[0].reason}).`);
+    } catch {
+      toast.error("Impossible de lire le fichier CSV.");
+    }
   };
 
   return (
@@ -341,6 +363,28 @@ export default function MembersView({
             <Download size={16} />
             <span className="hidden sm:inline">Export</span>
           </button>
+
+          {["Pasteur Principal", "Pasteur", "Ministre", "Admin", "Responsable", "Super Admin"].includes(
+            simulatedRole,
+          ) && (
+            <>
+              <input
+                ref={importInputRef}
+                type="file"
+                accept=".csv"
+                onChange={handleImportCsv}
+                className="hidden"
+              />
+              <button
+                id="member-import-btn"
+                onClick={() => importInputRef.current?.click()}
+                className="px-4 py-2.5 rounded-full font-ui font-bold text-xs text-bc-text border border-bc-border bg-white hover:bg-bc-canvas flex items-center gap-1.5 min-h-[48px] active:scale-95"
+              >
+                <Upload size={16} />
+                <span className="hidden sm:inline">Import CSV</span>
+              </button>
+            </>
+          )}
 
           {["Pasteur Principal", "Pasteur", "Ministre", "Admin", "Responsable", "Super Admin"].includes(
             simulatedRole,

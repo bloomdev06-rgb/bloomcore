@@ -65,6 +65,14 @@ db.exec(`
     error TEXT
   );
   CREATE INDEX IF NOT EXISTS idx_outbox_status ON outbox(status);
+  CREATE TABLE IF NOT EXISTS push_subscriptions (
+    endpoint TEXT PRIMARY KEY,
+    member_id TEXT NOT NULL,
+    p256dh TEXT NOT NULL,
+    auth TEXT NOT NULL,
+    created_at TEXT NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS idx_push_member ON push_subscriptions(member_id);
 `);
 
 // Migration idempotente : pwd_version pour révoquer les tokens au changement de mot de passe (#11).
@@ -236,4 +244,18 @@ export function markOutboxSent(id: number, sentAt: string): void {
 }
 export function markOutboxFailed(id: number, error: string): void {
   db.prepare("UPDATE outbox SET status = 'failed', error = ? WHERE id = ?").run(error, id);
+}
+
+// --- Web Push subscriptions ---
+export type PushSubRow = { endpoint: string; p256dh: string; auth: string };
+export function insertPushSub(endpoint: string, memberId: string, p256dh: string, auth: string, createdAt: string): void {
+  db.prepare(
+    'INSERT OR REPLACE INTO push_subscriptions (endpoint, member_id, p256dh, auth, created_at) VALUES (?, ?, ?, ?, ?)',
+  ).run(endpoint, memberId, p256dh, auth, createdAt);
+}
+export function listPushSubsForMember(memberId: string): PushSubRow[] {
+  return db.prepare('SELECT endpoint, p256dh, auth FROM push_subscriptions WHERE member_id = ?').all(memberId) as PushSubRow[];
+}
+export function deletePushSub(endpoint: string): void {
+  db.prepare('DELETE FROM push_subscriptions WHERE endpoint = ?').run(endpoint);
 }

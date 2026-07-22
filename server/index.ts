@@ -11,7 +11,7 @@ import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import express from 'express';
 import compression from 'compression';
-import { getCollection, setCollection, appendToCollection, getKv, setKv, getCredential, syncOpSeen, markSyncOp, insertWebhookEvent, markWebhookProcessed } from './datastore.ts';
+import { getCollection, setCollection, appendToCollection, getKv, setKv, getCredential, syncOpSeen, markSyncOp, insertWebhookEvent, markWebhookProcessed, insertPushSub, deletePushSub } from './datastore.ts';
 import { hashPassword, verifyPassword, signToken, verifyToken, createOneTimeToken, consumeOneTimeToken, upsertCredentials, requireSecret, usingInsecureSecret, resolveBindHost } from './auth.ts';
 import { ensureSeeded } from './seed.ts';
 import { runBootMigration } from './bootMigrate.ts';
@@ -240,6 +240,24 @@ app.get('/api/v1/auth/me', requireAuth, async (req, res) => {
   const member = (await getCollection('members')).find((m) => m.id === (req as any).memberId);
   if (!member) return res.status(404).json({ error: 'not found' });
   res.json(member);
+});
+
+// --- Web Push (§7 canal push) : clé publique VAPID + (dé)abonnement par appareil. ---
+// Clé lue au runtime (pas de rebuild front à changer de clé) ; null = push non configuré.
+app.get('/api/v1/push/public-key', (_req, res) => {
+  res.json({ key: process.env.VAPID_PUBLIC_KEY || null });
+});
+app.post('/api/v1/push/subscribe', requireAuth, async (req, res) => {
+  const ctx = (req as any).rbac as RbacContext;
+  const { endpoint, keys } = req.body || {};
+  if (!endpoint || !keys?.p256dh || !keys?.auth) return res.status(400).json({ error: 'subscription invalide' });
+  await insertPushSub(endpoint, ctx.member.id, keys.p256dh, keys.auth, new Date().toISOString());
+  res.json({ ok: true });
+});
+app.post('/api/v1/push/unsubscribe', requireAuth, async (req, res) => {
+  const { endpoint } = req.body || {};
+  if (endpoint) await deletePushSub(endpoint);
+  res.json({ ok: true });
 });
 
 // Single round-trip for initial load (App.tsx's bootstrap effect). Auth-gated :

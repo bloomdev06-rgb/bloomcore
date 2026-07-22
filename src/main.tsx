@@ -16,3 +16,13 @@ hydrate().finally(() => {
     </StrictMode>,
   );
 });
+
+// PWA : SW network-first (offline shell + réception Web Push). Prod uniquement (pas en dev
+// Vite, pour ne pas interférer avec le HMR) et seulement en contexte sécurisé (HTTPS/localhost)
+// — le navigateur refuse l'enregistrement sinon, donc rien à activer tant que le domaine HTTPS
+// n'est pas en place. ponytail: register après load pour ne pas concurrencer le 1er paint.
+if (import.meta.env.PROD && 'serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('/sw.js').catch(() => { /* SW indispo (http nu) : app OK sans */ });
+  });
+}

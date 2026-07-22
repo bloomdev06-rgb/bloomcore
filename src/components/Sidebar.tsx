@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Branch, Member, PermissionMatrix } from '../types';
 import {
-  LayoutDashboard, Users, Grid, LayoutList, Bus, Calendar,
+  LayoutDashboard, TrendingUp, Users, Grid, LayoutList, Bus, Calendar,
   Activity, Heart, GraduationCap, Shield, UserCog, Settings,
   FormInput, History, X, UserPlus, ChevronDown, FileText, Droplet,
   UserCheck, ClipboardList, Plus, DoorOpen
@@ -78,6 +78,7 @@ export default function Sidebar({
 
   const mainMenuItems = [
     { id: 'dashboard', label: 'Accueil', icon: LayoutDashboard },
+    { id: 'trends', label: 'Tendances', icon: TrendingUp },
     { id: 'members', label: 'Membres', icon: Users },
     { id: 'ministeres', label: 'Ministères', icon: Grid },
     { id: 'departments', label: 'Départements', icon: LayoutList },

@@ -28,6 +28,9 @@ import {
   listPendingOutbox as dbListPendingOutbox,
   markOutboxSent as dbMarkOutboxSent,
   markOutboxFailed as dbMarkOutboxFailed,
+  insertPushSub as dbInsertPushSub,
+  listPushSubsForMember as dbListPushSubsForMember,
+  deletePushSub as dbDeletePushSub,
 } from './db.ts';
 
 export const usePostgres = !!process.env.DATABASE_URL;
@@ -143,4 +146,20 @@ export async function markOutboxSent(id: number, sentAt: string): Promise<void> 
 export async function markOutboxFailed(id: number, error: string): Promise<void> {
   const b = await backend();
   return b ? b.markOutboxFailed(id, error) : dbMarkOutboxFailed(id, error);
+}
+
+// --- Web Push subscriptions ---
+export async function insertPushSub(endpoint: string, memberId: string, p256dh: string, auth: string, createdAt: string): Promise<void> {
+  const b = await backend();
+  return b ? b.insertPushSub(endpoint, memberId, p256dh, auth, createdAt) : dbInsertPushSub(endpoint, memberId, p256dh, auth, createdAt);
+}
+
+export async function listPushSubsForMember(memberId: string): Promise<{ endpoint: string; p256dh: string; auth: string }[]> {
+  const b = await backend();
+  return b ? b.listPushSubsForMember(memberId) : dbListPushSubsForMember(memberId);
+}
+
+export async function deletePushSub(endpoint: string): Promise<void> {
+  const b = await backend();
+  return b ? b.deletePushSub(endpoint) : dbDeletePushSub(endpoint);
 }

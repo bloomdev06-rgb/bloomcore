@@ -3,7 +3,8 @@ import { Member, Branch, NotifChannels } from '../types';
 import { useDepartments, labelFor } from '../data';
 import { apiChangePassword } from '../data/api';
 import { ThemeToggle } from './ui/theme-toggle';
-import { Phone, Mail, Briefcase, Calendar, MapPin, Droplet, ArrowRight, LogOut, Compass, Award, Pencil, Check, X, Smartphone, MessageSquare, Sun, Shield, KeyRound, Monitor, Trash2 } from 'lucide-react';
+import { Phone, Mail, Briefcase, Calendar, MapPin, Droplet, ArrowRight, LogOut, Compass, Award, Pencil, Check, X, Smartphone, MessageSquare, Sun, Shield, KeyRound, Monitor, Trash2, BellRing } from 'lucide-react';
+import { pushSupported, enablePush, disablePush } from '../lib/push';
 import { HealthSmiley } from './ui/HealthSmiley';
 import { Avatar } from './ui/Avatar';
 import { Modal } from './ui/Modal';
@@ -167,6 +168,25 @@ export default function ProfileView({ operator, simulatedRole, onUpdateMember, o
   const notifChannels = operator.notifChannels ?? DEFAULT_NOTIF_CHANNELS;
   const toggleNotifChannel = (key: keyof NotifChannels) =>
     onUpdateMember({ ...operator, notifChannels: { ...notifChannels, [key]: !notifChannels[key] } });
+
+  // Push : le toggle déclenche le vrai (dé)abonnement navigateur avant de persister la préf.
+  const [pushBusy, setPushBusy] = useState(false);
+  const toggleWebPush = async () => {
+    if (pushBusy) return;
+    setPushBusy(true);
+    try {
+      if (notifChannels.webpush) {
+        await disablePush();
+        onUpdateMember({ ...operator, notifChannels: { ...notifChannels, webpush: false } });
+      } else {
+        const ok = await enablePush();
+        if (ok) onUpdateMember({ ...operator, notifChannels: { ...notifChannels, webpush: true } });
+        else toast.error('Notifications push indisponibles (HTTPS + autorisation du navigateur requis).');
+      }
+    } finally {
+      setPushBusy(false);
+    }
+  };
 
   // Phase 5 — changement de mot de passe réel via POST /auth/change-password (état remonté
   // avant l'early-return). Backend injoignable → message hors-ligne, rien n'est modifié.
@@ -361,6 +381,15 @@ export default function ProfileView({ operator, simulatedRole, onUpdateMember, o
                     </button>
                   );
                 })}
+                {pushSupported() && (
+                  <button
+                    onClick={toggleWebPush}
+                    disabled={pushBusy}
+                    className={`px-3 py-1.5 rounded-full text-xs font-bold flex items-center gap-1.5 border transition-colors active-scale disabled:opacity-50 ${notifChannels.webpush ? 'bg-bc-green/10 border-bc-green/30 text-bc-text' : 'bg-bc-canvas border-bc-border text-bc-text-secondary'}`}
+                  >
+                    <BellRing size={13} /> Push mobile
+                  </button>
+                )}
               </div>
             </div>
             <button

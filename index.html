@@ -6,8 +6,12 @@
     <title>BloomCore — Community Platform</title>
     <meta name="theme-color" content="#0B7A55" />
     <link rel="icon" href="/icon.svg" type="image/svg+xml" />
-    <!-- PWA légère : installable sur l'écran d'accueil, volontairement SANS service
-         worker (un SW recréerait le problème des versions figées après déploiement). -->
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    <!-- PWA installable + offline shell. Le service worker (/sw.js) est network-first sur le
+         HTML → jamais figé après déploiement (cf. commentaire dans public/sw.js). -->
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="BloomCore" />
     <link rel="manifest" href="/manifest.webmanifest" />
   </head>
   <body>

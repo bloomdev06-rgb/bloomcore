@@ -3,15 +3,28 @@
 // qui SIMULENT l'envoi (console + outbox) tant que les clés .env sont absentes.
 // Brancher un vrai transport = remplir le corps d'UN adapter, l'interface est figée.
 import { Member, AppNotification, AppSettings, NotifChannels } from '../src/types.ts';
-import { insertOutboxIfAbsent, listPendingOutbox, markOutboxSent, markOutboxFailed } from './datastore.ts';
+import { insertOutboxIfAbsent, listPendingOutbox, markOutboxSent, markOutboxFailed, listPushSubsForMember, deletePushSub } from './datastore.ts';
 
-type Channel = 'email' | 'sms' | 'whatsapp';
+type Channel = 'email' | 'sms' | 'whatsapp' | 'webpush';
 
-const DEFAULT_CHANNELS: NotifChannels = { app: true, email: true, sms: false, whatsapp: false };
+// webpush:true côté DÉFAUT-déclencheur = le push est un canal candidat pour toute notif ;
+// le vrai garde est la préférence membre (prefs.webpush, opt-in via le toggle Mon Profil) ET
+// l'existence d'un abonnement (sans abonnement, le fan-out produit 0 ligne).
+const DEFAULT_CHANNELS: NotifChannels = { app: true, email: true, sms: false, whatsapp: false, webpush: true };
 
-// ponytail: adapters simulés — les clés env décident. Twilio/Nodemailer plus tard.
-function transportConfigured(channel: Channel): boolean {
+// Fan-out Web Push (pur, testable) : 1 notif × N abonnements → N lignes outbox à dedupe_key
+// distinct (par endpoint) → un même épisode ne re-notifie pas un appareil déjà servi.
+export function webpushRows(notifId: string, subs: { endpoint: string; p256dh: string; auth: string }[]) {
+  return subs.map((s) => ({
+    dedupeKey: `${notifId}:webpush:${s.endpoint}`,
+    recipient: JSON.stringify({ endpoint: s.endpoint, keys: { p256dh: s.p256dh, auth: s.auth } }),
+  }));
+}
+
+// ponytail: adapters simulés — les clés env décident. Twilio/Nodemailer/web-push plus tard.
+export function transportConfigured(channel: Channel): boolean {
   if (channel === 'email') return !!process.env.SMTP_HOST;
+  if (channel === 'webpush') return !!process.env.VAPID_PRIVATE_KEY;
   return !!process.env.TWILIO_ACCOUNT_SID;
 }
 
@@ -71,8 +84,28 @@ async function deliverTwilio(channel: 'sms' | 'whatsapp', to: string, body: stri
   if (!res.ok) throw new Error(`Twilio ${res.status}: ${(await res.text()).slice(0, 200)}`);
 }
 
+// Web Push via VAPID (web-push, import dynamique optionnel). `to` = l'abonnement sérialisé
+// ({ endpoint, keys:{p256dh,auth} }). Un abonnement mort (404/410) est purgé, pas compté échec.
+async function deliverWebPush(to: string, subject: string, body: string): Promise<void> {
+  const mod: any = await import('web-push' as any).catch(() => null);
+  if (!mod?.sendNotification) throw new Error('web-push indisponible (npm i web-push)');
+  const pub = process.env.VAPID_PUBLIC_KEY;
+  const priv = process.env.VAPID_PRIVATE_KEY;
+  if (!pub || !priv) throw new Error('VAPID non configuré (VAPID_PUBLIC_KEY / VAPID_PRIVATE_KEY)');
+  mod.setVapidDetails(process.env.VAPID_SUBJECT || 'mailto:admin@bloomcore.app', pub, priv);
+  const sub = JSON.parse(to);
+  const payload = JSON.stringify({ title: subject, body, url: '/' });
+  try {
+    await mod.sendNotification(sub, payload);
+  } catch (e: any) {
+    if (e?.statusCode === 404 || e?.statusCode === 410) { await deletePushSub(sub.endpoint); return; }
+    throw e;
+  }
+}
+
 async function deliver(channel: Channel, to: string, subject: string, body: string): Promise<void> {
   if (channel === 'email') return deliverEmail(to, subject, body);
+  if (channel === 'webpush') return deliverWebPush(to, subject, body);
   return deliverTwilio(channel, to, body);
 }
 
@@ -121,6 +154,15 @@ export async function dispatch(newNotifs: AppNotification[], members: Member[], 
       for (const channel of ['email', 'sms', 'whatsapp'] as Channel[]) {
         if (triggerChannels[channel] && prefs[channel]) {
           await send(channel, m, n.title, n.message, `${n.id}:${channel}:${m.id}`);
+        }
+      }
+      // Web Push : fan-out 1→N (un appareil = un abonnement = une ligne outbox).
+      if (triggerChannels.webpush && prefs.webpush) {
+        const subs = await listPushSubsForMember(m.id);
+        const status = transportConfigured('webpush') ? 'pending' : 'simulated';
+        for (const row of webpushRows(n.id, subs)) {
+          const { inserted } = await insertOutboxIfAbsent(row.dedupeKey, 'webpush', row.recipient, n.title, n.message, status, new Date().toISOString());
+          if (inserted && status === 'simulated') console.log(`[notify:webpush] ${n.title}`);
         }
       }
     }

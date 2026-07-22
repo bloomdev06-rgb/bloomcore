@@ -4,7 +4,7 @@ import {
   periodRange, levelToPercent, dominantHealthLevel, isRed, busMobilisationRate,
   moissonTotal, moissonBySource, busVisitesTotal, busPresenceCulteTotal, busActivitesTotal, activeBusIds, activeMemberIds, Period,
   pendingFollowUps, periodHealthLevels, periodWindows, healthEvolutionSeries,
-  consecutiveCulteAbsences, PRESENCE_CULTE_ABSENCE_THRESHOLD,
+  consecutiveCulteAbsences, PRESENCE_CULTE_ABSENCE_THRESHOLD, weeklyCulteCounts,
 } from './kpi';
 import { Member, Report } from '../types';
 
@@ -205,5 +205,13 @@ assert.equal(isRed(culteMember(), nowRed, [rep('autre', '2026-06-22', null)]), f
 // Rétrocompat : sans busReports, ou sans bloomBusId, la clause 3 n'est pas évaluée.
 assert.equal(isRed(culteMember(), nowRed), false);
 assert.equal(isRed(culteMember({ bloomBusId: undefined }), nowRed, absentReports), false);
+
+// weeklyCulteCounts : ne compte que les rapport_bloom_bus_member à content.culte vrai, par semaine.
+const culteRange = { from: new Date('2026-06-01'), to: new Date('2026-06-30') };
+const culteSeries = weeklyCulteCounts(
+  [rep('mA', '2026-06-08', 'culte'), rep('mB', '2026-06-08', 'culte'), rep('mA', '2026-06-22', 'culte'), rep('mA', '2026-06-15', null)],
+  culteRange, nowRed,
+);
+assert.equal(culteSeries.reduce((a, b) => a + b.count, 0), 3); // 2 en S(08) + 1 en S(22) ; le null ignoré
 
 console.log('kpi.check OK');
