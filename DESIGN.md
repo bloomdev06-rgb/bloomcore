@@ -148,6 +148,18 @@ contrast fails WCAG AA at that lightness. Reserved for fills and borders only.
 Category tags may use turquoise/fushia; branch UI uses only its own accent pair; never mix both
 sets on the same view.
 
+*Carve-out (2026-07, revue couleur).* Le plafond gouverne les accents **décoratifs et de
+branche**. Il ne s'applique PAS à :
+1. **La couleur qui encode une donnée ou un statut** — séries de graphe, sparklines, pills de
+   cycle de vie, icônes KPI teintées à la couleur de leur métrique. Une rangée de KPI peut donc
+   afficher vert/or/céruléen/pourpre simultanément : ce sont des marques d'information, pas de la
+   déco.
+2. **Les jetons d'icône de navigation** — chaque onglet porte la couleur de sa famille de domaine
+   (voir `src/data/domainColors.ts`), à ~12-20 % en fond de jeton. C'est de l'identité de section,
+   repérage fonctionnel, exempté au même titre que la donnée.
+Le socle blanc + Vert Sarcelle (~80 %) reste la règle : ces exceptions colorent de **petites
+marques** (icônes, rails, sparklines), jamais des surfaces dominantes.
+
 **The Branch Cascade Rule (in progress this session).** Branch identity is carried by CSS custom
 properties `--accent-1`/`--accent-2`, reassigned by a `[data-branch="light"]` selector on `<html>`
 cascading to every descendant — not by prop-drilling accent strings into individual components.

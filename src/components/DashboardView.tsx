@@ -243,7 +243,7 @@ export default function DashboardView({ activeBranch, simulatedRole, members = [
         <motion.div variants={itemVariants} className="grid grid-cols-[repeat(auto-fit,minmax(140px,1fr))] gap-4 shrink-0">
           <div className="bg-white p-4 rounded-2xl border border-bc-border shadow-soft hover:shadow-md transition-shadow">
             <div className="flex items-center gap-2 text-bc-text-secondary mb-2">
-              <Users size={14} />
+              <Users size={14} className="text-bc-green" />
               <span className="text-[9px] font-bold uppercase tracking-wider">Actifs</span>
             </div>
             <div className="text-xl font-ui font-extrabold text-bc-text tracking-tight">{activeCount}</div>
@@ -262,7 +262,7 @@ export default function DashboardView({ activeBranch, simulatedRole, members = [
 
           <div className="bg-white p-4 rounded-2xl border border-bc-border shadow-soft hover:shadow-md transition-shadow">
             <div className="flex items-center gap-2 text-bc-text-secondary mb-2">
-              <Bus size={14} />
+              <Bus size={14} className="text-bc-cerulean" />
               <span className="text-[9px] font-bold uppercase tracking-wider">Bloom Bus</span>
             </div>
             <div className="flex items-center gap-2.5">
@@ -276,7 +276,7 @@ export default function DashboardView({ activeBranch, simulatedRole, members = [
 
           <div className="bg-white p-4 rounded-2xl border border-bc-border shadow-soft hover:shadow-md transition-shadow">
             <div className="flex items-center gap-2 text-bc-text-secondary mb-2">
-              <TrendingUp size={14} />
+              <TrendingUp size={14} className="text-bc-gold" />
               <span className="text-[9px] font-bold uppercase tracking-wider">Moisson</span>
             </div>
             <div className="text-xl font-ui font-extrabold text-bc-text tracking-tight">{moisson.adn + moisson.bus}</div>
@@ -286,7 +286,7 @@ export default function DashboardView({ activeBranch, simulatedRole, members = [
 
           <div className="bg-white p-4 rounded-2xl border border-bc-border shadow-soft hover:shadow-md transition-shadow">
             <div className="flex items-center gap-2 text-bc-text-secondary mb-2">
-              <Sparkles size={14} />
+              <Sparkles size={14} className="text-bc-cerulean" />
               <span className="text-[9px] font-bold uppercase tracking-wider">OJ « Oui à Jésus »</span>
             </div>
             <div className="text-xl font-ui font-extrabold text-bc-text tracking-tight">{oj}</div>
@@ -296,7 +296,7 @@ export default function DashboardView({ activeBranch, simulatedRole, members = [
 
           <div className="bg-white p-4 rounded-2xl border border-bc-border shadow-soft hover:shadow-md transition-shadow">
             <div className="flex items-center gap-2 text-bc-text-secondary mb-2">
-              <Church size={14} />
+              <Church size={14} className="text-bc-purple" />
               <span className="text-[9px] font-bold uppercase tracking-wider">Présence culte</span>
             </div>
             <div className="text-xl font-ui font-extrabold text-bc-text tracking-tight">{culteTotal}</div>
@@ -318,7 +318,7 @@ export default function DashboardView({ activeBranch, simulatedRole, members = [
 
           <div className="bg-white p-4 rounded-2xl border border-bc-border shadow-soft hover:shadow-md transition-shadow">
             <div className="flex items-center gap-2 text-bc-text-secondary mb-2">
-              <Clock size={14} />
+              <Clock size={14} className="text-bc-warning" />
               <span className="text-[9px] font-bold uppercase tracking-wider">Nouveau en attente</span>
             </div>
             <div className="flex items-center gap-2.5">
@@ -332,7 +332,7 @@ export default function DashboardView({ activeBranch, simulatedRole, members = [
 
           <div className="bg-white p-4 rounded-2xl border border-bc-border shadow-soft hover:shadow-md transition-shadow">
             <div className="flex items-center gap-2 text-bc-text-secondary mb-2">
-              <AlertCircle size={14} />
+              <AlertCircle size={14} className="text-bc-danger" />
               <span className="text-[9px] font-bold uppercase tracking-wider">Au rouge</span>
             </div>
             <div className="flex items-center gap-2.5">

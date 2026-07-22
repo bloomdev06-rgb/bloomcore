@@ -10,6 +10,7 @@ import {
 import { useMediaQuery } from '../hooks/useMediaQuery';
 import { useDepartments, useMinistries, canView as canViewTab } from '../data';
 import { MEMBERS_TAB_DEPT_ONLY_ROLES } from '../data/scope';
+import { domainStyle } from '../data/domainColors';
 
 interface SidebarProps {
   collapsed: boolean;
@@ -193,7 +194,9 @@ export default function Sidebar({
                     transition={{ type: 'spring', stiffness: 350, damping: 30 }}
                   />
                 )}
-                <Icon size={20} className={`z-10 transition-transform ${isActive ? 'text-bc-green' : 'text-bc-text-secondary group-hover:text-bc-text'}`} />
+                <span className={`z-10 shrink-0 flex items-center justify-center w-8 h-8 rounded-xl transition-colors ${domainStyle(item.id).tint}`}>
+                  <Icon size={18} className={domainStyle(item.id).icon} />
+                </span>
                 {(!collapsed || !isDesktop) && (
                   <span className="font-ui text-sm tracking-wide z-10 flex-1 text-left">
                     {item.label}
@@ -291,7 +294,9 @@ export default function Sidebar({
                         transition={{ type: 'spring', stiffness: 350, damping: 30 }}
                       />
                     )}
-                    <Icon size={20} className={`z-10 transition-transform ${isActive ? 'text-bc-green' : 'text-bc-text-secondary group-hover:text-bc-text'}`} />
+                    <span className={`z-10 shrink-0 flex items-center justify-center w-8 h-8 rounded-xl transition-colors ${domainStyle(item.id).tint}`}>
+                  <Icon size={18} className={domainStyle(item.id).icon} />
+                </span>
                     {(!collapsed || !isDesktop) && (
                       <span className="font-ui text-sm tracking-wide z-10">
                         {item.label}
