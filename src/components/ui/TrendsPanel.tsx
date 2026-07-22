@@ -23,8 +23,8 @@ const COMMUNITY_HEALTH_AXES = [
 
 const sum = (s: { count: number }[]) => s.reduce((a, b) => a + b.count, 0);
 
-// Carte « graphe hebdo » réutilisable (série {week,count}). Extraite de TrendsView pour
-// être partagée entre l'onglet Tendances et la section Tendances de l'accueil.
+// Carte « graphe hebdo » réutilisable (série {week,count}), utilisée par la section
+// Tendances de l'accueil.
 export function TrendCard({ title, icon, total, subtitle, data, color, area = false }: {
   title: string; icon: React.ReactNode; total: number; subtitle: string;
   data: { week: string; count: number }[]; color: string; area?: boolean;
@@ -67,9 +67,9 @@ export function TrendCard({ title, icon, total, subtitle, data, color, area = fa
   );
 }
 
-// Corps des tendances (croissance + grille de courbes + santé communautaire), partagé par
-// l'onglet Tendances et la section Tendances de l'accueil. Les membres/rapports fournis sont
-// déjà filtrés (branche + portée du rôle) par l'appelant.
+// Corps des tendances (croissance + grille de courbes + santé communautaire), monté dans la
+// section Tendances de l'accueil. Les membres/rapports fournis sont déjà filtrés (branche +
+// portée du rôle) par l'appelant.
 export function TrendsPanel({ members, reports, effectivePeriod }: {
   members: Member[]; reports: Report[]; effectivePeriod: PeriodInput;
 }) {

@@ -45,7 +45,6 @@ function lazyRetry<T extends React.ComponentType<any>>(factory: () => Promise<{ 
   return lazy(loader);
 }
 const DashboardView = lazyRetry(() => import('./components/DashboardView'));
-const TrendsView = lazyRetry(() => import('./components/TrendsView'));
 const MembersView = lazyRetry(() => import('./components/MembersView'));
 const NouveauxView = lazyRetry(() => import('./components/NouveauxView'));
 const BloomBusView = lazyRetry(() => import('./components/BloomBusView'));
@@ -553,8 +552,6 @@ export default function App() {
               r.id === reportId ? { ...r, content: { ...r.content, traite: true } } : r))}
           />
         );
-      case 'trends':
-        return <TrendsView members={members} reports={reports} activeBranch={activeBranch} simulatedRole={simulatedRole} operatorId={operator?.id} />;
       case 'members':
         return (
           <MembersView

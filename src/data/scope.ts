@@ -16,8 +16,7 @@ export interface DashboardScope {
 // Coach/Leader → leur département. Les séries de tendances sont clés par content.memberId
 // (departmentId rarement renseigné sur les rapports Bloom Bus) → on scope les rapports par
 // MEMBRE en portée (union avec les rapports tagués d'un département en portée). Extrait de
-// DashboardView pour que l'onglet Tendances et la section Tendances de l'accueil partagent
-// exactement la même portée.
+// DashboardView : portée commune aux KPI et à la section Tendances de l'accueil.
 export function dashboardScope(
   operator: Member | undefined,
   role: string,

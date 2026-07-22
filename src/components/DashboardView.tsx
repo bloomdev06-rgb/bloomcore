@@ -91,7 +91,7 @@ export default function DashboardView({ activeBranch, simulatedRole, members = [
   const ministries = useMinistries();
   const deptName = (id?: string) => departments.find(d => d.id === id)?.name ?? '';
 
-  // §13.3 — portée selon le rôle (helper partagé avec l'onglet Tendances) : Ministre → ses
+  // §13.3 — portée selon le rôle (helper dashboardScope) : Ministre → ses
   // ministères, Responsable/Coach/Leader → leur département, staff pastoral → global. Rapports
   // scopés par MEMBRE (les tendances sont clés par content.memberId, pas departmentId).
   const scope = dashboardScope(operator, simulatedRole, members, reports, departments, ministries);
