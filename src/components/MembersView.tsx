@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useRef, useMemo, useDeferredValue } from "react";
 import { labelFor } from "../data";
 import {
   Search,
@@ -128,7 +128,12 @@ export default function MembersView({
   });
 
   // Filter logic
-  const filteredMembers = members
+  // ponytail: `useDeferredValue` sur la recherche → la frappe reste instantanée (input lié à
+  // searchTerm), le filtre+tri+inMemberScope (O(membres)) tourne une fois sur la valeur différée.
+  // Le useMemo garantit qu'un render « frappe » (searchTerm changé, deferred pas encore) réutilise
+  // la liste en cache au lieu de re-scanner.
+  const deferredSearch = useDeferredValue(searchTerm);
+  const filteredMembers = useMemo(() => members
     .filter((m) => {
       // Exclude 'Nouveau' state from members view if they haven't graduated to a member level yet
       if (m.level === "nouveau" && m.integrationState !== "integre")
@@ -137,9 +142,9 @@ export default function MembersView({
       const matchesSearch =
         `${m.firstName} ${m.lastName}`
           .toLowerCase()
-          .includes(searchTerm.toLowerCase()) ||
-        m.phone.includes(searchTerm) ||
-        (m.email && m.email.toLowerCase().includes(searchTerm.toLowerCase()));
+          .includes(deferredSearch.toLowerCase()) ||
+        m.phone.includes(deferredSearch) ||
+        (m.email && m.email.toLowerCase().includes(deferredSearch.toLowerCase()));
 
       // La branche est pilotée par le commutateur global Church/Light/Global du Header.
       const matchesBranch = activeBranch === "global" || m.branch === activeBranch;
@@ -164,7 +169,9 @@ export default function MembersView({
       const nameA = `${a.lastName} ${a.firstName}`.toLowerCase();
       const nameB = `${b.lastName} ${b.firstName}`.toLowerCase();
       return nameA.localeCompare(nameB);
-    });
+    }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [members, deferredSearch, activeBranch, filterLevel, filterPastoralCursus, filterDept, filterFunction, filterBaptism, filterSchoolLevel, filterRed, operator, simulatedRole, ministries]);
 
   const menCount = filteredMembers.filter((m) => m.gender === "H").length;
   const womenCount = filteredMembers.filter((m) => m.gender === "F").length;
@@ -175,7 +182,7 @@ export default function MembersView({
   const hasMore = filteredMembers.length > visibleCount;
   useEffect(() => {
     setVisibleCount(PAGE_SIZE);
-  }, [searchTerm, filterLevel, filterPastoralCursus, filterDept, filterFunction, filterBaptism, filterSchoolLevel, filterRed, activeBranch]);
+  }, [deferredSearch, filterLevel, filterPastoralCursus, filterDept, filterFunction, filterBaptism, filterSchoolLevel, filterRed, activeBranch]);
 
   const open360View = (member: Member) => {
     setSelectedMember(member);
@@ -228,7 +235,7 @@ export default function MembersView({
               placeholder="Rechercher..."
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
-              className="pl-9 pr-4 py-2 w-full border border-bc-border rounded-full text-xs bg-bc-canvas/40 focus:outline-none focus:border-bc-green focus:bg-white transition-all"
+              className="pl-9 pr-4 py-2 w-full border border-bc-border rounded-full text-xs bg-bc-canvas/40 focus:outline-none focus:border-bc-green focus:bg-white transition-colors"
             />
           </div>
 

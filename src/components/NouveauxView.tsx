@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useDeferredValue } from 'react';
 import { motion } from 'motion/react';
 import { Member, Branch, IntegrationFollowStatus } from '../types';
 import { useDepartments, load, save } from '../data';
@@ -92,11 +92,12 @@ export default function NouveauxView({ members, onUpdateMember, activeBranch, si
     return true;
   };
 
+  const deferredSearch = useDeferredValue(search); // ponytail: frappe instantanée, filtrage différé
   const filtered = pool.filter(m => {
     if (statusFilter && statusOf(m) !== statusFilter) return false;
     if (deptFilter !== 'all' && !m.departments?.[deptFilter]) return false;
-    if (search) {
-      const q = search.toLowerCase();
+    if (deferredSearch) {
+      const q = deferredSearch.toLowerCase();
       if (!`${m.firstName} ${m.lastName}`.toLowerCase().includes(q) && !m.phone.includes(q)) return false;
     }
     if ((regFrom || regTo) && !inRange(m.entryDate, regFrom, regTo)) return false;
@@ -178,7 +179,7 @@ export default function NouveauxView({ members, onUpdateMember, activeBranch, si
               key={s.key}
               variants={staggerItem}
               onClick={() => setStatusFilter(active ? null : s.key)}
-              className={`text-left rounded-2xl border p-4 transition-all active:scale-95 ${active ? s.card + ' shadow-md' : 'bg-white border-bc-border hover:border-bc-text-secondary/40'}`}
+              className={`text-left rounded-2xl border p-4 transition active:scale-95 ${active ? s.card + ' shadow-md' : 'bg-white border-bc-border hover:border-bc-text-secondary/40'}`}
             >
               <div className={`text-[11px] font-bold ${s.text}`}>{s.key}</div>
               <div className="text-2xl font-ui font-black mt-1 text-bc-text">{counts[s.key]}</div>
@@ -258,7 +259,7 @@ export default function NouveauxView({ members, onUpdateMember, activeBranch, si
                     key={m.id}
                     variants={staggerItem}
                     onClick={() => selectMember(m)}
-                    className={`w-full flex items-center gap-3 py-3 text-left transition-colors active-scale ${selectedId === m.id ? 'bg-bc-canvas' : 'hover:bg-bc-canvas/60'} rounded-xl px-2`}
+                    className={`cv-row w-full flex items-center gap-3 py-3 text-left transition-colors active-scale ${selectedId === m.id ? 'bg-bc-canvas' : 'hover:bg-bc-canvas/60'} rounded-xl px-2`}
                   >
                     {/* rail de statut (Move 3) — la couleur du cycle de vie se lit sans lire le texte */}
                     <span className={`w-1 self-stretch rounded-full shrink-0 ${meta.bar}`} />

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useDeferredValue } from 'react';
 import { Branch, Member, PastoralCursus, Report } from '../types';
 import { Heart, User, ArrowUpCircle, FileText, Share2, Search, PenLine, LayoutList, Network, X } from 'lucide-react';
 import { useBusLines, useDepartments, useMinistries, labelFor } from '../data';
@@ -73,10 +73,12 @@ export default function CursusView({ activeBranch, simulatedRole, members = [], 
   );
   const cursusMembers = cursusBase.filter(m => m.branch === operatorBranch);
 
+  // ponytail: recherche différée → frappe instantanée, le filtrage tourne sur la valeur différée.
+  const deferredSearch = useDeferredValue(searchTerm);
   const applyFilters = (pool: Member[]) => pool.filter(m => {
     if (filterLevel !== 'all' && m.pastoralCursus !== filterLevel) return false;
-    if (searchTerm) {
-      const q = searchTerm.toLowerCase();
+    if (deferredSearch) {
+      const q = deferredSearch.toLowerCase();
       if (!`${m.firstName} ${m.lastName}`.toLowerCase().includes(q) && !m.phone.includes(q)) return false;
     }
     return true;
@@ -145,7 +147,7 @@ export default function CursusView({ activeBranch, simulatedRole, members = [], 
               placeholder="Rechercher un pasteur/filleul..."
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
-              className="pl-9 pr-4 py-2 w-full border border-bc-border rounded-full text-xs bg-bc-canvas/40 focus:outline-none focus:border-bc-border focus:bg-white transition-all"
+              className="pl-9 pr-4 py-2 w-full border border-bc-border rounded-full text-xs bg-bc-canvas/40 focus:outline-none focus:border-bc-border focus:bg-white transition-colors"
             />
           </div>
 
@@ -286,7 +288,7 @@ export default function CursusView({ activeBranch, simulatedRole, members = [], 
                 </div>
               ) : (
                 filteredMembers.map(m => (
-                  <motion.div variants={staggerItem} key={m.id} className="border border-bc-border p-4 rounded-2xl flex justify-between items-center hover:bg-bc-canvas transition-colors cursor-pointer group">
+                  <motion.div variants={staggerItem} key={m.id} className="cv-row border border-bc-border p-4 rounded-2xl flex justify-between items-center hover:bg-bc-canvas transition-colors cursor-pointer group">
                     <div className="flex items-center gap-3">
                       <Avatar src={m.avatarUrl} initials={`${m.firstName[0]}${m.lastName[0]}`} size="sm" className="w-10 h-10 bg-bc-border/40 text-bc-text-secondary text-xs uppercase" />
                       <div>

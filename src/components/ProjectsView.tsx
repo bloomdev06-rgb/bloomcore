@@ -320,7 +320,7 @@ export default function ProjectsView({ activeBranch, simulatedRole, events = [],
           const objs = project.objectives ?? [];
           const done = objs.filter((o) => o.done).length;
           return (
-            <motion.div variants={staggerItem} key={project.id} onClick={() => setSelectedId(project.id)} className="bg-white border border-bc-border rounded-2xl p-4 hover:shadow-md hover:border-bc-text-secondary/40 transition-all cursor-pointer group">
+            <motion.div variants={staggerItem} key={project.id} onClick={() => setSelectedId(project.id)} className="bg-white border border-bc-border rounded-2xl p-4 hover:shadow-md hover:border-bc-text-secondary/40 transition cursor-pointer group">
               <div className="flex justify-between items-start mb-2">
                 <div>
                   <h4 className="font-bold text-sm text-bc-text group-hover:underline">{project.name}</h4>

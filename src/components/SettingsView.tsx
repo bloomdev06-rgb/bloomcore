@@ -89,7 +89,7 @@ export default function SettingsView({ activeBranch, simulatedRole, settings, on
                     aria-pressed={settings.branches[b].accent === a.key}
                     className="p-2.5 -m-2.5 rounded-full disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-bc-green focus-visible:ring-offset-2 active-scale"
                   >
-                    <span className={`w-7 h-7 rounded-full ${a.className} flex items-center justify-center ring-2 ring-offset-2 transition-all ${settings.branches[b].accent === a.key ? 'ring-bc-text' : 'ring-transparent'}`}>
+                    <span className={`w-7 h-7 rounded-full ${a.className} flex items-center justify-center ring-2 ring-offset-2 transition ${settings.branches[b].accent === a.key ? 'ring-bc-text' : 'ring-transparent'}`}>
                       {settings.branches[b].accent === a.key && <Check size={13} className="text-white" />}
                     </span>
                   </button>

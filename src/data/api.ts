@@ -141,6 +141,25 @@ function signalSyncChanged(): void {
   if (typeof window !== 'undefined') window.dispatchEvent(new Event('bc-sync-changed'));
 }
 
+// « Flush en vol » — l'indicateur ne doit tourner (spinner) que pendant un vrai aller-retour
+// réseau, pas tant que la file attend. ponytail: pas de store, un flag module suffit.
+let syncing = false;
+export function isSyncing(): boolean { return syncing; }
+
+// Retry borné : tant que la file n'est pas vide on retente le flush périodiquement, et on
+// s'auto-arrête dès qu'elle est drainée. Sans ça, un échec transitoire EN LIGNE (500 / timeout
+// sans bascule offline) laissait la file — et donc le spinner — coincés à vie.
+const SYNC_RETRY_MS = 30_000;
+let retryTimer: ReturnType<typeof setInterval> | null = null;
+function stopSyncRetry(): void { if (retryTimer) { clearInterval(retryTimer); retryTimer = null; } }
+function scheduleSyncRetry(): void {
+  if (retryTimer || typeof window === 'undefined') return;
+  retryTimer = setInterval(() => {
+    if (syncQueueLength() === 0) { stopSyncRetry(); return; }
+    void flushSyncQueue();
+  }, SYNC_RETRY_MS);
+}
+
 function enqueueSync(name: string, value: unknown): void {
   try {
     const queue: QueuedOp[] = JSON.parse(localStorage.getItem(SYNC_QUEUE_KEY) ?? '[]');
@@ -148,6 +167,7 @@ function enqueueSync(name: string, value: unknown): void {
     next.push({ opId: crypto.randomUUID(), name, value, asOf: getSyncedAt(name) });
     localStorage.setItem(SYNC_QUEUE_KEY, JSON.stringify(next));
     signalSyncChanged();
+    scheduleSyncRetry(); // relance périodique tant que la file n'est pas vide
   } catch {
     // localStorage plein/indisponible — tant pis, LWW au prochain save.
   }
@@ -155,14 +175,17 @@ function enqueueSync(name: string, value: unknown): void {
 
 export async function flushSyncQueue(): Promise<void> {
   const token = getAuthToken();
-  if (!token) return;
+  if (!token) return; // pas d'auth → rien à envoyer ; l'indicateur reste statique (« En attente »)
+  if (syncing) return; // un seul flush en vol à la fois (retry + online + bootstrap peuvent coïncider)
   let queue: QueuedOp[] = [];
   try {
     queue = JSON.parse(localStorage.getItem(SYNC_QUEUE_KEY) ?? '[]');
   } catch {
     return;
   }
-  if (queue.length === 0) return;
+  if (queue.length === 0) { stopSyncRetry(); return; }
+  syncing = true;
+  signalSyncChanged(); // le spinner ne tourne QUE pendant cet aller-retour
   try {
     const res = await fetch(`${API_BASE}/sync/batch`, {
       method: 'POST',
@@ -180,6 +203,13 @@ export async function flushSyncQueue(): Promise<void> {
     reportConflicts(conflicts); // rattrapage : op multi-collections, pas de contexte unique
   } catch {
     // toujours hors-ligne — on réessaiera au prochain flush.
+  } finally {
+    syncing = false;
+    signalSyncChanged();
+    // Source unique de vérité : reste-t-il quelque chose ? → réarme le retry ; sinon stop.
+    // Couvre TOUS les chemins (échec !res.ok, offline, drain partiel) et la file pré-existante
+    // au boot (apiBootstrap → flush → ici) sans dépendre d'un nouvel enqueue.
+    if (syncQueueLength() > 0) scheduleSyncRetry(); else stopSyncRetry();
   }
 }
 
@@ -267,6 +297,8 @@ export async function apiPut(name: string, value: unknown): Promise<boolean> {
         else seedSyncSnapshot(name, value);
       }
       reportConflicts(data.conflicts, name);
+      // Serveur joignable → draine opportunément tout backlog en attente (self-guard si vide).
+      if (syncQueueLength() > 0) void flushSyncQueue();
     }
     return res.ok;
   } catch {

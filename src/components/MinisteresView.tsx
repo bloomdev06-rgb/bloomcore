@@ -595,7 +595,7 @@ export default function MinisteresView({ activeBranch, simulatedRole, members, r
               if (deptId) moveDept(deptId, m.id);
               setDragOverId(null);
             }) : undefined}
-            className={`bg-white rounded-[2rem] border p-6 shadow-sm transition-all group flex flex-col ${canOpen ? 'cursor-pointer' : 'cursor-default'} ${
+            className={`bg-white rounded-[2rem] border p-6 shadow-sm transition group flex flex-col ${canOpen ? 'cursor-pointer' : 'cursor-default'} ${
               isTarget ? 'border-bc-green ring-2 ring-bc-green/30' : `border-bc-border ${canOpen ? 'hover:shadow-md hover:border-bc-green/30' : ''}`
             }`}
           >
@@ -620,7 +620,7 @@ export default function MinisteresView({ activeBranch, simulatedRole, members, r
                   </button>
                 )}
                 {canOpen && (
-                  <button className="text-bc-text-secondary group-hover:text-bc-text group-hover:translate-x-1 transition-all shrink-0">
+                  <button className="text-bc-text-secondary group-hover:text-bc-text group-hover:translate-x-1 transition shrink-0">
                     <ChevronRight size={20} />
                   </button>
                 )}

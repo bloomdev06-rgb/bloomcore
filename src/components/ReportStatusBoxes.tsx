@@ -1,3 +1,4 @@
+import { memo } from 'react';
 import { X, AlertTriangle, Check } from 'lucide-react';
 import { Report } from '../types';
 import { reportingWindow } from '../data/week';
@@ -9,7 +10,9 @@ import { memberWeekStatus } from '../data/completude';
 //   coche verte    → validé (rempli par le capitaine, ou membre puis validé)
 // `onValidate(week)` optionnel : si fourni, une case « en attente » devient cliquable pour
 // valider (réservé au capitaine / hiérarchie).
-export function ReportStatusBoxes({
+// ponytail: memo — rendu par ligne de membre (listes Membres/Nouveaux) ; ne recalcule les 2 cases
+// que si memberId/reports/onValidate changent.
+export const ReportStatusBoxes = memo(function ReportStatusBoxes({
   memberId,
   reports,
   now = new Date(),
@@ -57,6 +60,6 @@ export function ReportStatusBoxes({
       })}
     </div>
   );
-}
+});
 
 export default ReportStatusBoxes;

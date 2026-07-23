@@ -1,3 +1,4 @@
+import { memo } from "react"
 import type { LucideIcon } from "lucide-react"
 import { cn } from "../../lib/utils"
 import { photoSrc } from "../../data/api"
@@ -18,7 +19,9 @@ const SIZE_CLASS = {
 
 const ICON_SIZE = { sm: 12, md: 16, lg: 28 } as const
 
-export function Avatar({ src, icon: Icon, initials, size = "md", className }: AvatarProps) {
+// ponytail: memo — l'Avatar est rendu par ligne dans 11 vues (listes membres) ; props scalaires,
+// il ne re-render que si src/icon/initials/size changent, pas à chaque render du parent.
+export const Avatar = memo(function Avatar({ src, icon: Icon, initials, size = "md", className }: AvatarProps) {
   const base = cn(
     "rounded-full flex items-center justify-center shrink-0 font-ui font-bold overflow-hidden",
     SIZE_CLASS[size],
@@ -38,4 +41,4 @@ export function Avatar({ src, icon: Icon, initials, size = "md", className }: Av
   }
 
   return <div className={base}>{initials}</div>
-}
+})

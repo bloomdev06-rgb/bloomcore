@@ -110,6 +110,14 @@ html.plein-soleil {
   }
 }
 
+/* ponytail: content-visibility — le navigateur saute le rendu/layout des lignes hors écran
+   dans une liste scrollable non paginée (Nouveaux, Cursus). `auto` mémorise la hauteur réelle
+   après le 1er rendu → pas de saut de scrollbar ; 96px = simple estimation initiale. */
+@utility cv-row {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 96px;
+}
+
 :root {
   /* Design system tokens */
   /* ponytail: documents the real convention (rounded-[2rem]/rounded-2xl literals, 97+65

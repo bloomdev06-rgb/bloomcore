@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { Branch, Member, Event, Report } from '../types';
 import { Users, Bus, TrendingUp, AlertCircle, Clock, X, FolderKanban, Sparkles, Church } from 'lucide-react';
 import { AreaChart, Area, XAxis, Tooltip, ResponsiveContainer } from 'recharts';
@@ -88,47 +88,72 @@ export default function DashboardView({ activeBranch, simulatedRole, members = [
   const operator = members.find(m => m.id === operatorId) ?? members[0];
   const departments = useDepartments();
   const ministries = useMinistries();
+  const busLines = useBusLines();
+  const projects = useProjects();
   const deptName = (id?: string) => departments.find(d => d.id === id)?.name ?? '';
 
-  // §13.3 — portée selon le rôle (helper dashboardScope) : Ministre → ses
-  // ministères, Responsable/Coach/Leader → leur département, staff pastoral → global. Rapports
-  // scopés par MEMBRE (les tendances sont clés par content.memberId, pas departmentId).
-  const scope = dashboardScope(operator, simulatedRole, members, reports, departments, ministries);
-  const ownMinistry = simulatedRole === 'Ministre' ? ministries.find(m => m.tuteurId === operator?.id) : undefined;
-  const homeDeptId = scope.deptIds?.[0];
+  // §13.3 — portée selon le rôle (helper dashboardScope) : Ministre → ses ministères,
+  // Responsable/Coach/Leader → leur département, staff pastoral → global. Rapports scopés par
+  // MEMBRE (les tendances sont clés par content.memberId, pas departmentId).
+  // ponytail: tous les scans O(rapports) mémoïsés — clés sur les primitives réelles
+  // (period/customFrom/customTo, pas l'objet effectivePeriod recréé à chaque render). Ouvrir/fermer
+  // la modale "À traiter" (showFollowUps) ne relance plus les ~15 scans.
+  const d = useMemo(() => {
+    const scope = dashboardScope(operator, simulatedRole, members, reports, departments, ministries);
+    const ownMinistry = simulatedRole === 'Ministre' ? ministries.find(m => m.tuteurId === operator?.id) : undefined;
+    const homeDeptId = scope.deptIds?.[0];
+    const branchMembers = scope.members.filter(m => activeBranch === 'global' || m.branch === activeBranch);
+    const branchReports = scope.reports.filter(r => activeBranch === 'global' || r.targetBranch === activeBranch);
+    const branchEvents = events.filter(e => activeBranch === 'global' || e.branch === activeBranch || e.branch === 'global');
+    const waitingCount = branchMembers.filter(m => m.integrationState === 'en_attente').length;
+    const redCount = branchMembers.filter(m => isRed(m, undefined, reports)).length;
+    const pendingReceptionsCount = branchMembers.filter(m => m.integrationState === 'en_attente' && m.receptionValidated === false).length;
+    // Actif = a servi ≥ 1 fois sur la période du sélecteur.
+    const activeCount = activeMemberIds(branchReports, effectivePeriod).size;
+    // Agenda Proche : les 3 prochains événements réels non clôturés de la branche.
+    const todayIso = new Date().toISOString().split('T')[0];
+    const upcomingEvents = branchEvents
+      .filter(e => !e.closed && !e.cancelled && e.date >= todayIso)
+      .sort((a, b) => a.date.localeCompare(b.date) || (a.time ?? '').localeCompare(b.time ?? ''))
+      .slice(0, 3);
+    const activeBusCount = activeBusIds(branchReports, effectivePeriod).size;
+    const totalBusLines = busLines.length;
+    const moisson = moissonBySource(branchReports, effectivePeriod);
+    const oj = ojTotal(branchReports, effectivePeriod);
+    const culteSeries = weeklyCulteCounts(branchReports, effectivePeriod);
+    const culteTotal = culteSeries.reduce((a, b) => a + b.count, 0);
+    const { from: pFrom, to: pTo } = periodRange(effectivePeriod);
+    const periodBaptised = branchMembers.filter(m => m.baptismDate && new Date(m.baptismDate) >= pFrom && new Date(m.baptismDate) <= pTo);
+    const baptisedViaDept = periodBaptised.filter(m => m.baptismViaDepartment).length;
+    // "Nouveau en attente" — enregistrés et orientés vers un département, pas encore reçus par le responsable.
+    const nouveauxEnAttente = branchMembers.filter(m =>
+      m.level === 'nouveau' && Object.keys(m.departments ?? {}).length > 0 && m.receptionValidated === false).length;
+    const followUps = pendingFollowUps(branchReports);
+    const health = periodHealthLevels(branchReports, effectivePeriod);
+    const projectsInProgress = projects.filter(p =>
+      p.status === 'En cours' && (activeBranch === 'global' || (p.scope === 'branche' && p.branch === activeBranch) || p.scope === 'transverse' || p.scope === 'ministere'));
+    // Croissance & Participants + sparks (nouveaux enregistrés + actifs/baptêmes/moisson/OJ par semaine).
+    const growthData = weeklyGrowthSeries(branchMembers, branchReports, effectivePeriod);
+    const activeSeries = weeklyActiveCounts(branchReports, effectivePeriod);
+    const baptismSeries = weeklyBaptismCounts(branchMembers, effectivePeriod);
+    const moissonSeries = weeklyMoissonCounts(branchReports, effectivePeriod);
+    const ojSeries = weeklyOjCounts(branchReports, effectivePeriod);
+    return { ownMinistry, homeDeptId, branchMembers, branchReports, branchEvents, waitingCount, redCount,
+      pendingReceptionsCount, activeCount, upcomingEvents, activeBusCount, totalBusLines, moisson, oj,
+      culteSeries, culteTotal, periodBaptised, baptisedViaDept, nouveauxEnAttente, followUps, health,
+      projectsInProgress, growthData, activeSeries, baptismSeries, moissonSeries, ojSeries };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [operator, simulatedRole, members, reports, events, activeBranch, period, customFrom, customTo, departments, ministries, busLines, projects]);
 
-  const branchMembers = scope.members.filter(m => activeBranch === 'global' || m.branch === activeBranch);
-  const branchReports = scope.reports.filter(r => activeBranch === 'global' || r.targetBranch === activeBranch);
-  const branchEvents = events.filter(e => activeBranch === 'global' || e.branch === activeBranch || e.branch === 'global');
-  const waitingCount = branchMembers.filter(m => m.integrationState === 'en_attente').length;
-  const redCount = branchMembers.filter(m => isRed(m, undefined, reports)).length;
-  const pendingReceptionsCount = branchMembers.filter(m => m.integrationState === 'en_attente' && m.receptionValidated === false).length;
-  // Actif = a servi ≥ 1 fois sur la période du sélecteur.
-  const activeCount = activeMemberIds(branchReports, effectivePeriod).size;
-  // Agenda Proche : les 3 prochains événements réels non clôturés de la branche.
-  const todayIso = new Date().toISOString().split('T')[0];
-  const upcomingEvents = branchEvents
-    .filter(e => !e.closed && !e.cancelled && e.date >= todayIso)
-    .sort((a, b) => a.date.localeCompare(b.date) || (a.time ?? '').localeCompare(b.time ?? ''))
-    .slice(0, 3);
-  const activeBusCount = activeBusIds(branchReports, effectivePeriod).size;
-  const totalBusLines = useBusLines().length;
-  const moisson = moissonBySource(branchReports, effectivePeriod);
-  const oj = ojTotal(branchReports, effectivePeriod);
-  const culteSeries = weeklyCulteCounts(branchReports, effectivePeriod);
-  const culteTotal = culteSeries.reduce((a, b) => a + b.count, 0);
-  const { from: pFrom, to: pTo } = periodRange(effectivePeriod);
-  const periodBaptised = branchMembers.filter(m => m.baptismDate && new Date(m.baptismDate) >= pFrom && new Date(m.baptismDate) <= pTo);
-  const baptisedViaDept = periodBaptised.filter(m => m.baptismViaDepartment).length;
-  // "Nouveau en attente" — enregistrés et orientés vers un département, pas encore reçus par le responsable.
-  const nouveauxEnAttente = branchMembers.filter(m =>
-    m.level === 'nouveau' && Object.keys(m.departments ?? {}).length > 0 && m.receptionValidated === false).length;
-  const followUps = pendingFollowUps(branchReports);
+  const {
+    ownMinistry, homeDeptId, branchMembers, branchReports, branchEvents, waitingCount, redCount,
+    pendingReceptionsCount, activeCount, upcomingEvents, activeBusCount, totalBusLines, moisson, oj,
+    culteSeries, culteTotal, periodBaptised, baptisedViaDept, nouveauxEnAttente, followUps, health,
+    projectsInProgress, growthData, activeSeries, baptismSeries, moissonSeries, ojSeries,
+  } = d;
+
   // §8.3 — même règle de confidentialité que ReportsView : le corps pastoral seul voit le contenu.
   const canSeeConfidential = ['Pasteur', 'Pasteur Principal', 'Ministre'].includes(simulatedRole);
-  const health = periodHealthLevels(branchReports, effectivePeriod);
-  const projectsInProgress = useProjects().filter(p =>
-    p.status === 'En cours' && (activeBranch === 'global' || (p.scope === 'branche' && p.branch === activeBranch) || p.scope === 'transverse' || p.scope === 'ministere'));
 
   // §13.3 — dashboard par profil. Encadrement = tableau décisionnel ; autres = tableau personnel.
   const LEADERSHIP = ['Pasteur', 'Pasteur Principal', 'Ministre', 'Admin', 'Super Admin', 'Responsable', 'Coach', 'Leader'];
@@ -185,9 +210,6 @@ export default function DashboardView({ activeBranch, simulatedRole, members = [
       </div>
     );
   }
-
-  // Croissance & Participants — données réelles (nouveaux enregistrés + actifs par semaine).
-  const growthData = weeklyGrowthSeries(branchMembers, branchReports, effectivePeriod);
 
   const containerVariants = {
     hidden: { opacity: 0 },
@@ -247,7 +269,7 @@ export default function DashboardView({ activeBranch, simulatedRole, members = [
               <span className="text-[9px] font-bold uppercase tracking-wider">Actifs</span>
             </div>
             <div className="text-xl font-ui font-extrabold text-bc-text tracking-tight">{activeCount}</div>
-            <Spark data={weeklyActiveCounts(branchReports, effectivePeriod)} color="var(--color-bc-green)" />
+            <Spark data={activeSeries} color="var(--color-bc-green)" />
             <p className="text-[9px] text-bc-text-secondary mt-1">Ont servi sur la période</p>
           </div>
 
@@ -256,7 +278,7 @@ export default function DashboardView({ activeBranch, simulatedRole, members = [
               <span className="text-[9px] font-bold uppercase tracking-wider">Baptisés</span>
             </div>
             <div className="text-xl font-ui font-extrabold text-bc-text tracking-tight">{periodBaptised.length}</div>
-            <Spark data={weeklyBaptismCounts(branchMembers, effectivePeriod)} color="var(--color-bc-success)" />
+            <Spark data={baptismSeries} color="var(--color-bc-success)" />
             <p className="text-[9px] text-bc-text-secondary mt-1">Sur la période · {baptisedViaDept} Dépt · {periodBaptised.length - baptisedViaDept} Fiche</p>
           </div>
 
@@ -280,7 +302,7 @@ export default function DashboardView({ activeBranch, simulatedRole, members = [
               <span className="text-[9px] font-bold uppercase tracking-wider">Moisson</span>
             </div>
             <div className="text-xl font-ui font-extrabold text-bc-text tracking-tight">{moisson.adn + moisson.bus}</div>
-            <Spark data={weeklyMoissonCounts(branchReports, effectivePeriod)} color="var(--color-bc-gold)" />
+            <Spark data={moissonSeries} color="var(--color-bc-gold)" />
             <p className="text-[9px] text-bc-text-secondary mt-1">Intégrés · {moisson.adn} ADN · {moisson.bus} Bus</p>
           </div>
 
@@ -290,7 +312,7 @@ export default function DashboardView({ activeBranch, simulatedRole, members = [
               <span className="text-[9px] font-bold uppercase tracking-wider">OJ « Oui à Jésus »</span>
             </div>
             <div className="text-xl font-ui font-extrabold text-bc-text tracking-tight">{oj}</div>
-            <Spark data={weeklyOjCounts(branchReports, effectivePeriod)} color="var(--color-bc-cerulean)" />
+            <Spark data={ojSeries} color="var(--color-bc-cerulean)" />
             <p className="text-[9px] text-bc-text-secondary mt-1">Sur la période · rapports ADN</p>
           </div>
 
