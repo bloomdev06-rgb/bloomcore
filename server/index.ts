@@ -491,8 +491,31 @@ function storeImage(dataUrl: string): string | null {
   return `/uploads/${name}`;
 }
 
+// Paire vignette+large liée par nommage : <hash>.jpg (large, lightbox) + <hash>-t.jpg (vignette,
+// renvoyée comme avatarUrl). Hash sur la LARGE → les deux tailles d'une même photo restent liées
+// et dédupliquées. ponytail: l'app encode toujours en JPEG (canvas) → noms .jpg fixes.
+function storeImagePair(thumbUrl: string, largeUrl: string): string | null {
+  const t = thumbUrl.match(DATA_URL_RE);
+  const l = largeUrl.match(DATA_URL_RE);
+  if (!t || !l) return null;
+  const thumbBuf = Buffer.from(t[2], 'base64');
+  const largeBuf = Buffer.from(l[2], 'base64');
+  if (thumbBuf.length > 2 * 1024 * 1024 || largeBuf.length > 2 * 1024 * 1024) return null;
+  const hash = createHash('sha1').update(largeBuf).digest('hex');
+  const largeFile = path.join(UPLOAD_DIR, `${hash}.jpg`);
+  const thumbFile = path.join(UPLOAD_DIR, `${hash}-t.jpg`);
+  if (!fs.existsSync(largeFile)) fs.writeFileSync(largeFile, largeBuf);
+  if (!fs.existsSync(thumbFile)) fs.writeFileSync(thumbFile, thumbBuf);
+  return `/uploads/${hash}-t.jpg`;
+}
+
 app.post('/api/v1/uploads', requireAuth, (req, res) => {
-  const { data } = req.body ?? {};
+  const { data, thumb, large } = req.body ?? {};
+  if (typeof thumb === 'string' && typeof large === 'string') {
+    const url = storeImagePair(thumb, large);
+    if (!url) return res.status(400).json({ error: 'image invalide ou trop lourde (max 2 Mo/taille)' });
+    return res.json({ url });
+  }
   if (typeof data !== 'string') return res.status(400).json({ error: 'dataURL image attendue' });
   const url = storeImage(data);
   if (!url) return res.status(400).json({ error: 'image invalide ou trop lourde (max 2 Mo, png/jpeg/webp)' });

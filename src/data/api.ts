@@ -247,14 +247,16 @@ if (typeof window !== 'undefined') {
 // Téléverse une photo (dataURL) → URL de fichier servie par l'API (/uploads/<hash>).
 // null si hors-ligne/serveur absent : l'appelant garde le dataURL (offline-first),
 // la migration au boot serveur convertira au prochain sync.
-export async function apiUpload(dataUrl: string): Promise<string | null> {
+// thumb = vignette (renvoyée comme avatarUrl) ; large = version lightbox stockée à côté,
+// liée par nommage (<hash>-t.jpg / <hash>.jpg). Sans `large`, upload d'une seule taille (legacy).
+export async function apiUpload(thumb: string, large?: string): Promise<string | null> {
   const token = getAuthToken();
   if (!token) return null;
   try {
     const res = await fetch(`${API_BASE}/uploads`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-      body: JSON.stringify({ data: dataUrl }),
+      body: JSON.stringify(large ? { thumb, large } : { data: thumb }),
     });
     if (!res.ok) return null;
     const { url } = await res.json();
@@ -262,6 +264,16 @@ export async function apiUpload(dataUrl: string): Promise<string | null> {
   } catch {
     return null;
   }
+}
+
+// URL de la version large (lightbox) : /uploads/<hash>-t.jpg → /uploads/<hash>.jpg.
+// Legacy (<hash>.jpg sans -t), dataURL inline ou URL externe : renvoyé tel quel (le lightbox
+// retombe alors sur la vignette). ponytail: convention de nommage → aucun champ membre en plus.
+export function largePhotoUrl(url?: string): string | undefined {
+  if (!url) return url;
+  return url.startsWith('/uploads/') && url.endsWith('-t.jpg')
+    ? `${url.slice(0, -'-t.jpg'.length)}.jpg`
+    : url;
 }
 
 // Fire-and-forget push of a whole collection/kv value. Requires a token

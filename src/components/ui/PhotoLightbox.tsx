@@ -1,6 +1,7 @@
+import { useState } from "react"
 import { createPortal } from "react-dom"
 import { X } from "lucide-react"
-import { photoSrc } from "../../data/api"
+import { photoSrc, largePhotoUrl } from "../../data/api"
 
 interface PhotoLightboxProps {
   src: string
@@ -9,6 +10,11 @@ interface PhotoLightboxProps {
 }
 
 export function PhotoLightbox({ src, alt, onClose }: PhotoLightboxProps) {
+  // On tente la version large (nette en plein écran) ; si elle n'existe pas — photo legacy,
+  // avatar créé hors-ligne, URL externe — on retombe sur la vignette fournie.
+  const [failed, setFailed] = useState(false)
+  const large = largePhotoUrl(src)
+  const shown = failed || !large ? src : large
   return createPortal(
     <div
       className="fixed inset-0 bg-black/80 flex items-center justify-center z-[60] p-6"
@@ -21,8 +27,9 @@ export function PhotoLightbox({ src, alt, onClose }: PhotoLightboxProps) {
         <X size={22} />
       </button>
       <img
-        src={photoSrc(src)}
+        src={photoSrc(shown)}
         alt={alt || ""}
+        onError={() => { if (!failed) setFailed(true) }}
         className="max-w-full max-h-full rounded-2xl object-contain shadow-2xl"
         onClick={(e) => e.stopPropagation()}
       />

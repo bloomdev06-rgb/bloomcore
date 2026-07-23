@@ -29,7 +29,8 @@ export const Avatar = memo(function Avatar({ src, icon: Icon, initials, size = "
   )
 
   if (src) {
-    return <img src={photoSrc(src)} alt={initials || ""} className={cn(base, "object-cover")} />
+    // loading/decoding : avec ~4000 membres, une liste ne télécharge que les vignettes visibles.
+    return <img src={photoSrc(src)} alt={initials || ""} loading="lazy" decoding="async" className={cn(base, "object-cover")} />
   }
 
   if (Icon) {
