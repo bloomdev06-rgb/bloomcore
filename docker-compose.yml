@@ -63,7 +63,10 @@ services:
     volumes:
       - bloomcore-redis:/data
     healthcheck:
-      test: ["CMD-SHELL", "redis-cli -a \"$${REDIS_PASSWORD:-bloom}\" ping | grep PONG"]
+      # Substitution côté Compose (un seul $) : le conteneur redis n'a pas REDIS_PASSWORD
+      # dans son environnement (seule la "command" le reçoit), donc $$VAR (substitution
+      # shell côté conteneur) s'évaluait en chaîne vide → auth refusée → faux "unhealthy".
+      test: ["CMD-SHELL", "redis-cli -a '${REDIS_PASSWORD:-bloom}' ping | grep -q PONG"]
       interval: 5s
       timeout: 3s
       retries: 10
