@@ -1,7 +1,7 @@
-# Déploiement de test clé en main : `docker compose up -d --build`.
-# Renseigner au minimum AUTH_SECRET (et de préférence ACADEMY_WEBHOOK_SECRET, CORS_ORIGINS)
-# dans un fichier `.env` à côté de ce fichier — Compose le charge automatiquement.
-# Générer un secret : node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
+# Déploiement clé en main : `docker compose up -d --build`.
+# Renseigner au minimum AUTH_SECRET, ACADEMY_WEBHOOK_SECRET, POSTGRES_PASSWORD,
+# REDIS_PASSWORD dans un fichier `.env` à côté de ce fichier — Compose le charge automatiquement.
+# Générer un secret : openssl rand -hex 32
 services:
   bloomcore:
     build: .
@@ -23,6 +23,9 @@ services:
       # puis le serveur importe une fois les données SQLite existantes (migrateFromSqlite,
       # gardé par le flag _m6_migrated). Absent → mode SQLite legacy inchangé.
       DATABASE_URL: postgresql://postgres:${POSTGRES_PASSWORD:-bloom}@db:5432/bloomcore?schema=public
+      # Redis provisionné, prêt à brancher (rate-limit persistant, révocation de token,
+      # cache bootstrap). Non encore consommé par le code — inoffensif tant que non lu.
+      REDIS_URL: redis://:${REDIS_PASSWORD:-bloom}@redis:6379
       # SQLite persisté sur le volume nommé ci-dessous — tables auxiliaires
       # (credentials/tokens/…) même en mode Postgres.
       BLOOMCORE_DB: /data/bloomcore.db
@@ -33,6 +36,8 @@ services:
       - bloomcore-data:/data
     depends_on:
       db:
+        condition: service_healthy
+      redis:
         condition: service_healthy
     restart: unless-stopped
 
@@ -50,6 +55,33 @@ services:
       retries: 10
     restart: unless-stopped
 
+  redis:
+    image: redis:7-alpine
+    # requirepass : jamais de Redis ouvert sans mot de passe, même sur réseau interne.
+    # appendonly : persistance AOF — les compteurs/révocations survivent à un redémarrage.
+    command: ["redis-server", "--requirepass", "${REDIS_PASSWORD:-bloom}", "--appendonly", "yes"]
+    volumes:
+      - bloomcore-redis:/data
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli -a \"$${REDIS_PASSWORD:-bloom}\" ping | grep PONG"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
+  # Monitoring uptime : pinger http://bloomcore:4000/api/v1/health depuis l'UI Kuma
+  # (première connexion → créer le compte admin immédiatement). Exposer via un domaine
+  # dédié (ex. status.votre-domaine) dans Dockploy/Traefik plutôt que le port brut.
+  uptime-kuma:
+    image: louislam/uptime-kuma:1
+    ports:
+      - "${KUMA_PORT:-3001}:3001"
+    volumes:
+      - bloomcore-kuma:/app/data
+    restart: unless-stopped
+
 volumes:
   bloomcore-data:
   bloomcore-pg:
+  bloomcore-redis:
+  bloomcore-kuma:
