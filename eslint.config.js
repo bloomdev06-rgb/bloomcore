@@ -7,7 +7,7 @@ import tseslint from 'typescript-eslint';
 // style sur un code MVP assumé (135 `any` documentés). exhaustive-deps en warn (bruyant mais
 // utile), rules-of-hooks en error (jamais un faux positif légitime).
 export default [
-  { ignores: ['dist', 'node_modules', 'server'] },
+  { ignores: ['dist', 'node_modules'] },
   {
     files: ['src/**/*.{ts,tsx}'],
     languageOptions: {
@@ -18,6 +18,24 @@ export default [
     rules: {
       'react-hooks/rules-of-hooks': 'error',
       'react-hooks/exhaustive-deps': 'warn',
+    },
+  },
+  // Phase 1 (T1.5) — frontière serveur/frontend verrouillée par le lint : le serveur ne
+  // doit plus jamais importer le code du front (packages/domain est le seul domaine
+  // partagé légitime). Seule exception documentée : server/seedData.ts (ponytail),
+  // désactivée localement par une directive eslint-disable-next-line ciblée.
+  {
+    files: ['server/**/*.ts'],
+    languageOptions: {
+      parser: tseslint.parser,
+    },
+    rules: {
+      'no-restricted-imports': ['error', {
+        patterns: [{
+          group: ['*/src/*', '../src/*', '../../src/*'],
+          message: 'Le serveur ne doit pas importer le frontend (src/). Utiliser packages/domain — exception documentée uniquement dans server/seedData.ts.',
+        }],
+      }],
     },
   },
 ];
