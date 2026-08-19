@@ -16,7 +16,7 @@
     "clean": "rm -rf dist server/*.db",
     "postinstall": "prisma generate",
     "lint": "tsc --noEmit && eslint src server",
-    "test": "tsx server/auth.check.ts && tsx server/rbac.check.ts && tsx server/guards.check.ts && tsx server/sync.check.ts && tsx src/data/kpi.check.ts && tsx packages/domain/reportLock.check.ts && tsx src/data/adn.check.ts && tsx src/data/events.check.ts && tsx packages/domain/notificationRules.check.ts && tsx packages/domain/scope.check.ts && tsx packages/domain/week.check.ts && tsx src/data/completude.check.ts && tsx packages/shared/schemas/report.check.ts && tsx packages/shared/migrate.check.ts && tsx packages/domain/permissions.check.ts && tsx src/data/csvImport.check.ts && tsx server/notify.check.ts && tsx server/redis.check.ts && tsx packages/schemas/member.check.ts && tsx packages/schemas/report.check.ts"
+    "test": "tsx server/auth.check.ts && tsx server/rbac.check.ts && tsx server/guards.check.ts && tsx server/sync.check.ts && tsx src/data/kpi.check.ts && tsx packages/domain/reportLock.check.ts && tsx src/data/adn.check.ts && tsx src/data/events.check.ts && tsx packages/domain/notificationRules.check.ts && tsx packages/domain/scope.check.ts && tsx packages/domain/week.check.ts && tsx src/data/completude.check.ts && tsx packages/shared/schemas/report.check.ts && tsx packages/shared/migrate.check.ts && tsx packages/domain/permissions.check.ts && tsx src/data/csvImport.check.ts && tsx server/notify.check.ts && tsx server/redis.check.ts && tsx packages/schemas/member.check.ts && tsx packages/schemas/report.check.ts && tsx packages/schemas/collections.check.ts"
   },
   "dependencies": {
     "@prisma/client": "^6.19.3",

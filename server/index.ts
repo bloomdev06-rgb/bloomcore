@@ -24,6 +24,13 @@ import { loginKey, isLocked, recordFail, clearFails } from './rateLimit.ts';
 import { redisHealthy } from './redis.ts';
 import { MemberSchema, MemberPatchSchema } from '../packages/schemas/member.ts';
 import { ReportSchema, ReportPatchSchema } from '../packages/schemas/report.ts';
+import {
+  EventSchema, EventPatchSchema, NotificationSchema, NotificationPatchSchema,
+  CertificationSchema, CertificationPatchSchema, IntegrationReportSchema, IntegrationReportPatchSchema,
+  MinistrySchema, MinistryPatchSchema, DepartmentSchema, DepartmentPatchSchema,
+  ActivitySchema, ActivityPatchSchema, ProjectSchema, ProjectPatchSchema,
+  BusLineSchema, BusLinePatchSchema, FormSchema, FormPatchSchema,
+} from '../packages/schemas/collections.ts';
 
 // M6 — importer les vraies données SQLite→Postgres AVANT le seed, pour que
 // ensureSeeded ne fasse que combler ce qui manque (idempotent, no-op en SQLite).
@@ -404,6 +411,69 @@ app.delete('/api/v1/reports/:id', requireAuth, async (req, res) => {
   }
 });
 
+// Phase 4 (T4.4+) — factory pour les collections suivantes : EXACTEMENT le pipeline écrit à
+// la main pour /members (T4.2) et /reports (T4.4) ci-dessus (deltaToWhole + assertCanWrite +
+// applyWrite, zéro logique RBAC/merge nouvelle), factorisé pour ne pas récrire la même
+// boucle 9 fois avec le risque de divergence/copier-coller que ça implique. Comportement
+// observable IDENTIQUE à des routes écrites à la main pour chaque collection.
+function registerCrudEndpoints(name: string, Schema: { safeParse: (v: unknown) => any }, PatchSchema: { safeParse: (v: unknown) => any }): void {
+  app.post(`/api/v1/${name}`, requireAuth, async (req, res) => {
+    const parsed = Schema.safeParse(req.body);
+    if (!parsed.success) return res.status(400).json({ error: parsed.error.issues.map((i: any) => `${i.path.join('.') || '(racine)'}: ${i.message}`).join('; ') });
+    const item = parsed.data;
+    try {
+      const existing = await readCollection(name, true);
+      if (existing.some((it: any) => String(it.id) === String(item.id) && !it.deletedAt)) {
+        return res.status(409).json({ error: `${name}: ${item.id} existe déjà` });
+      }
+      const body = await deltaToWhole(name, [item], []);
+      await assertCanWrite(name, (req as any).rbac, body);
+      const { added } = await applyWrite(name, body, undefined, await preservedIds(name, (req as any).rbac));
+      return res.status(201).json(added.find((it: any) => String(it.id) === String(item.id)) ?? item);
+    } catch (e) {
+      if (e instanceof GuardError) return res.status(e.status).json({ error: e.message });
+      throw e;
+    }
+  });
+
+  app.patch(`/api/v1/${name}/:id`, requireAuth, async (req, res) => {
+    const parsed = PatchSchema.safeParse({ ...req.body, id: req.params.id });
+    if (!parsed.success) return res.status(400).json({ error: parsed.error.issues.map((i: any) => `${i.path.join('.') || '(racine)'}: ${i.message}`).join('; ') });
+    const patch = parsed.data;
+    try {
+      const existing = await readCollection(name, true);
+      const stored = existing.find((it: any) => String(it.id) === String(req.params.id) && !it.deletedAt);
+      if (!stored) return res.status(404).json({ error: `${name}: ${req.params.id} introuvable` });
+      // updatedAt/deletedAt : métadonnées serveur (applyWrite), jamais dans un schéma .strict()
+      // — exclues avant de fusionner (même correctif que le bug trouvé en T4.4, voir commit).
+      const { updatedAt: _u, deletedAt: _d, ...storedRest } = stored;
+      const merged = { ...storedRest, ...patch };
+      const body = await deltaToWhole(name, [merged], []);
+      await assertCanWrite(name, (req as any).rbac, body);
+      const { added, changed } = await applyWrite(name, body, undefined, await preservedIds(name, (req as any).rbac));
+      return res.json([...added, ...changed].find((it: any) => String(it.id) === String(req.params.id)) ?? merged);
+    } catch (e) {
+      if (e instanceof GuardError) return res.status(e.status).json({ error: e.message });
+      throw e;
+    }
+  });
+
+  app.delete(`/api/v1/${name}/:id`, requireAuth, async (req, res) => {
+    try {
+      const existing = await readCollection(name, true);
+      const stored = existing.find((it: any) => String(it.id) === String(req.params.id) && !it.deletedAt);
+      if (!stored) return res.status(404).json({ error: `${name}: ${req.params.id} introuvable` });
+      const body = await deltaToWhole(name, [], [req.params.id]);
+      await assertCanWrite(name, (req as any).rbac, body);
+      await applyWrite(name, body, undefined, await preservedIds(name, (req as any).rbac));
+      return res.status(204).end();
+    } catch (e) {
+      if (e instanceof GuardError) return res.status(e.status).json({ error: e.message });
+      throw e;
+    }
+  });
+}
+
 // Clôture d'un culte/événement (T4.4) : crée/upsert en UNE opération serveur les 3 rapports
 // de clôture (portiers, ADN, culte de synthèse) + marque l'événement clos — au lieu de 4
 // mutations client séparées (3× onAddReport/onUpdateReport + 1 PUT events). Le CONTENU des
@@ -471,6 +541,21 @@ app.post('/api/v1/events/:id/close', requireAuth, async (req, res) => {
     throw e;
   }
 });
+
+// Phase 4 (T4.4→T4.n) — reste des collections, via la factory registerCrudEndpoints
+// définie plus haut. Ordre = risque PII décroissant (Playbook §Phase 4), events déjà
+// couvert en partie par la route de clôture ci-dessus (POST/PATCH/DELETE génériques
+// restent utiles pour les mutations hors clôture : création manuelle, édition, annulation).
+registerCrudEndpoints('events', EventSchema, EventPatchSchema);
+registerCrudEndpoints('notifications', NotificationSchema, NotificationPatchSchema);
+registerCrudEndpoints('certifications', CertificationSchema, CertificationPatchSchema);
+registerCrudEndpoints('integration_reports', IntegrationReportSchema, IntegrationReportPatchSchema);
+registerCrudEndpoints('ministries', MinistrySchema, MinistryPatchSchema);
+registerCrudEndpoints('departments', DepartmentSchema, DepartmentPatchSchema);
+registerCrudEndpoints('activities', ActivitySchema, ActivityPatchSchema);
+registerCrudEndpoints('projects', ProjectSchema, ProjectPatchSchema);
+registerCrudEndpoints('bus_lines', BusLineSchema, BusLinePatchSchema);
+registerCrudEndpoints('forms', FormSchema, FormPatchSchema);
 
 app.get('/api/v1/:name', requireAuth, async (req, res) => {
   const { name } = req.params;
