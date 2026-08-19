@@ -14,7 +14,14 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: '22.5'
+          # '22.5' pointait sur un patch précis (résolu en 22.5.1 par setup-node) où
+          # node:sqlite n'est en fait PAS disponible malgré la doc Node — confirmé par
+          # plusieurs issues upstream (nodejs/node#53905, #60601) et par l'échec réel
+          # de `npm test` en CI (ERR_UNKNOWN_BUILTIN_MODULE: node:sqlite). Node
+          # v22.22.2 (testé ici en local) a le module. On s'aligne sur .nvmrc (juste
+          # "22" → dernière 22.x) plutôt que de re-pinner un patch précis à la main,
+          # pour ne plus jamais retomber sur un patch cassé par accident.
+          node-version-file: '.nvmrc'
           cache: npm
       - run: npm ci
       - run: npm run lint
