@@ -18,7 +18,7 @@ import { runBootMigration } from './bootMigrate.ts';
 import { applyWrite, readCollection, deltaToWhole, GuardError } from './guards.ts';
 import { buildContext, assertCanWrite, filterReadable, preservedIds, RbacContext } from './rbac.ts';
 import { dispatch } from './notify.ts';
-import { addClient, poke } from './stream.ts';
+import { addClient, poke, initPokeSubscriber } from './stream.ts';
 import { startScheduler } from './scheduler.ts';
 import { loginKey, isLocked, recordFail, clearFails } from './rateLimit.ts';
 import { redisHealthy } from './redis.ts';
@@ -558,4 +558,7 @@ app.listen(PORT, HOST, () => {
     console.warn('⚠️  AUTH_SECRET absent/faible mais écoute réseau ouverte — définissez AUTH_SECRET (≥16 c.) ou NODE_ENV=production.');
   }
 });
+// Best-effort : sans REDIS_URL, initPokeSubscriber() est un no-op immédiat (voir stream.ts).
+// Ne doit jamais empêcher le boot — une erreur ici degrade vers la diffusion locale seule.
+initPokeSubscriber().catch((e) => console.error('[stream] initPokeSubscriber a échoué:', e.message));
 startScheduler();
