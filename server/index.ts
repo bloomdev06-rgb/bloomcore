@@ -191,20 +191,27 @@ app.post('/api/v1/auth/login', async (req, res) => {
   }
   await clearFails(key);
   const token = await signToken(member.id);
-  // Phase 6 (T6.1) : cookie HttpOnly — inaccessible en JS (XSS ne peut plus voler le token),
-  // Secure hors dev (jamais transmis en clair), SameSite=Lax (couvre le CSRF de base pour des
-  // mutations en JSON POST/PATCH/DELETE — pas de formulaire HTML classique dans cette app).
-  // Le token reste AUSSI renvoyé dans le body — transition douce : le client peut encore le
-  // lire/stocker le temps de basculer complètement sur `credentials:'include'` (T6.1 côté
-  // client) sans casser les sessions déjà ouvertes avant ce déploiement.
+  setSessionCookie(res, token);
+  res.json({ token, member });
+});
+
+// Phase 6 (T6.1) : cookie HttpOnly — inaccessible en JS (XSS ne peut plus voler le token),
+// Secure hors dev (jamais transmis en clair), SameSite=Lax (couvre le CSRF de base pour des
+// mutations en JSON POST/PATCH/DELETE — pas de formulaire HTML classique dans cette app).
+// Le token reste AUSSI renvoyé dans le body de chaque route qui appelle ceci — transition :
+// le client le garde EN MÉMOIRE (plus jamais en localStorage) pour les usages où le cookie
+// ne suffit pas encore, et les sessions ouvertes avant ce déploiement ne cassent pas.
+// Posé sur TOUTES les routes qui émettent un token (login, complete, change-password) —
+// sinon un compte activé par lien ou un changement de mot de passe repartait sans cookie,
+// et sa session ne survivait pas au rechargement de la page.
+function setSessionCookie(res: express.Response, token: string): void {
   res.cookie(SESSION_COOKIE, token, {
     httpOnly: true,
     secure: IS_PROD,
     sameSite: 'lax',
     maxAge: TOKEN_TTL_MS,
   });
-  res.json({ token, member });
-});
+}
 
 // Phase 6 (T6.1) — efface le cookie de session. Le token en localStorage (transition) reste
 // à effacer côté client (clearAuthToken(), inchangé) ; cette route ne gère que le cookie.
@@ -259,7 +266,9 @@ app.post('/api/v1/auth/complete', async (req, res) => {
   if (!consumed) return res.status(401).json({ error: 'token invalide, expiré ou déjà utilisé' });
   await upsertCredentials(consumed.memberId, String(password));
   const member = (await readCollection('members')).find((m) => m.id === consumed.memberId);
-  res.json({ token: await signToken(consumed.memberId), member });
+  const sessionToken = await signToken(consumed.memberId);
+  setSessionCookie(res, sessionToken); // T6.1 — l'activation ouvre une vraie session cookie
+  res.json({ token: sessionToken, member });
 });
 
 app.post('/api/v1/auth/change-password', requireAuth, async (req, res) => {
@@ -275,7 +284,9 @@ app.post('/api/v1/auth/change-password', requireAuth, async (req, res) => {
   // pwd_version vient d'être incrémentée → l'ancien token de CE client est aussi invalidé.
   // On lui en émet un frais (pv à jour) pour que sa session survive ; les autres appareils
   // (tokens à l'ancienne pv) sont déconnectés — c'est l'effet recherché.
-  res.json({ ok: true, token: await signToken(memberId) });
+  const freshToken = await signToken(memberId);
+  setSessionCookie(res, freshToken); // T6.1 — remplace aussi le cookie (l'ancien porte une pv révoquée)
+  res.json({ ok: true, token: freshToken });
 });
 
 app.post('/api/v1/auth/admin-reset', requireAuth, async (req, res) => {

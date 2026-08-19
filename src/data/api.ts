@@ -80,12 +80,59 @@ function reportConflicts(conflicts: unknown, context?: string): void {
   toast.error(`${where}${conflicts.length} élément(s) non synchronisé(s) (modifié(s) ailleurs entre-temps)`);
 }
 
+// Phase 6 (T6.1, transition terminée) : le token ne vit PLUS en localStorage — un XSS ne
+// peut plus voler une session persistée. Il est gardé EN MÉMOIRE pour la durée de l'onglet
+// (utile pour ?token= sur les <img>/SSE tant qu'on l'a) ; après un rechargement de page,
+// c'est le cookie HttpOnly (posé au login) qui authentifie seul — le serveur l'accepte
+// partout (requireAuth, /stream, /uploads). Le flag bc_session_active (non secret : un
+// booléen, pas un credential) remplace la présence du token comme test « suis-je connecté »
+// dans les gardes ci-dessous — sans lui, après reload, tous les fetch s'annulaient avant
+// d'avoir laissé le cookie prouver la session.
+const SESSION_FLAG_KEY = 'bc_session_active';
+let memoryToken: string | null = null;
+
+// Migration depuis l'ancien stockage : les sessions ouvertes AVANT ce déploiement ont
+// encore leur token en localStorage (et pas de cookie tant qu'elles ne se re-loguent pas).
+// On l'adopte en mémoire puis on l'EFFACE du disque — après quoi ce navigateur est propre.
+try {
+  const legacy = localStorage.getItem(AUTH_TOKEN_KEY);
+  if (legacy) {
+    memoryToken = legacy;
+    localStorage.setItem(SESSION_FLAG_KEY, '1');
+    localStorage.removeItem(AUTH_TOKEN_KEY);
+  }
+} catch { /* localStorage indisponible (SSR/test) — sans conséquence */ }
+
+function setAuthToken(token: string): void {
+  memoryToken = token;
+  try { localStorage.setItem(SESSION_FLAG_KEY, '1'); } catch { /* best-effort */ }
+}
+
 export function getAuthToken(): string | null {
-  return localStorage.getItem(AUTH_TOKEN_KEY);
+  return memoryToken;
+}
+
+// Vrai s'il existe une session plausible : token en mémoire (onglet courant) OU flag posé
+// par un login antérieur (cookie attendu). Peut être un faux positif après expiration du
+// cookie (12h) — les fetch renvoient alors 401 et l'app retombe sur l'écran de connexion,
+// exactement comme avec un token localStorage expiré avant cette transition.
+function isAuthed(): boolean {
+  if (memoryToken) return true;
+  try { return localStorage.getItem(SESSION_FLAG_KEY) === '1'; } catch { return false; }
+}
+
+// En-tête Authorization SEULEMENT si un token est en mémoire — sinon objet vide, et c'est
+// le cookie (credentials:'include' sur tous les fetch) qui porte l'authentification.
+function authHeaders(): Record<string, string> {
+  return memoryToken ? { Authorization: `Bearer ${memoryToken}` } : {};
 }
 
 export function clearAuthToken(): void {
-  localStorage.removeItem(AUTH_TOKEN_KEY);
+  memoryToken = null;
+  try {
+    localStorage.removeItem(SESSION_FLAG_KEY);
+    localStorage.removeItem(AUTH_TOKEN_KEY); // legacy — au cas où une vieille session traîne
+  } catch { /* best-effort */ }
 }
 
 // Phase 6 (T6.1) — efface le cookie de session côté serveur. Best-effort : le logout local
@@ -100,8 +147,9 @@ export async function apiLogout(): Promise<void> {
   }
 }
 
-// /uploads est désormais authentifié (voir server/index.ts). Les <img> ne portent pas
-// de header → on fait voyager le token en query. dataURL/URL externe : inchangé.
+// /uploads est authentifié (voir server/index.ts). Les <img> ne portent pas de header →
+// token en query quand on l'a en mémoire ; sinon URL nue : le navigateur joint le cookie
+// de session automatiquement en same-origin (le serveur l'accepte sur /uploads, T6.1).
 export function photoSrc(url?: string): string | undefined {
   if (!url || !url.startsWith('/uploads/')) return url;
   const token = getAuthToken();
@@ -109,15 +157,14 @@ export function photoSrc(url?: string): string | undefined {
 }
 
 export async function apiBootstrap(): Promise<Record<string, unknown> | null> {
-  // Lecture auth-gated côté serveur : sans token, le serveur répondrait 401 à
-  // coup sûr — inutile de faire l'aller-retour réseau (et le bruit console qui
-  // va avec). App.tsx re-bootstrap de toute façon après login (deps [loggedInMemberId]).
-  const token = getAuthToken();
-  if (!token) return null;
+  // Lecture auth-gated côté serveur : sans session plausible (ni token mémoire, ni flag
+  // de login antérieur → pas de cookie attendu), 401 à coup sûr — inutile de faire
+  // l'aller-retour réseau. App.tsx re-bootstrap de toute façon après login.
+  if (!isAuthed()) return null;
   try {
     const res = await fetch(`${API_BASE}/bootstrap`, {
-      credentials: 'include', // Phase 6 (T6.1) : envoie le cookie de session (same-origin, no-op tant que le front n'est pas cross-origin)
-      headers: { Authorization: `Bearer ${token}` },
+      credentials: 'include', // cookie de session (T6.1) — seul credential après un reload
+      headers: authHeaders(),
     });
     if (!res.ok) return null;
     const data = await res.json();
@@ -187,8 +234,7 @@ function enqueueSync(name: string, value: unknown): void {
 }
 
 export async function flushSyncQueue(): Promise<void> {
-  const token = getAuthToken();
-  if (!token) return; // pas d'auth → rien à envoyer ; l'indicateur reste statique (« En attente »)
+  if (!isAuthed()) return; // pas d'auth → rien à envoyer ; l'indicateur reste statique (« En attente »)
   if (syncing) return; // un seul flush en vol à la fois (retry + online + bootstrap peuvent coïncider)
   let queue: QueuedOp[] = [];
   try {
@@ -203,7 +249,7 @@ export async function flushSyncQueue(): Promise<void> {
     const res = await fetch(`${API_BASE}/sync/batch`, {
       credentials: 'include', // Phase 6 (T6.1)
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      headers: { 'Content-Type': 'application/json', ...authHeaders() },
       body: JSON.stringify({ ops: queue }),
     });
     if (!res.ok) return;
@@ -230,10 +276,9 @@ export async function flushSyncQueue(): Promise<void> {
 // Re-fetch d'UNE collection (déjà filtrée RBAC côté serveur). Utilisé par le
 // flux temps réel pour rafraîchir les notifs sans re-bootstrap complet.
 export async function apiFetchCollection(name: string): Promise<unknown[] | null> {
-  const token = getAuthToken();
-  if (!token) return null;
+  if (!isAuthed()) return null;
   try {
-    const res = await fetch(`${API_BASE}/${name}`, { credentials: 'include', headers: { Authorization: `Bearer ${token}` } }); // Phase 6 (T6.1)
+    const res = await fetch(`${API_BASE}/${name}`, { credentials: 'include', headers: authHeaders() }); // Phase 6 (T6.1)
     if (!res.ok) return null;
     const data = await res.json();
     return Array.isArray(data) ? data : null;
@@ -247,9 +292,14 @@ export async function apiFetchCollection(name: string): Promise<unknown[] | null
 // une fonction de fermeture (à appeler au logout). No-op sans token/navigateur.
 export function openNotificationStream(onPoke: () => void): () => void {
   if (typeof window === 'undefined' || typeof EventSource === 'undefined') return () => {};
+  // Après un reload, memoryToken est vide (jamais persisté) mais la session peut rester
+  // valide via le cookie (T6.1, le serveur accepte les deux sur /stream) — on se fie donc
+  // à isAuthed() pour décider d'ouvrir la connexion, et on ne met `?token=` que si on l'a
+  // réellement en mémoire (sinon EventSource joint le cookie same-origin automatiquement).
+  if (!isAuthed()) return () => {};
   const token = getAuthToken();
-  if (!token) return () => {};
-  const es = new EventSource(`${API_BASE}/stream?token=${encodeURIComponent(token)}`);
+  const url = token ? `${API_BASE}/stream?token=${encodeURIComponent(token)}` : `${API_BASE}/stream`;
+  const es = new EventSource(url);
   es.addEventListener('notifications', () => onPoke());
   return () => es.close();
 }
@@ -264,13 +314,12 @@ if (typeof window !== 'undefined') {
 // thumb = vignette (renvoyée comme avatarUrl) ; large = version lightbox stockée à côté,
 // liée par nommage (<hash>-t.jpg / <hash>.jpg). Sans `large`, upload d'une seule taille (legacy).
 export async function apiUpload(thumb: string, large?: string): Promise<string | null> {
-  const token = getAuthToken();
-  if (!token) return null;
+  if (!isAuthed()) return null;
   try {
     const res = await fetch(`${API_BASE}/uploads`, {
       credentials: 'include', // Phase 6 (T6.1)
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      headers: { 'Content-Type': 'application/json', ...authHeaders() },
       body: JSON.stringify(large ? { thumb, large } : { data: thumb }),
     });
     if (!res.ok) return null;
@@ -295,8 +344,7 @@ export function largePhotoUrl(url?: string): string | undefined {
 // (mutations are auth-gated server-side) — silently a no-op before login.
 // Échec réseau → file de rattrapage (voir flushSyncQueue).
 export async function apiPut(name: string, value: unknown): Promise<boolean> {
-  const token = getAuthToken();
-  if (!token) return false;
+  if (!isAuthed()) return false;
   // Delta quand un snapshot existe : on n'envoie que les items changés/supprimés. Sinon
   // (KV, ou pas de base) → valeur complète. La file offline garde TOUJOURS le whole-array.
   const delta = Array.isArray(value) ? computeDelta(name, value) : null;
@@ -307,7 +355,7 @@ export async function apiPut(name: string, value: unknown): Promise<boolean> {
     const res = await fetch(`${API_BASE}/${name}${qs}`, {
       credentials: 'include', // Phase 6 (T6.1)
       method: 'PUT',
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      headers: { 'Content-Type': 'application/json', ...authHeaders() },
       body: JSON.stringify(delta ?? value),
     });
     // 401 (token expiré → réussira après re-login) et 5xx (transitoire) → file de rattrapage.
@@ -344,13 +392,12 @@ export async function apiPut(name: string, value: unknown): Promise<boolean> {
 // (voir src/data/index.ts save()), qui lui gère déjà retry/file offline. Doublon inoffensif :
 // le serveur voit alors un état déjà identique au sien (canonical égal) → no-op.
 export async function apiCreateMember(member: unknown): Promise<boolean> {
-  const token = getAuthToken();
-  if (!token) return false;
+  if (!isAuthed()) return false;
   try {
     const res = await fetch(`${API_BASE}/members`, {
       credentials: 'include', // Phase 6 (T6.1)
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      headers: { 'Content-Type': 'application/json', ...authHeaders() },
       body: JSON.stringify(member),
     });
     return res.ok;
@@ -360,13 +407,12 @@ export async function apiCreateMember(member: unknown): Promise<boolean> {
 }
 
 export async function apiPatchMember(member: { id: string }): Promise<boolean> {
-  const token = getAuthToken();
-  if (!token) return false;
+  if (!isAuthed()) return false;
   try {
     const res = await fetch(`${API_BASE}/members/${encodeURIComponent(member.id)}`, {
       credentials: 'include', // Phase 6 (T6.1)
       method: 'PATCH',
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      headers: { 'Content-Type': 'application/json', ...authHeaders() },
       body: JSON.stringify(member),
     });
     return res.ok;
@@ -376,13 +422,12 @@ export async function apiPatchMember(member: { id: string }): Promise<boolean> {
 }
 
 export async function apiDeleteMember(id: string): Promise<boolean> {
-  const token = getAuthToken();
-  if (!token) return false;
+  if (!isAuthed()) return false;
   try {
     const res = await fetch(`${API_BASE}/members/${encodeURIComponent(id)}`, {
       credentials: 'include', // Phase 6 (T6.1)
       method: 'DELETE',
-      headers: { Authorization: `Bearer ${token}` },
+      headers: authHeaders(),
     });
     return res.ok;
   } catch {
@@ -417,7 +462,7 @@ export async function apiLogin(phone: string, password: string): Promise<LoginRe
     });
     if (!res.ok) return { ok: false, reason: 'invalid' };
     const data = await res.json();
-    localStorage.setItem(AUTH_TOKEN_KEY, data.token);
+    setAuthToken(data.token);
     return { ok: true, token: data.token, member: data.member };
   } catch {
     return { ok: false, reason: 'network' };
@@ -450,7 +495,7 @@ export async function apiComplete(token: string, password: string): Promise<Logi
   const data = await postJson('/auth/complete', { token, password });
   if (!data) return { ok: false, reason: 'network' };
   if (data.status !== 200 || !data.token) return { ok: false, reason: 'invalid' };
-  localStorage.setItem(AUTH_TOKEN_KEY, data.token);
+  setAuthToken(data.token);
   return { ok: true, token: data.token, member: data.member };
 }
 
@@ -460,6 +505,6 @@ export async function apiChangePassword(current: string, next: string): Promise<
   if (data.status !== 200) return { ok: false, error: data.error };
   // Le serveur ré-émet un token (pv à jour) : sans ça, l'ancien token — désormais révoqué —
   // ferait échouer la requête suivante. On le stocke pour garder la session courante.
-  if (typeof data.token === 'string') localStorage.setItem(AUTH_TOKEN_KEY, data.token);
+  if (typeof data.token === 'string') setAuthToken(data.token);
   return { ok: true };
 }
