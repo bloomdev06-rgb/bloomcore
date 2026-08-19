@@ -31,7 +31,7 @@ export const usingInsecureSecret = TOKEN_SECRET.startsWith('dev-insecure-');
 export function resolveBindHost(insecure: boolean, override?: string): string {
   return override || (insecure ? '127.0.0.1' : '::');
 }
-const TOKEN_TTL_MS = 12 * 60 * 60 * 1000; // 12h
+export const TOKEN_TTL_MS = 12 * 60 * 60 * 1000; // 12h — exporté pour server/index.ts (cookie maxAge, T6.1) : une seule source de vérité, jamais dupliquée.
 
 export function hashPassword(password: string): string {
   const salt = randomBytes(16).toString('hex');

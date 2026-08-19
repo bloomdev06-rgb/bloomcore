@@ -1,5 +1,5 @@
 import React, { useState, useEffect, lazy, Suspense } from 'react';
-import { load, save, seeds, useDepartments, useMinistries, useBusLines, useAdmins, deriveTimeBasedNotifications, apiBootstrap, apiPut, clearAuthToken, enableSync, canView, openNotificationStream, apiFetchCollection, labelFor, apiCreateMember, apiPatchMember, apiDeleteMember } from './data';
+import { load, save, seeds, useDepartments, useMinistries, useBusLines, useAdmins, deriveTimeBasedNotifications, apiBootstrap, apiPut, clearAuthToken, apiLogout, enableSync, canView, openNotificationStream, apiFetchCollection, labelFor, apiCreateMember, apiPatchMember, apiDeleteMember } from './data';
 import { reportName } from './data/reportNames';
 import { resolveMemberRole } from './data/roles';
 import { MEMBERS_TAB_DEPT_ONLY_ROLES } from './data/scope';
@@ -196,6 +196,9 @@ export default function App() {
 
   const handleLogout = () => {
     clearAuthToken();
+    // Phase 6 (T6.1) — efface aussi le cookie de session côté serveur. Fire-and-forget :
+    // le logout local (ci-dessus/ci-dessous) ne dépend jamais de cet appel réseau.
+    void apiLogout();
     // Poste partagé (contexte église) : purge toutes les données métier du compte, sinon
     // l'utilisateur suivant les verrait (F3). Le reload remonte l'app sur des seeds propres —
     // sans ça, l'état React en mémoire re-persisterait immédiatement les données purgées.

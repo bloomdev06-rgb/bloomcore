@@ -11,8 +11,9 @@ import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import express from 'express';
 import compression from 'compression';
+import cookieParser from 'cookie-parser';
 import { getCollection, setCollection, appendToCollection, getKv, setKv, getCredential, syncOpSeen, markSyncOp, insertWebhookEvent, markWebhookProcessed, insertPushSub, deletePushSub } from './datastore.ts';
-import { hashPassword, verifyPassword, signToken, verifyToken, createOneTimeToken, consumeOneTimeToken, upsertCredentials, requireSecret, usingInsecureSecret, resolveBindHost } from './auth.ts';
+import { hashPassword, verifyPassword, signToken, verifyToken, createOneTimeToken, consumeOneTimeToken, upsertCredentials, requireSecret, usingInsecureSecret, resolveBindHost, TOKEN_TTL_MS } from './auth.ts';
 import { ensureSeeded } from './seed.ts';
 import { runBootMigration } from './bootMigrate.ts';
 import { applyWrite, readCollection, deltaToWhole, GuardError } from './guards.ts';
@@ -42,6 +43,10 @@ const app = express();
 // Compression gzip de tout (assets + JSON API) : le bootstrap ~450 Ko tombe à ~60 Ko —
 // facteur dominant sur mobile/3G.
 app.use(compression());
+// Phase 6 (T6.1) : lit le cookie de session bc_session — requireAuth l'accepte EN PLUS
+// du header Authorization (transition douce, voir plus bas). N'écrit rien sans que
+// res.cookie() soit appelé explicitement (login) — aucun effet tant que rien ne pose le cookie.
+app.use(cookieParser());
 // rawBody conservé pour la vérification HMAC du webhook École Bloom.
 app.use(express.json({ limit: '10mb', verify: (req, _res, buf) => { (req as any).rawBody = buf; } })); // avatar photos are base64 data URIs
 
@@ -53,10 +58,19 @@ const ALLOWED_ORIGINS = (process.env.CORS_ORIGINS
 ).split(',').map((s) => s.trim()).filter(Boolean);
 app.use((req, res, next) => {
   const origin = req.headers.origin;
-  if (origin && ALLOWED_ORIGINS.includes(origin)) res.setHeader('Access-Control-Allow-Origin', origin);
+  const originAllowed = !!origin && ALLOWED_ORIGINS.includes(origin);
+  if (originAllowed) res.setHeader('Access-Control-Allow-Origin', origin);
   res.setHeader('Vary', 'Origin');
-  res.setHeader('Access-Control-Allow-Methods', 'GET,PUT,POST,OPTIONS');
+  // PATCH/DELETE : ajoutés en Phase 4 (endpoints par intention) — absents ici jusqu'à
+  // présent, ce qui n'a rien cassé tant que front et API sont same-origin (pas de
+  // préflight CORS requis), mais aurait bloqué silencieusement ces méthodes dès qu'un
+  // front cross-origin serait branché (Phase 6, T6.3). Corrigé à l'occasion de T6.1.
+  res.setHeader('Access-Control-Allow-Methods', 'GET,PUT,POST,PATCH,DELETE,OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type,Authorization');
+  // Cookie de session (T6.1) : un fetch cross-origin avec credentials:'include' n'envoie/
+  // ne reçoit le cookie que si le serveur echo une origine EXPLICITE (jamais '*', déjà le
+  // cas ici) ET pose ce header. Sans origine autorisée, on ne le pose pas (rien à autoriser).
+  if (originAllowed) res.setHeader('Access-Control-Allow-Credentials', 'true');
   res.setHeader('X-Content-Type-Options', 'nosniff');
   res.setHeader('X-Frame-Options', 'DENY');
   res.setHeader('Referrer-Policy', 'no-referrer');
@@ -87,9 +101,15 @@ const ARRAY_COLLECTIONS = new Set([
 ]);
 const KV_KEYS = new Set(['permissions', 'settings']);
 
+const SESSION_COOKIE = 'bc_session';
+
 async function requireAuth(req: express.Request, res: express.Response, next: express.NextFunction) {
   const header = req.headers.authorization;
-  const token = header?.startsWith('Bearer ') ? header.slice(7) : null;
+  // Phase 6 (T6.1) : cookie HttpOnly EN PLUS du header Bearer — transition douce, le header
+  // reste accepté (au moins le temps de cette phase) pour ne rien casser pendant la bascule
+  // du client. Le cookie est prioritaire s'il est présent (posé par /auth/login ci-dessous).
+  const token = (req as any).cookies?.[SESSION_COOKIE]
+    ?? (header?.startsWith('Bearer ') ? header.slice(7) : null);
   const memberId = token ? await verifyToken(token) : null;
   if (!memberId) return res.status(401).json({ error: 'unauthorized' });
   // Contexte RBAC complet (membre + rôles résolus depuis les données).
@@ -147,7 +167,27 @@ app.post('/api/v1/auth/login', async (req, res) => {
     return res.status(401).json({ error: 'invalid credentials' });
   }
   await clearFails(key);
-  res.json({ token: await signToken(member.id), member });
+  const token = await signToken(member.id);
+  // Phase 6 (T6.1) : cookie HttpOnly — inaccessible en JS (XSS ne peut plus voler le token),
+  // Secure hors dev (jamais transmis en clair), SameSite=Lax (couvre le CSRF de base pour des
+  // mutations en JSON POST/PATCH/DELETE — pas de formulaire HTML classique dans cette app).
+  // Le token reste AUSSI renvoyé dans le body — transition douce : le client peut encore le
+  // lire/stocker le temps de basculer complètement sur `credentials:'include'` (T6.1 côté
+  // client) sans casser les sessions déjà ouvertes avant ce déploiement.
+  res.cookie(SESSION_COOKIE, token, {
+    httpOnly: true,
+    secure: IS_PROD,
+    sameSite: 'lax',
+    maxAge: TOKEN_TTL_MS,
+  });
+  res.json({ token, member });
+});
+
+// Phase 6 (T6.1) — efface le cookie de session. Le token en localStorage (transition) reste
+// à effacer côté client (clearAuthToken(), inchangé) ; cette route ne gère que le cookie.
+app.post('/api/v1/auth/logout', (_req, res) => {
+  res.clearCookie(SESSION_COOKIE, { httpOnly: true, secure: IS_PROD, sameSite: 'lax' });
+  res.json({ ok: true });
 });
 
 // Activation / réinitialisation — envoi simulé via les adapters (trigger 17 :
@@ -273,11 +313,15 @@ app.get('/api/v1/bootstrap', requireAuth, async (req, res) => {
 });
 
 // Flux temps réel (SSE, §7). EventSource ne peut pas poser de header Authorization
-// → token en query (même contrainte que /uploads). Doit rester AVANT /:name pour
-// ne pas être capturé comme nom de collection. 'no-transform' fait sauter la
-// compression gzip globale (sinon le flux est bufferisé et jamais envoyé).
+// → token en query (même contrainte que /uploads), ou cookie de session (T6.1) — envoyé
+// automatiquement par le navigateur en same-origin, sans rien à changer côté EventSource.
+// Cross-origin (T6.3, quand le front est servi ailleurs) : EventSource devra être construit
+// avec `{ withCredentials: true }`, sinon le cookie ne suit pas la requête cross-site.
+// Doit rester AVANT /:name pour ne pas être capturé comme nom de collection.
+// 'no-transform' fait sauter la compression gzip globale (sinon le flux est bufferisé et jamais envoyé).
 app.get('/api/v1/stream', async (req, res) => {
-  const token = typeof req.query.token === 'string' ? req.query.token : null;
+  const token = (req as any).cookies?.[SESSION_COOKIE]
+    ?? (typeof req.query.token === 'string' ? req.query.token : null);
   if (!token || !(await verifyToken(token))) return res.status(401).json({ error: 'unauthorized' });
   res.setHeader('Content-Type', 'text/event-stream');
   res.setHeader('Cache-Control', 'no-cache, no-transform');
@@ -748,7 +792,8 @@ const storage = getStorage(UPLOAD_DIR);
 // (UPLOAD_DIR peut simplement être vide).
 app.use('/uploads', async (req, res, next) => {
   const header = req.headers.authorization;
-  const token = (header?.startsWith('Bearer ') ? header.slice(7) : null)
+  const token = (req as any).cookies?.[SESSION_COOKIE]
+    ?? (header?.startsWith('Bearer ') ? header.slice(7) : null)
     ?? (typeof req.query.token === 'string' ? req.query.token : null);
   if (!token || !(await verifyToken(token))) return res.status(401).json({ error: 'unauthorized' });
   next();

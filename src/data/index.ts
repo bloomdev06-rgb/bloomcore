@@ -20,7 +20,7 @@ import {
   INITIAL_ADMINS,
 } from '../mockData';
 export { deriveTimeBasedNotifications } from './notificationRules';
-export { apiBootstrap, apiLogin, clearAuthToken, apiPut, apiFetchCollection, openNotificationStream, syncQueueLength, isSyncing, apiCreateMember, apiPatchMember, apiDeleteMember } from './api';
+export { apiBootstrap, apiLogin, clearAuthToken, apiLogout, apiPut, apiFetchCollection, openNotificationStream, syncQueueLength, isSyncing, apiCreateMember, apiPatchMember, apiDeleteMember } from './api';
 export { labelFor } from '../../packages/shared/migrate';
 export { canView, hasCapability, resolveCapability } from './permissions';
 import { apiPut } from './api';

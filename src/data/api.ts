@@ -88,6 +88,18 @@ export function clearAuthToken(): void {
   localStorage.removeItem(AUTH_TOKEN_KEY);
 }
 
+// Phase 6 (T6.1) — efface le cookie de session côté serveur. Best-effort : le logout local
+// (clearAuthToken() + reset du state React, voir App.tsx handleLogout) ne doit JAMAIS
+// attendre ni dépendre de cet appel réseau — un logout doit toujours réussir localement,
+// même hors-ligne/serveur injoignable.
+export async function apiLogout(): Promise<void> {
+  try {
+    await fetch(`${API_BASE}/auth/logout`, { credentials: 'include', method: 'POST' });
+  } catch {
+    // ignoré — voir commentaire ci-dessus
+  }
+}
+
 // /uploads est désormais authentifié (voir server/index.ts). Les <img> ne portent pas
 // de header → on fait voyager le token en query. dataURL/URL externe : inchangé.
 export function photoSrc(url?: string): string | undefined {
@@ -104,6 +116,7 @@ export async function apiBootstrap(): Promise<Record<string, unknown> | null> {
   if (!token) return null;
   try {
     const res = await fetch(`${API_BASE}/bootstrap`, {
+      credentials: 'include', // Phase 6 (T6.1) : envoie le cookie de session (same-origin, no-op tant que le front n'est pas cross-origin)
       headers: { Authorization: `Bearer ${token}` },
     });
     if (!res.ok) return null;
@@ -188,6 +201,7 @@ export async function flushSyncQueue(): Promise<void> {
   signalSyncChanged(); // le spinner ne tourne QUE pendant cet aller-retour
   try {
     const res = await fetch(`${API_BASE}/sync/batch`, {
+      credentials: 'include', // Phase 6 (T6.1)
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
       body: JSON.stringify({ ops: queue }),
@@ -219,7 +233,7 @@ export async function apiFetchCollection(name: string): Promise<unknown[] | null
   const token = getAuthToken();
   if (!token) return null;
   try {
-    const res = await fetch(`${API_BASE}/${name}`, { headers: { Authorization: `Bearer ${token}` } });
+    const res = await fetch(`${API_BASE}/${name}`, { credentials: 'include', headers: { Authorization: `Bearer ${token}` } }); // Phase 6 (T6.1)
     if (!res.ok) return null;
     const data = await res.json();
     return Array.isArray(data) ? data : null;
@@ -254,6 +268,7 @@ export async function apiUpload(thumb: string, large?: string): Promise<string |
   if (!token) return null;
   try {
     const res = await fetch(`${API_BASE}/uploads`, {
+      credentials: 'include', // Phase 6 (T6.1)
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
       body: JSON.stringify(large ? { thumb, large } : { data: thumb }),
@@ -290,6 +305,7 @@ export async function apiPut(name: string, value: unknown): Promise<boolean> {
     const asOf = getSyncedAt(name);
     const qs = asOf ? `?asOf=${encodeURIComponent(asOf)}` : '';
     const res = await fetch(`${API_BASE}/${name}${qs}`, {
+      credentials: 'include', // Phase 6 (T6.1)
       method: 'PUT',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
       body: JSON.stringify(delta ?? value),
@@ -332,6 +348,7 @@ export async function apiCreateMember(member: unknown): Promise<boolean> {
   if (!token) return false;
   try {
     const res = await fetch(`${API_BASE}/members`, {
+      credentials: 'include', // Phase 6 (T6.1)
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
       body: JSON.stringify(member),
@@ -347,6 +364,7 @@ export async function apiPatchMember(member: { id: string }): Promise<boolean> {
   if (!token) return false;
   try {
     const res = await fetch(`${API_BASE}/members/${encodeURIComponent(member.id)}`, {
+      credentials: 'include', // Phase 6 (T6.1)
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
       body: JSON.stringify(member),
@@ -362,6 +380,7 @@ export async function apiDeleteMember(id: string): Promise<boolean> {
   if (!token) return false;
   try {
     const res = await fetch(`${API_BASE}/members/${encodeURIComponent(id)}`, {
+      credentials: 'include', // Phase 6 (T6.1)
       method: 'DELETE',
       headers: { Authorization: `Bearer ${token}` },
     });
@@ -388,6 +407,10 @@ export interface LoginResult {
 export async function apiLogin(phone: string, password: string): Promise<LoginResult> {
   try {
     const res = await fetch(`${API_BASE}/auth/login`, {
+      // Phase 6 (T6.1) : sans credentials:'include', le navigateur ignore le Set-Cookie
+      // renvoyé par /auth/login — le cookie de session ne serait JAMAIS posé. Indispensable
+      // ici (contrairement aux autres fetch, où c'est de la préparation cross-origin T6.3).
+      credentials: 'include',
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ identifier: phone, password }),
@@ -407,6 +430,7 @@ export async function apiLogin(phone: string, password: string): Promise<LoginRe
 async function postJson(path: string, body: unknown, token?: string | null): Promise<any | null> {
   try {
     const res = await fetch(`${API_BASE}${path}`, {
+      credentials: 'include', // Phase 6 (T6.1)
       method: 'POST',
       headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
       body: JSON.stringify(body),
