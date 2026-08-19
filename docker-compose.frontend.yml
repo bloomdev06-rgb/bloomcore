@@ -1,0 +1,31 @@
+# Phase 6 (T6.2-T6.3) — overlay OPT-IN pour un frontend séparé (nginx), à combiner avec
+# docker-compose.yml :
+#   docker compose -f docker-compose.yml -f docker-compose.frontend.yml up -d --build
+#
+# Le déploiement par défaut (docker-compose.yml seul) reste mono-service, INCHANGÉ — cet
+# overlay n'est pas actif tant qu'il n'est pas explicitement passé en `-f`. Activer la
+# séparation frontend/API est une décision de déploiement, pas un changement de code par
+# défaut : le mono-service reste plus simple à opérer pour qui n'a pas besoin de scaler le
+# front et l'API séparément.
+#
+# À faire manuellement quand cet overlay est activé (T6.3, non automatisé ici) :
+#   - CORS_ORIGINS sur le service `bloomcore` doit inclure le domaine du frontend.
+#   - APP_URL doit rester le domaine PUBLIC visible par les utilisateurs (celui du
+#     frontend, pas celui de l'API) — c'est lui qui figure dans les emails/liens envoyés.
+#   - Construire le frontend avec VITE_API_BASE=https://api.votre-domaine/api/v1 (voir
+#     nginx/frontend.Dockerfile) pour qu'il cesse de supposer une origine commune.
+#   - SameSite=Lax (T6.1) suffit pour un sous-domaine du même site (ex. app.x.com +
+#     api.x.com) ; pour des domaines COMPLÈTEMENT distincts, un cookie cross-site strict
+#     imposerait SameSite=None + Secure — non couvert ici (hors scope du Playbook initial).
+services:
+  frontend:
+    build:
+      context: .
+      dockerfile: nginx/frontend.Dockerfile
+      args:
+        VITE_API_BASE: ${VITE_API_BASE:-}
+    ports:
+      - "${FRONTEND_PORT:-8080}:80"
+    depends_on:
+      - bloomcore
+    restart: unless-stopped

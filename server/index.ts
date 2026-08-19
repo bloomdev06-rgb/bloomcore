@@ -94,6 +94,23 @@ app.use((req, res, next) => {
   next();
 });
 
+// Phase 6 (T6.3) — défense en profondeur CSRF pour les mutations, EN PLUS de SameSite=Lax
+// (T6.1, qui bloque déjà l'essentiel : un cookie ne part pas sur une requête POST/PATCH/
+// DELETE déclenchée depuis un autre site). Le CORS ci-dessus n'est qu'une politique
+// NAVIGATEUR (`fetch` la respecte, un script forgé côté serveur ou `curl` l'ignorent) — cette
+// vérification explicite de l'en-tête Origin est ce qui reste actif même hors navigateur.
+// N'agit que si l'en-tête Origin est PRÉSENT (les clients non-navigateur légitimes — outillage
+// interne, health checks — n'en envoient pas et restent gérés par l'auth par token/cookie
+// elle-même) et seulement sur les méthodes qui mutent un état.
+const MUTATING_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
+app.use((req, res, next) => {
+  const origin = req.headers.origin;
+  if (origin && MUTATING_METHODS.has(req.method) && !ALLOWED_ORIGINS.includes(origin)) {
+    return res.status(403).json({ error: 'origine non autorisée' });
+  }
+  next();
+});
+
 const ARRAY_COLLECTIONS = new Set([
   'members', 'events', 'reports', 'audits', 'notifications', 'forms',
   'delegations', 'ministries', 'departments', 'certifications', 'admins', 'activities', 'integration_reports',
