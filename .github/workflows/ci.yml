@@ -2,7 +2,9 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    # main seul à l'origine : la CI ne tournait jamais sur les branches réellement
+    # déployées (Dokploy suivait m6-relational, puis separation-deploy).
+    branches: [main, m6-relational, separation-deploy]
   pull_request:
 
 jobs:

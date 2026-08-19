@@ -123,6 +123,10 @@ export default function ProfileView({ operator, simulatedRole, onUpdateMember, o
   const [revokingSessionId, setRevokingSessionId] = useState<string | null>(null);
   const [confirmingSelfDelete, setConfirmingSelfDelete] = useState(false);
   const [pwDraft, setPwDraft] = useState({ current: '', next: '', confirm: '' });
+  // Remonté ici (au-dessus de l'early-return) : un hook déclaré APRÈS un return conditionnel
+  // viole les Rules of Hooks — l'ordre des hooks change entre un render sans operator et un
+  // render avec, ce qui corrompt l'état du composant (crash potentiel de la vue profil).
+  const [pushBusy, setPushBusy] = useState(false);
   // E1 — si aucun membre chargé (serveur renvoyant members: []), operator est undefined :
   // early-return plutôt que de crasher sur operator.firstName / operator.departments.
   if (!operator) {
@@ -169,8 +173,8 @@ export default function ProfileView({ operator, simulatedRole, onUpdateMember, o
   const toggleNotifChannel = (key: keyof NotifChannels) =>
     onUpdateMember({ ...operator, notifChannels: { ...notifChannels, [key]: !notifChannels[key] } });
 
-  // Push : le toggle déclenche le vrai (dé)abonnement navigateur avant de persister la préf.
-  const [pushBusy, setPushBusy] = useState(false);
+  // Push : le toggle déclenche le vrai (dé)abonnement navigateur avant de persister la préf
+  // (état pushBusy remonté avant l'early-return, comme les autres hooks).
   const toggleWebPush = async () => {
     if (pushBusy) return;
     setPushBusy(true);

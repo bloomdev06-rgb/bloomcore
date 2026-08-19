@@ -40,6 +40,12 @@ await runBootMigration();
 await ensureSeeded();
 
 const app = express();
+// Derrière Traefik/Dokploy, sans ceci req.ip = l'IP du reverse-proxy pour TOUT le monde :
+// le rate-limit anti-brute-force (loginKey = ip+identifiant) comptait tous les visiteurs
+// comme une seule IP — verrouillage collectif possible, et un attaquant réel non isolé.
+// `1` = ne faire confiance qu'à UN saut de proxy (le Traefik du serveur), pas aux
+// X-Forwarded-For arbitraires d'un client direct (spoof d'IP pour contourner le lockout).
+app.set('trust proxy', 1);
 // Compression gzip de tout (assets + JSON API) : le bootstrap ~450 Ko tombe à ~60 Ko —
 // facteur dominant sur mobile/3G.
 app.use(compression());
