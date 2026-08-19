@@ -1,0 +1,24 @@
+# Worker (scheduler dédié — alertes temporelles + drain outbox, voir server/worker.ts et
+# infra/DEPLOY-DOKPLOY.md). Même code que l'API (backend/Dockerfile), seule la commande de
+# démarrage change (server/worker.ts au lieu du serveur HTTP) — pas de HEALTHCHECK HTTP
+# puisqu'il n'y a aucun serveur ici (contrairement au piège corrigé sur le service `worker`
+# du docker-compose.yml historique, ce Dockerfile n'hérite d'AUCUN healthcheck par défaut).
+#
+# CONTEXTE DE BUILD ATTENDU : la racine du repo, comme backend/Dockerfile. Dans Dokploy :
+# "Docker Context Path" = `.`, "Dockerfile Path" = `backend/Dockerfile.worker`.
+FROM node:22-alpine
+WORKDIR /app
+ENV NODE_ENV=production \
+    BLOOMCORE_DB=/data/bloomcore.db
+RUN mkdir -p /data
+COPY package.json package-lock.json ./
+COPY prisma ./prisma
+RUN npm ci --omit=dev
+COPY server ./server
+COPY packages ./packages
+# Même exception documentée que backend/Dockerfile (server/seedData.ts → ../src/mockData.ts).
+COPY src ./src
+# En mode Postgres (DATABASE_URL défini) : appliquer les migrations avant de démarrer — comme
+# pour l'API, gardé ici aussi car rien ne garantit l'ordre de démarrage worker/API (les deux
+# peuvent tenter la migration en parallèle ; `prisma migrate deploy` est idempotent/safe).
+CMD ["sh", "-c", "if [ -n \"$DATABASE_URL\" ]; then npx prisma migrate deploy; fi && exec npx tsx server/worker.ts"]

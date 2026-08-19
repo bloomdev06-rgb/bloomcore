@@ -1,6 +1,11 @@
 #!/bin/sh
-# Sauvegarde Postgres — service "backup" de docker-compose.yml (image postgres:16-alpine,
-# qui contient déjà pg_dump : pas de dépendance supplémentaire à installer pour le dump local).
+# Sauvegarde Postgres — image postgres:16-alpine (pg_dump déjà présent, pas de dépendance
+# supplémentaire à installer pour le dump local). Utilisé par le service `backup` de
+# docker-compose.yml (mode tout-en-un) ET par infra/Dockerfile.backup (architecture éclatée,
+# Application Dokploy indépendante) — d'où la connexion DB paramétrable ci-dessous plutôt que
+# le hostname `db` en dur : en mode tout-en-un, BACKUP_DB_HOST vaut `db` par défaut (nom du
+# service compose) ; en architecture éclatée, le mettre sur l'Internal Host du Postgres
+# natif Dokploy (visible dans le dashboard de la ressource Database).
 #
 # Boucle infinie volontaire (pas de cron dans l'image alpine par défaut) : dump immédiat au
 # démarrage du conteneur, puis toutes les 24h. Rétention locale : les dumps plus vieux que
@@ -22,6 +27,10 @@ set -eu
 mkdir -p /backups
 RETENTION_DAYS="${BACKUP_RETENTION_DAYS:-14}"
 R2_RETENTION_DAYS="${R2_RETENTION_DAYS:-90}"
+DB_HOST="${BACKUP_DB_HOST:-db}"
+DB_PORT="${BACKUP_DB_PORT:-5432}"
+DB_USER="${BACKUP_DB_USER:-postgres}"
+DB_NAME="${BACKUP_DB_NAME:-bloomcore}"
 
 R2_ENABLED=0
 if [ -n "${R2_ACCOUNT_ID:-}" ] && [ -n "${R2_ACCESS_KEY_ID:-}" ] && [ -n "${R2_SECRET_ACCESS_KEY:-}" ] && [ -n "${R2_BUCKET:-}" ]; then
@@ -45,7 +54,7 @@ while true; do
   ts=$(date +%Y%m%d-%H%M%S)
   file="/backups/bloomcore-${ts}.sql.gz"
   echo "[backup] $(date -Iseconds) dump → ${file}"
-  if pg_dump -h db -U postgres -d bloomcore | gzip > "${file}.tmp"; then
+  if pg_dump -h "${DB_HOST}" -p "${DB_PORT}" -U "${DB_USER}" -d "${DB_NAME}" | gzip > "${file}.tmp"; then
     mv "${file}.tmp" "${file}"
     echo "[backup] OK ($(du -h "${file}" | cut -f1))"
     if [ "${R2_ENABLED}" = "1" ]; then

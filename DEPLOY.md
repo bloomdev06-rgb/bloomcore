@@ -1,5 +1,12 @@
 # Cahier de déploiement — BloomCore
 
+> **Ce document décrit le mode mono-service historique (branche `m6-relational`).**
+> Pour un déploiement Dokploy en conteneurs isolés par élément (API, worker, frontend,
+> Postgres/Redis natifs, sauvegarde) sur la branche `separation-deploy`, voir
+> [`infra/DEPLOY-DOKPLOY.md`](infra/DEPLOY-DOKPLOY.md) — c'est le guide à suivre pour un
+> nouveau déploiement. Ce fichier reste utile pour le mode tout-en-un simple (un seul
+> `docker compose up`), toujours disponible en repli.
+
 Ce guide permet à **n'importe qui** de déployer BloomCore de zéro sur un nouveau serveur.
 Aucune connaissance préalable du projet n'est requise. Suivre les sections dans l'ordre.
 

@@ -13,7 +13,7 @@
 #   - APP_URL doit rester le domaine PUBLIC visible par les utilisateurs (celui du
 #     frontend, pas celui de l'API) — c'est lui qui figure dans les emails/liens envoyés.
 #   - Construire le frontend avec VITE_API_BASE=https://api.votre-domaine/api/v1 (voir
-#     nginx/frontend.Dockerfile) pour qu'il cesse de supposer une origine commune.
+#     frontend/Dockerfile) pour qu'il cesse de supposer une origine commune.
 #   - SameSite=Lax (T6.1) suffit pour un sous-domaine du même site (ex. app.x.com +
 #     api.x.com) ; pour des domaines COMPLÈTEMENT distincts, un cookie cross-site strict
 #     imposerait SameSite=None + Secure — non couvert ici (hors scope du Playbook initial).
@@ -21,7 +21,7 @@ services:
   frontend:
     build:
       context: .
-      dockerfile: nginx/frontend.Dockerfile
+      dockerfile: frontend/Dockerfile
       args:
         VITE_API_BASE: ${VITE_API_BASE:-}
     ports:
