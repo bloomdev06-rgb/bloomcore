@@ -23,6 +23,7 @@ import { startScheduler } from './scheduler.ts';
 import { loginKey, isLocked, recordFail, clearFails } from './rateLimit.ts';
 import { redisHealthy } from './redis.ts';
 import { MemberSchema, MemberPatchSchema } from '../packages/schemas/member.ts';
+import { ReportSchema, ReportPatchSchema } from '../packages/schemas/report.ts';
 
 // M6 — importer les vraies données SQLite→Postgres AVANT le seed, pour que
 // ensureSeeded ne fasse que combler ce qui manque (idempotent, no-op en SQLite).
@@ -343,6 +344,128 @@ app.delete('/api/v1/members/:id', requireAuth, async (req, res) => {
     await assertCanWrite('members', (req as any).rbac, body);
     await applyWrite('members', body, undefined, await preservedIds('members', (req as any).rbac));
     return res.status(204).end();
+  } catch (e) {
+    if (e instanceof GuardError) return res.status(e.status).json({ error: e.message });
+    throw e;
+  }
+});
+
+// Phase 4 (T4.4) — même recette que /api/v1/members ci-dessus, appliquée à `reports`.
+app.post('/api/v1/reports', requireAuth, async (req, res) => {
+  const parsed = ReportSchema.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: parsed.error.issues.map((i) => `${i.path.join('.') || '(racine)'}: ${i.message}`).join('; ') });
+  const report = parsed.data;
+  try {
+    const existing = await readCollection('reports', true);
+    if (existing.some((r: any) => String(r.id) === String(report.id) && !r.deletedAt)) {
+      return res.status(409).json({ error: `reports: ${report.id} existe déjà` });
+    }
+    const body = await deltaToWhole('reports', [report], []);
+    await assertCanWrite('reports', (req as any).rbac, body);
+    const { added } = await applyWrite('reports', body, undefined, await preservedIds('reports', (req as any).rbac));
+    return res.status(201).json(added.find((r: any) => String(r.id) === String(report.id)) ?? report);
+  } catch (e) {
+    if (e instanceof GuardError) return res.status(e.status).json({ error: e.message });
+    throw e;
+  }
+});
+
+app.patch('/api/v1/reports/:id', requireAuth, async (req, res) => {
+  const parsed = ReportPatchSchema.safeParse({ ...req.body, id: req.params.id });
+  if (!parsed.success) return res.status(400).json({ error: parsed.error.issues.map((i) => `${i.path.join('.') || '(racine)'}: ${i.message}`).join('; ') });
+  const patch = parsed.data;
+  try {
+    const existing = await readCollection('reports', true);
+    const stored = existing.find((r: any) => String(r.id) === String(req.params.id) && !r.deletedAt);
+    if (!stored) return res.status(404).json({ error: `reports: ${req.params.id} introuvable` });
+    const merged = { ...stored, ...patch };
+    const body = await deltaToWhole('reports', [merged], []);
+    await assertCanWrite('reports', (req as any).rbac, body);
+    const { added, changed } = await applyWrite('reports', body, undefined, await preservedIds('reports', (req as any).rbac));
+    return res.json([...added, ...changed].find((r: any) => String(r.id) === String(req.params.id)) ?? merged);
+  } catch (e) {
+    if (e instanceof GuardError) return res.status(e.status).json({ error: e.message });
+    throw e;
+  }
+});
+
+app.delete('/api/v1/reports/:id', requireAuth, async (req, res) => {
+  try {
+    const existing = await readCollection('reports', true);
+    const stored = existing.find((r: any) => String(r.id) === String(req.params.id) && !r.deletedAt);
+    if (!stored) return res.status(404).json({ error: `reports: ${req.params.id} introuvable` });
+    const body = await deltaToWhole('reports', [], [req.params.id]);
+    await assertCanWrite('reports', (req as any).rbac, body);
+    await applyWrite('reports', body, undefined, await preservedIds('reports', (req as any).rbac));
+    return res.status(204).end();
+  } catch (e) {
+    if (e instanceof GuardError) return res.status(e.status).json({ error: e.message });
+    throw e;
+  }
+});
+
+// Clôture d'un culte/événement (T4.4) : crée/upsert en UNE opération serveur les 3 rapports
+// de clôture (portiers, ADN, culte de synthèse) + marque l'événement clos — au lieu de 4
+// mutations client séparées (3× onAddReport/onUpdateReport + 1 PUT events). Le CONTENU des
+// rapports (compteurs, thème, ferveur…) reste calculé côté client (formulaire) : ce n'est pas
+// une règle métier serveur, juste une saisie — le serveur ne fait qu'assembler/persister.
+// Body : { reports: [{ reportType, authorId, authorName, authorRole, content, confidential? }] }
+const CLOSE_REPORT_TYPES = new Set(['rapport_portiers', 'rapport_adn', 'rapport_culte']);
+app.post('/api/v1/events/:id/close', requireAuth, async (req, res) => {
+  try {
+    const events = await readCollection('events', true);
+    const event = events.find((e: any) => String(e.id) === String(req.params.id) && !e.deletedAt);
+    if (!event) return res.status(404).json({ error: `events: ${req.params.id} introuvable` });
+    const incomingReports = Array.isArray(req.body?.reports) ? req.body.reports : [];
+    if (!incomingReports.length) return res.status(400).json({ error: 'reports: au moins un rapport de clôture requis' });
+    for (const r of incomingReports) {
+      if (!CLOSE_REPORT_TYPES.has(r?.reportType)) {
+        return res.status(400).json({ error: `reports: reportType '${r?.reportType}' non autorisé sur cette route (attendu : ${[...CLOSE_REPORT_TYPES].join(', ')})` });
+      }
+    }
+    const storedReports = await readCollection('reports', true);
+    const today = new Date().toISOString().split('T')[0];
+    const merged = incomingReports.map((r: any) => {
+      const existing = storedReports.find((s: any) => !s.deletedAt && s.reportType === r.reportType && s.eventId === req.params.id);
+      // Même politique de fusion que le client (EventsView.tsx) : upsert par type+event, on
+      // ne remplace que les clés de content réellement fournies (les champs texte déjà saisis
+      // par un autre rôle — prédicateur, thème… — ne sont pas écrasés par du vide).
+      const nonEmpty = Object.fromEntries(Object.entries(r.content ?? {}).filter(([, v]) => v !== '' && v !== undefined));
+      if (existing) {
+        // `updatedAt`/`deletedAt` sont des métadonnées serveur ajoutées par applyWrite (jamais
+        // renvoyées au client normalement, voir guards.ts canonical()) — un stocké relu ici les
+        // porte. Le schéma Report (.strict()) ne les connaît pas : à exclure avant re-validation,
+        // sinon un ré-upsert (2e clôture, complément) est rejeté à tort.
+        const { updatedAt: _u, deletedAt: _d, ...rest } = existing;
+        return { ...rest, content: { ...existing.content, ...nonEmpty } };
+      }
+      return {
+        id: `rep_${r.reportType.replace('rapport_', '')}_${req.params.id}_${Date.now()}`,
+        authorId: r.authorId,
+        authorName: r.authorName,
+        authorRole: r.authorRole,
+        targetBranch: event.branch,
+        date: today,
+        reportType: r.reportType,
+        eventId: req.params.id,
+        confidential: !!r.confidential,
+        content: nonEmpty,
+      };
+    });
+    for (const m of merged) {
+      const check = ReportSchema.safeParse(m);
+      if (!check.success) return res.status(400).json({ error: `reports: ${m.id} invalide — ${check.error.issues.map((i) => i.message).join('; ')}` });
+    }
+    const reportsBody = await deltaToWhole('reports', merged, []);
+    await assertCanWrite('reports', (req as any).rbac, reportsBody);
+    await applyWrite('reports', reportsBody, undefined, await preservedIds('reports', (req as any).rbac));
+
+    const closedEvent = { ...event, closed: true };
+    const eventsBody = await deltaToWhole('events', [closedEvent], []);
+    await assertCanWrite('events', (req as any).rbac, eventsBody);
+    await applyWrite('events', eventsBody, undefined, await preservedIds('events', (req as any).rbac));
+
+    return res.json({ ok: true, event: closedEvent, reports: merged });
   } catch (e) {
     if (e instanceof GuardError) return res.status(e.status).json({ error: e.message });
     throw e;
