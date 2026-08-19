@@ -561,4 +561,8 @@ app.listen(PORT, HOST, () => {
 // Best-effort : sans REDIS_URL, initPokeSubscriber() est un no-op immédiat (voir stream.ts).
 // Ne doit jamais empêcher le boot — une erreur ici degrade vers la diffusion locale seule.
 initPokeSubscriber().catch((e) => console.error('[stream] initPokeSubscriber a échoué:', e.message));
-startScheduler();
+// Phase 3 (T3.1) : le scheduler tourne ici par défaut (RUN_SCHEDULER absent = 'true'),
+// comportement inchangé pour un déploiement mono-service. Le déployer en compose avec le
+// service worker dédié (server/worker.ts) doit mettre RUN_SCHEDULER=false sur l'API pour
+// éviter un double sweep (double envoi d'alertes/emails) — voir docker-compose.yml.
+if (process.env.RUN_SCHEDULER !== 'false') startScheduler();

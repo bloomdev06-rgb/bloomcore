@@ -23,8 +23,8 @@ services:
       # puis le serveur importe une fois les données SQLite existantes (migrateFromSqlite,
       # gardé par le flag _m6_migrated). Absent → mode SQLite legacy inchangé.
       DATABASE_URL: postgresql://postgres:${POSTGRES_PASSWORD:-bloom}@db:5432/bloomcore?schema=public
-      # Redis provisionné, prêt à brancher (rate-limit persistant, révocation de token,
-      # cache bootstrap). Non encore consommé par le code — inoffensif tant que non lu.
+      # Consommé par server/rateLimit.ts (anti-brute-force partagé), server/auth.ts (cache
+      # pwd_version) et server/stream.ts (pub/sub poke() multi-instance) — Phase 2.
       REDIS_URL: redis://:${REDIS_PASSWORD:-bloom}@redis:6379
       # SQLite persisté sur le volume nommé ci-dessous — tables auxiliaires
       # (credentials/tokens/…) même en mode Postgres.
@@ -32,6 +32,36 @@ services:
       # Défini UNIQUEMENT pour un environnement de test/démo : seed des credentials + des
       # 18 profils de test (mem_test_*). Laisser vide pour une vraie prod (activation requise).
       SEED_DEMO_PASSWORD: ${SEED_DEMO_PASSWORD:-}
+      # Phase 3 (T3.2) : le scheduler tourne dans le service worker dédié ci-dessous —
+      # désactivé ici pour ne pas dérouler le sweep (et donc les emails/SMS) deux fois.
+      RUN_SCHEDULER: "false"
+    volumes:
+      - bloomcore-data:/data
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # Phase 3 (T3.2) : process dédié au scheduler (alertes temporelles + drain outbox),
+  # séparé de l'API pour scaler l'API (replicas) sans dupliquer les sweeps. Même image
+  # que bloomcore (même code, autre commande) — voir server/worker.ts. Dépend de Redis
+  # (le pub/sub SSE est ce qui relaie ses poke() vers les clients connectés à l'API).
+  worker:
+    build: .
+    image: bloomcore:latest
+    # `command:` remplace le CMD du Dockerfile (qui applique `prisma migrate deploy`) —
+    # le refaire ici : sinon rien ne garantit que le schéma est prêt avant que ce
+    # service ne lise/écrive en base (démarrage worker/api en parallèle, pas d'ordre
+    # garanti par depends_on au-delà du healthcheck Postgres lui-même).
+    command: ["sh", "-c", "if [ -n \"$$DATABASE_URL\" ]; then npx prisma migrate deploy; fi && exec npx tsx server/worker.ts"]
+    environment:
+      NODE_ENV: production
+      AUTH_SECRET: ${AUTH_SECRET:?AUTH_SECRET requis - voir .env.example}
+      DATABASE_URL: postgresql://postgres:${POSTGRES_PASSWORD:-bloom}@db:5432/bloomcore?schema=public
+      REDIS_URL: redis://:${REDIS_PASSWORD:-bloom}@redis:6379
+      BLOOMCORE_DB: /data/bloomcore.db
     volumes:
       - bloomcore-data:/data
     depends_on:
