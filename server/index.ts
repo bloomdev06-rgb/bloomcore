@@ -22,6 +22,7 @@ import { addClient, poke, initPokeSubscriber } from './stream.ts';
 import { startScheduler } from './scheduler.ts';
 import { loginKey, isLocked, recordFail, clearFails } from './rateLimit.ts';
 import { redisHealthy } from './redis.ts';
+import { MemberSchema, MemberPatchSchema } from '../packages/schemas/member.ts';
 
 // M6 — importer les vraies données SQLite→Postgres AVANT le seed, pour que
 // ensureSeeded ne fasse que combler ce qui manque (idempotent, no-op en SQLite).
@@ -280,6 +281,72 @@ app.get('/api/v1/stream', async (req, res) => {
   // qui coupent les connexions inactives (commentaire SSE, ignoré par le client).
   const beat = setInterval(() => res.write(': ping\n\n'), 25_000);
   req.on('close', () => clearInterval(beat));
+});
+
+// Phase 4 (T4.1-T4.2) — premiers endpoints par intention, validés Zod, remplaçant
+// progressivement PUT /api/v1/:name (whole-array) pour cette collection. DOIVENT rester
+// AVANT app.get('/api/v1/:name', ...) ci-dessous — Express matche dans l'ordre de
+// déclaration, sinon 'members' serait capturé comme paramètre :name de la route générique.
+// Pipeline RÉUTILISÉ à l'identique du PUT existant (aucune logique RBAC/merge dupliquée) :
+// deltaToWhole() reconstruit un whole-array effectif à partir du stocké + de l'intention
+// (create/patch/delete), puis assertCanWrite + applyWrite tournent EXACTEMENT comme pour
+// un PUT whole-array classique — c'est le même scoping, les mêmes tombstones, le même LWW.
+app.post('/api/v1/members', requireAuth, async (req, res) => {
+  const parsed = MemberSchema.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: parsed.error.issues.map((i) => `${i.path.join('.') || '(racine)'}: ${i.message}`).join('; ') });
+  const member = parsed.data;
+  try {
+    const existing = await readCollection('members', true);
+    if (existing.some((m: any) => String(m.id) === String(member.id) && !m.deletedAt)) {
+      return res.status(409).json({ error: `members: ${member.id} existe déjà` });
+    }
+    const body = await deltaToWhole('members', [member], []);
+    await assertCanWrite('members', (req as any).rbac, body);
+    const { added } = await applyWrite('members', body, undefined, await preservedIds('members', (req as any).rbac));
+    // Spec : "compte créé à l'enrôlement, le membre définit son mot de passe via lien" —
+    // identique au comportement du PUT whole-array (voir plus bas dans ce fichier).
+    for (const m of added) await issueAuthLink(m, 'activate');
+    return res.status(201).json(added.find((m: any) => String(m.id) === String(member.id)) ?? member);
+  } catch (e) {
+    if (e instanceof GuardError) return res.status(e.status).json({ error: e.message });
+    throw e;
+  }
+});
+
+app.patch('/api/v1/members/:id', requireAuth, async (req, res) => {
+  const parsed = MemberPatchSchema.safeParse({ ...req.body, id: req.params.id });
+  if (!parsed.success) return res.status(400).json({ error: parsed.error.issues.map((i) => `${i.path.join('.') || '(racine)'}: ${i.message}`).join('; ') });
+  const patch = parsed.data;
+  try {
+    const existing = await readCollection('members', true);
+    const stored = existing.find((m: any) => String(m.id) === String(req.params.id) && !m.deletedAt);
+    if (!stored) return res.status(404).json({ error: `members: ${req.params.id} introuvable` });
+    const merged = { ...stored, ...patch };
+    const body = await deltaToWhole('members', [merged], []);
+    await assertCanWrite('members', (req as any).rbac, body);
+    const { added, changed } = await applyWrite('members', body, undefined, await preservedIds('members', (req as any).rbac));
+    return res.json([...added, ...changed].find((m: any) => String(m.id) === String(req.params.id)) ?? merged);
+  } catch (e) {
+    if (e instanceof GuardError) return res.status(e.status).json({ error: e.message });
+    throw e;
+  }
+});
+
+app.delete('/api/v1/members/:id', requireAuth, async (req, res) => {
+  try {
+    const existing = await readCollection('members', true);
+    const stored = existing.find((m: any) => String(m.id) === String(req.params.id) && !m.deletedAt);
+    if (!stored) return res.status(404).json({ error: `members: ${req.params.id} introuvable` });
+    // Omission intentionnelle de l'id -> tombstone par applyWrite (même mécanisme que le
+    // PUT whole-array quand un opérateur renvoie sa liste sans cet id).
+    const body = await deltaToWhole('members', [], [req.params.id]);
+    await assertCanWrite('members', (req as any).rbac, body);
+    await applyWrite('members', body, undefined, await preservedIds('members', (req as any).rbac));
+    return res.status(204).end();
+  } catch (e) {
+    if (e instanceof GuardError) return res.status(e.status).json({ error: e.message });
+    throw e;
+  }
 });
 
 app.get('/api/v1/:name', requireAuth, async (req, res) => {
