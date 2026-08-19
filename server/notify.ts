@@ -2,7 +2,7 @@
 // réel (collection notifications) ; email/SMS/WhatsApp passent par des adapters
 // qui SIMULENT l'envoi (console + outbox) tant que les clés .env sont absentes.
 // Brancher un vrai transport = remplir le corps d'UN adapter, l'interface est figée.
-import { Member, AppNotification, AppSettings, NotifChannels } from '../src/types.ts';
+import { Member, AppNotification, AppSettings, NotifChannels } from '../packages/domain/types.ts';
 import { insertOutboxIfAbsent, listPendingOutbox, markOutboxSent, markOutboxFailed, listPushSubsForMember, deletePushSub } from './datastore.ts';
 
 type Channel = 'email' | 'sms' | 'whatsapp' | 'webpush';

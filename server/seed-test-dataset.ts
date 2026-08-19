@@ -12,7 +12,7 @@
 import { getCollection, setCollection, getKv, setKv, db } from './db.ts';
 import { hashPassword } from './auth.ts';
 import { buildTestDataset, patchTestProfiles, attachAllToBus, STDS_PREFIX } from './testDataset.ts';
-import type { Member, Ministry } from '../src/types.ts';
+import type { Member, Ministry } from '../packages/domain/types.ts';
 
 db.exec('PRAGMA busy_timeout = 8000'); // attendre si le serveur écrit en même temps
 

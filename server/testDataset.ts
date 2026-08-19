@@ -9,7 +9,7 @@
 // Tout est préfixé `stds_` + nom "(TEST)" pour un nettoyage manuel facile.
 import type {
   Member, Report, Ministry, Department, BloomBusEntity, CommunityLevel, DeptFunction, PastoralCursus,
-} from '../src/types.ts';
+} from '../packages/domain/types.ts';
 
 export const STDS_PREFIX = 'stds_';
 

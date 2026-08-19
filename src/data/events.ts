@@ -51,7 +51,9 @@ export function culteSlotLabel(slotKey: string, weekIso?: string): string {
 }
 
 // Anciens événements seed (avant lot 4) — purgés des bases/localStorage existants.
-export const isLegacySeedEventId = (id: string) => /^evt_[1-5]$/.test(id) || id.startsWith('evt_culte_');
+// Déplacé vers packages/domain/seedIds.ts (Phase 1, T1.4) : le serveur en a besoin pour
+// la migration one-shot du seed ; ré-exporté ici pour ne rien casser côté front.
+export { isLegacySeedEventId } from '../../packages/domain/seedIds.ts';
 
 const iso = (d: Date) => {
   const y = d.getFullYear(), m = String(d.getMonth() + 1).padStart(2, '0'), day = String(d.getDate()).padStart(2, '0');

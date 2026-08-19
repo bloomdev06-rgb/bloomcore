@@ -3,7 +3,7 @@
 // never disagree about "what's in the demo data".
 import { getCollection, setCollection, getKv, setKv, getCredential, insertCredentialIfAbsent, countCredentials } from './datastore.ts';
 import { hashPassword } from './auth.ts';
-import { isLegacySeedEventId } from '../src/data/events.ts';
+import { isLegacySeedEventId } from '../packages/domain/seedIds.ts';
 import {
   INITIAL_MEMBERS,
   INITIAL_EVENTS,
@@ -19,7 +19,7 @@ import {
   INITIAL_ADMINS,
   INITIAL_PROJECTS,
   INITIAL_BUS_LINES,
-} from '../src/mockData.ts';
+} from './seedData.ts';
 import { buildTestDataset, patchTestProfiles, attachAllToBus } from './testDataset.ts';
 
 // H1 — les 18 profils de test + comptes admin de test (mem_test_*/adm_mem_test_*) ne sont
