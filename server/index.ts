@@ -22,6 +22,7 @@ import { addClient, poke, initPokeSubscriber } from './stream.ts';
 import { startScheduler } from './scheduler.ts';
 import { loginKey, isLocked, recordFail, clearFails } from './rateLimit.ts';
 import { redisHealthy } from './redis.ts';
+import { getStorage, SIGNED_URL_TTL_SEC } from './storage.ts';
 import { MemberSchema, MemberPatchSchema } from '../packages/schemas/member.ts';
 import { ReportSchema, ReportPatchSchema } from '../packages/schemas/report.ts';
 import {
@@ -731,12 +732,20 @@ const UPLOAD_DIR = path.join(
   'uploads',
 );
 fs.mkdirSync(UPLOAD_DIR, { recursive: true });
+// Phase 5 (T5.2) : écriture désormais via l'adaptateur (server/storage.ts) — disque par
+// défaut (S3_ENDPOINT absent), MinIO/S3 si défini. `UPLOAD_DIR` reste le repli disque ET
+// la racine servie par la route /uploads ci-dessous (mode disque uniquement — en mode S3,
+// les photos ne transitent plus par ce volume, voir GET /api/v1/uploads/sign plus bas).
+const storage = getStorage(UPLOAD_DIR);
 // Photos derrière authentification : PII (parfois mineurs). Les <img> ne portent pas
 // de header Authorization → le token est aussi accepté en query (?token=). Pas de scope
 // par membre : les fichiers sont dédupliqués par hash de contenu (un même fichier peut
 // appartenir à plusieurs membres), scoper est donc infaisable — toute session valide lit.
 // `immutable` retiré : le cache reste révocable (le token expire en 12h).
-// ponytail: auth-only ; passer à des URLs signées expirantes si un jour exposé au public.
+// ponytail: cette route reste le SEUL chemin de lecture en mode disque (repli dev/mono-
+// service). En mode S3/MinIO, GET /api/v1/uploads/sign?key=<hash> (T5.3, plus bas) est le
+// chemin prévu — cette route /uploads redevient alors inutilisée mais reste inoffensive
+// (UPLOAD_DIR peut simplement être vide).
 app.use('/uploads', async (req, res, next) => {
   const header = req.headers.authorization;
   const token = (header?.startsWith('Bearer ') ? header.slice(7) : null)
@@ -745,22 +754,40 @@ app.use('/uploads', async (req, res, next) => {
   next();
 }, express.static(UPLOAD_DIR, { maxAge: '1y' }));
 
+// GET /api/v1/uploads/sign?key=<hash[.ext|-t.jpg]> — URL signée à durée de vie limitée
+// (storage.SIGNED_URL_TTL_SEC), chemin de lecture prévu pour le mode S3/MinIO (T5.3). En
+// mode disque, l'adaptateur renvoie directement `/uploads/<key>` (comportement historique,
+// pas de vraie expiration côté disque) — cette route reste donc sûre à appeler dans TOUS
+// les modes, même si le client ne s'en sert pas encore activement (voir rapport de phase :
+// le hook front de résolution/cache n'est pas branché dans cet incrément).
+app.get('/api/v1/uploads/sign', requireAuth, async (req, res) => {
+  const key = typeof req.query.key === 'string' ? req.query.key : null;
+  // Pas de traversée de chemin : les clés sont TOUJOURS des hex sha1 (+ suffixe -t.jpg/.ext)
+  // générés serveur, jamais un chemin fourni par le client à cette étape (storeImage ci-dessous).
+  if (!key || !/^[a-f0-9]{40}(-t)?\.(jpg|jpeg|png|webp)$/.test(key)) {
+    return res.status(400).json({ error: 'key invalide' });
+  }
+  if (!(await storage.exists(key))) return res.status(404).json({ error: 'introuvable' });
+  const url = await storage.getSignedUrl(key);
+  res.json({ url, expiresIn: SIGNED_URL_TTL_SEC });
+});
+
 const DATA_URL_RE = /^data:image\/(png|jpe?g|webp);base64,(.+)$/;
-function storeImage(dataUrl: string): string | null {
+async function storeImage(dataUrl: string): Promise<string | null> {
   const m = dataUrl.match(DATA_URL_RE);
   if (!m) return null;
   const buf = Buffer.from(m[2], 'base64');
   if (buf.length > 2 * 1024 * 1024) return null; // 2 Mo max (les photos sont downscalées côté client)
-  const name = `${createHash('sha1').update(buf).digest('hex')}.${m[1] === 'jpeg' ? 'jpg' : m[1]}`;
-  const file = path.join(UPLOAD_DIR, name);
-  if (!fs.existsSync(file)) fs.writeFileSync(file, buf);
-  return `/uploads/${name}`;
+  const ext = m[1] === 'jpeg' ? 'jpg' : m[1];
+  const key = `${createHash('sha1').update(buf).digest('hex')}.${ext}`;
+  if (!(await storage.exists(key))) await storage.putObject(key, buf, `image/${ext === 'jpg' ? 'jpeg' : ext}`);
+  return `/uploads/${key}`;
 }
 
 // Paire vignette+large liée par nommage : <hash>.jpg (large, lightbox) + <hash>-t.jpg (vignette,
 // renvoyée comme avatarUrl). Hash sur la LARGE → les deux tailles d'une même photo restent liées
 // et dédupliquées. ponytail: l'app encode toujours en JPEG (canvas) → noms .jpg fixes.
-function storeImagePair(thumbUrl: string, largeUrl: string): string | null {
+async function storeImagePair(thumbUrl: string, largeUrl: string): Promise<string | null> {
   const t = thumbUrl.match(DATA_URL_RE);
   const l = largeUrl.match(DATA_URL_RE);
   if (!t || !l) return null;
@@ -768,22 +795,22 @@ function storeImagePair(thumbUrl: string, largeUrl: string): string | null {
   const largeBuf = Buffer.from(l[2], 'base64');
   if (thumbBuf.length > 2 * 1024 * 1024 || largeBuf.length > 2 * 1024 * 1024) return null;
   const hash = createHash('sha1').update(largeBuf).digest('hex');
-  const largeFile = path.join(UPLOAD_DIR, `${hash}.jpg`);
-  const thumbFile = path.join(UPLOAD_DIR, `${hash}-t.jpg`);
-  if (!fs.existsSync(largeFile)) fs.writeFileSync(largeFile, largeBuf);
-  if (!fs.existsSync(thumbFile)) fs.writeFileSync(thumbFile, thumbBuf);
-  return `/uploads/${hash}-t.jpg`;
+  const largeKey = `${hash}.jpg`;
+  const thumbKey = `${hash}-t.jpg`;
+  if (!(await storage.exists(largeKey))) await storage.putObject(largeKey, largeBuf, 'image/jpeg');
+  if (!(await storage.exists(thumbKey))) await storage.putObject(thumbKey, thumbBuf, 'image/jpeg');
+  return `/uploads/${thumbKey}`;
 }
 
-app.post('/api/v1/uploads', requireAuth, (req, res) => {
+app.post('/api/v1/uploads', requireAuth, async (req, res) => {
   const { data, thumb, large } = req.body ?? {};
   if (typeof thumb === 'string' && typeof large === 'string') {
-    const url = storeImagePair(thumb, large);
+    const url = await storeImagePair(thumb, large);
     if (!url) return res.status(400).json({ error: 'image invalide ou trop lourde (max 2 Mo/taille)' });
     return res.json({ url });
   }
   if (typeof data !== 'string') return res.status(400).json({ error: 'dataURL image attendue' });
-  const url = storeImage(data);
+  const url = await storeImage(data);
   if (!url) return res.status(400).json({ error: 'image invalide ou trop lourde (max 2 Mo, png/jpeg/webp)' });
   res.json({ url });
 });
@@ -794,7 +821,7 @@ app.post('/api/v1/uploads', requireAuth, (req, res) => {
   let migrated = 0;
   for (const m of members as any[]) {
     if (typeof m.avatarUrl === 'string' && m.avatarUrl.startsWith('data:image/')) {
-      const url = storeImage(m.avatarUrl);
+      const url = await storeImage(m.avatarUrl);
       if (url) { m.avatarUrl = url; migrated++; }
     }
   }

@@ -35,6 +35,15 @@ services:
       # Phase 3 (T3.2) : le scheduler tourne dans le service worker dédié ci-dessous —
       # désactivé ici pour ne pas dérouler le sweep (et donc les emails/SMS) deux fois.
       RUN_SCHEDULER: "false"
+      # Phase 5 (T5.1-T5.3) : MinIO S3-compatible pour les photos. LAISSER VIDE pour rester
+      # en mode disque (comportement historique, /data/uploads sur le volume ci-dessous) —
+      # définir les 4 variables ci-dessous bascule automatiquement server/storage.ts en mode
+      # S3 (voir ce fichier pour le détail). Le bucket doit exister AVANT le premier upload :
+      # le service `uploads-bucket` ci-dessous le crée une fois au démarrage.
+      S3_ENDPOINT: ${S3_ENDPOINT:-}
+      S3_BUCKET: ${S3_BUCKET:-bloomcore}
+      S3_ACCESS_KEY: ${S3_ACCESS_KEY:-}
+      S3_SECRET_KEY: ${S3_SECRET_KEY:-}
     volumes:
       - bloomcore-data:/data
     depends_on:
@@ -113,8 +122,43 @@ services:
       - bloomcore-kuma:/app/data
     restart: unless-stopped
 
+  # Phase 5 (T5.1) — stockage objet des photos (server/storage.ts, mode S3). OPTIONNEL :
+  # tant que S3_ENDPOINT n'est pas défini sur le service `bloomcore`, ce service tourne mais
+  # n'est utilisé par rien (mode disque actif par défaut, /data/uploads sur bloomcore-data).
+  # PAS de port public (accès réseau interne seul) — la console 9001 uniquement via un
+  # domaine Dokploy dédié si besoin d'y accéder depuis l'extérieur.
+  minio:
+    image: minio/minio:latest
+    command: ["server", "/data", "--console-address", ":9001"]
+    environment:
+      MINIO_ROOT_USER: ${S3_ACCESS_KEY:-bloomcore}
+      MINIO_ROOT_PASSWORD: ${S3_SECRET_KEY:?S3_SECRET_KEY requis si MinIO est utilisé (Phase 5) - voir .env.example}
+    volumes:
+      - bloomcore-minio:/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
+  # One-shot : crée le bucket S3_BUCKET s'il n'existe pas encore, puis sort (code 0).
+  # `mc alias`/`mc mb` sont idempotents — ré-exécutable sans risque à chaque `docker compose up`.
+  uploads-bucket:
+    image: minio/mc:latest
+    depends_on:
+      minio:
+        condition: service_healthy
+    environment:
+      S3_ACCESS_KEY: ${S3_ACCESS_KEY:-bloomcore}
+      S3_SECRET_KEY: ${S3_SECRET_KEY:-}
+      S3_BUCKET: ${S3_BUCKET:-bloomcore}
+    entrypoint: ["sh", "-c", "mc alias set local http://minio:9000 \"$$S3_ACCESS_KEY\" \"$$S3_SECRET_KEY\" && mc mb --ignore-existing \"local/$$S3_BUCKET\""]
+    restart: "no"
+
 volumes:
   bloomcore-data:
   bloomcore-pg:
   bloomcore-redis:
   bloomcore-kuma:
+  bloomcore-minio:
