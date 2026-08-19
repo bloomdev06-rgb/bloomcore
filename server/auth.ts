@@ -3,6 +3,7 @@
 // covers both with a few lines. Upgrade path: swap for bcrypt/jsonwebtoken if
 // this ever needs to interop with other services or survive a security review.
 import { scryptSync, randomBytes, timingSafeEqual, createHmac } from 'node:crypto';
+import { getRedis, REDIS_KEY_PREFIX } from './redis.ts';
 
 // Secret obligatoire : en production, refuse de démarrer si absent ou laissé à une
 // valeur d'exemple — sinon un attaquant connaissant le défaut forge n'importe quel
@@ -55,8 +56,32 @@ export async function signToken(memberId: string): Promise<string> {
 
 // Version du mot de passe d'un membre (0 si aucun credential). Incrémentée à chaque
 // changement de mot de passe → invalide tous les tokens émis avant (voir verifyToken).
+// Phase 2 (T2.3) : cache Redis read-through, TTL 1h — c'était 1 lecture Postgres par
+// requête authentifiée (verifyToken l'appelle à CHAQUE fois). invalidatePwdVersion()
+// DOIT être appelée dans la même opération que tout ce qui change pwd_version (voir
+// upsertCredentials ci-dessous — c'est le seul point d'écriture, donc le seul appelant).
+const PWD_VERSION_CACHE_TTL_SEC = 3600;
+const pwdVersionKey = (memberId: string) => `${REDIS_KEY_PREFIX}pv:${memberId}`;
+
 export async function passwordVersion(memberId: string): Promise<number> {
-  return (await getCredential(memberId))?.pwd_version ?? 0;
+  const c = await getRedis().catch(() => null);
+  if (c) {
+    try {
+      const cached = await c.get(pwdVersionKey(memberId));
+      if (cached !== null) return Number(cached);
+    } catch { /* Redis injoignable — repli DB ci-dessous, jamais bloquant */ }
+  }
+  const v = (await getCredential(memberId))?.pwd_version ?? 0;
+  if (c) {
+    try { await c.set(pwdVersionKey(memberId), String(v), { EX: PWD_VERSION_CACHE_TTL_SEC }); } catch { /* best-effort */ }
+  }
+  return v;
+}
+
+async function invalidatePwdVersion(memberId: string): Promise<void> {
+  const c = await getRedis().catch(() => null);
+  if (!c) return;
+  try { await c.del(pwdVersionKey(memberId)); } catch { /* best-effort — le TTL 1h borne la fenêtre */ }
 }
 
 // --- Tokens à usage unique (activation 48h / réinitialisation 1h) ---
@@ -83,6 +108,9 @@ export async function upsertCredentials(memberId: string, password: string): Pro
   // Changement de mot de passe (UPDATE) → pwd_version++ : révoque tous les tokens antérieurs.
   // Première définition (INSERT à l'activation) → version 0, aucune session à invalider.
   await upsertCredential(memberId, hashPassword(password));
+  // Invalidation DANS la même opération que l'incrément (T2.3) : la prochaine lecture
+  // de passwordVersion() relit Postgres au lieu de servir une version périmée du cache.
+  await invalidatePwdVersion(memberId);
 }
 
 export async function verifyToken(token: string): Promise<string | null> {
