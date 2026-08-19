@@ -1,7 +1,7 @@
 // Run: npx tsx src/data/notificationRules.check.ts
 import assert from 'node:assert';
-import { deriveTimeBasedNotifications } from './notificationRules';
-import { Member, Department, Ministry } from '../types';
+import { deriveTimeBasedNotifications } from './notificationRules.ts';
+import { Member, Department, Ministry } from './types.ts';
 
 const now = new Date('2026-06-30T12:00:00Z');
 const delays = { pending: 3, red: 7 };

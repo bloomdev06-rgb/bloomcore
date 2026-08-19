@@ -1,7 +1,7 @@
 // Run: npx tsx src/data/scope.check.ts
 import assert from 'node:assert';
-import { inMemberScope, busInScope, directReportsOf, canFillReportFor } from './scope';
-import { Member, BloomBusEntity, Department, Ministry } from '../types';
+import { inMemberScope, busInScope, directReportsOf, canFillReportFor } from './scope.ts';
+import { Member, BloomBusEntity, Department, Ministry } from './types.ts';
 
 let nextId = 0;
 const mk = (over: Partial<Member> = {}): Member => ({

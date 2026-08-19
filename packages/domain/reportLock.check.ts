@@ -1,7 +1,7 @@
 // Check du verrou 24h des rapports Bloom Bus. Lancer : npx tsx src/data/reportLock.check.ts
 import assert from 'node:assert';
 import { isBusReportLocked } from './reportLock.ts';
-import type { Report } from '../types';
+import type { Report } from './types.ts';
 
 const base = {
   id: 'r1', authorId: 'm1', authorName: 'T', authorRole: 'Capitaine de Bus',

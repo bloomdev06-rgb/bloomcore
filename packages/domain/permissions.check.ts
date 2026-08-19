@@ -1,7 +1,7 @@
 // Vérifie le moteur de capacités §5 : base ⊕ overrides ⊕ specialAuth (harnais node:assert).
 import assert from 'node:assert';
-import { resolveCapability } from './permissions';
-import { Member, PermissionMatrix, CapabilityOverride, SpecialAuthorization } from '../types';
+import { resolveCapability } from './permissions.ts';
+import { Member, PermissionMatrix, CapabilityOverride, SpecialAuthorization } from './types.ts';
 
 const CAP = 'consulter_situation_financiere';
 

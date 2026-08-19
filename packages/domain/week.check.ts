@@ -1,6 +1,6 @@
 // Run: npx tsx src/data/week.check.ts
 import assert from 'node:assert';
-import { mondayOf, weekId, weekLabel, weekOffset, reportingWindow, isWeekFillable } from './week';
+import { mondayOf, weekId, weekLabel, weekOffset, reportingWindow, isWeekFillable } from './week.ts';
 
 // mondayOf — un mardi et un dimanche de la même semaine calendaire tombent sur le même lundi.
 assert.equal(mondayOf(new Date(2026, 6, 8)).getTime(), new Date(2026, 6, 6).getTime()); // mer 8/7 -> lun 6/7

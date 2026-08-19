@@ -3,8 +3,8 @@
 // même dérivation pure que le client (notificationRules.ts) : les ids sont
 // déterministes (notif_red_<memberId>…), donc l'insertion est idempotente entre
 // restarts ET dédupliquée avec l'effet client resté en fallback hors-ligne.
-import { deriveTimeBasedNotifications } from '../src/data/notificationRules.ts';
-import { AppSettings, Member } from '../src/types.ts';
+import { deriveTimeBasedNotifications } from '../packages/domain/notificationRules.ts';
+import { AppSettings, Member } from '../packages/domain/types.ts';
 import { getKv, appendToCollection } from './datastore.ts';
 import { readCollection } from './guards.ts';
 import { dispatch, drainOutbox } from './notify.ts';

@@ -2,10 +2,10 @@
 // qui n'est qu'un commutateur de démo côté client). Réutilise les modules purs
 // du frontend (permissions.ts, scope.ts) pour que client et serveur ne puissent
 // pas diverger sur la sémantique des capacités et du scope.
-import { Member, Ministry, PermissionMatrix, Delegation, AdminAccount, Department, BloomBusEntity, SpecialAuthorization, CapabilityOverride } from '../src/types.ts';
-import { resolveCapability } from '../src/data/permissions.ts';
-import { inMemberScope, canFillReportFor, busInScope, fullBloomBusAccess, bloomBusRoleOf, MULTI_BRANCH_ROLES } from '../src/data/scope.ts';
-import { isBusReportLocked } from '../src/data/reportLock.ts';
+import { Member, Ministry, PermissionMatrix, Delegation, AdminAccount, Department, BloomBusEntity, SpecialAuthorization, CapabilityOverride } from '../packages/domain/types.ts';
+import { resolveCapability } from '../packages/domain/permissions.ts';
+import { inMemberScope, canFillReportFor, busInScope, fullBloomBusAccess, bloomBusRoleOf, MULTI_BRANCH_ROLES } from '../packages/domain/scope.ts';
+import { isBusReportLocked } from '../packages/domain/reportLock.ts';
 import { getKv } from './datastore.ts';
 import { GuardError, readCollection, canonical } from './guards.ts';
 import { roleForDeptFn, roleForLevel } from '../packages/shared/migrate.ts';
