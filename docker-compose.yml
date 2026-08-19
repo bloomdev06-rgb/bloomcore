@@ -65,6 +65,11 @@ services:
     # service ne lise/écrive en base (démarrage worker/api en parallèle, pas d'ordre
     # garanti par depends_on au-delà du healthcheck Postgres lui-même).
     command: ["sh", "-c", "if [ -n \"$$DATABASE_URL\" ]; then npx prisma migrate deploy; fi && exec npx tsx server/worker.ts"]
+    # Le HEALTHCHECK du Dockerfile (wget /api/v1/health sur :4000) est hérité par ce
+    # conteneur — or le worker n'a AUCUN serveur HTTP : il serait marqué unhealthy en
+    # permanence (faux positif d'incident dans Dokploy/Kuma). Neutralisé explicitement.
+    healthcheck:
+      disable: true
     environment:
       NODE_ENV: production
       AUTH_SECRET: ${AUTH_SECRET:?AUTH_SECRET requis - voir .env.example}
@@ -122,43 +127,14 @@ services:
       - bloomcore-kuma:/app/data
     restart: unless-stopped
 
-  # Phase 5 (T5.1) — stockage objet des photos (server/storage.ts, mode S3). OPTIONNEL :
-  # tant que S3_ENDPOINT n'est pas défini sur le service `bloomcore`, ce service tourne mais
-  # n'est utilisé par rien (mode disque actif par défaut, /data/uploads sur bloomcore-data).
-  # PAS de port public (accès réseau interne seul) — la console 9001 uniquement via un
-  # domaine Dokploy dédié si besoin d'y accéder depuis l'extérieur.
-  minio:
-    image: minio/minio:latest
-    command: ["server", "/data", "--console-address", ":9001"]
-    environment:
-      MINIO_ROOT_USER: ${S3_ACCESS_KEY:-bloomcore}
-      MINIO_ROOT_PASSWORD: ${S3_SECRET_KEY:?S3_SECRET_KEY requis si MinIO est utilisé (Phase 5) - voir .env.example}
-    volumes:
-      - bloomcore-minio:/data
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
-      interval: 5s
-      timeout: 3s
-      retries: 10
-    restart: unless-stopped
-
-  # One-shot : crée le bucket S3_BUCKET s'il n'existe pas encore, puis sort (code 0).
-  # `mc alias`/`mc mb` sont idempotents — ré-exécutable sans risque à chaque `docker compose up`.
-  uploads-bucket:
-    image: minio/mc:latest
-    depends_on:
-      minio:
-        condition: service_healthy
-    environment:
-      S3_ACCESS_KEY: ${S3_ACCESS_KEY:-bloomcore}
-      S3_SECRET_KEY: ${S3_SECRET_KEY:-}
-      S3_BUCKET: ${S3_BUCKET:-bloomcore}
-    entrypoint: ["sh", "-c", "mc alias set local http://minio:9000 \"$$S3_ACCESS_KEY\" \"$$S3_SECRET_KEY\" && mc mb --ignore-existing \"local/$$S3_BUCKET\""]
-    restart: "no"
+  # Phase 5 : MinIO vit dans docker-compose.minio.yml (overlay OPT-IN, comme le frontend
+  # nginx dans docker-compose.frontend.yml). Il était initialement déclaré ICI avec
+  # `${S3_SECRET_KEY:?...}` — mais l'interpolation `:?` de Compose échoue au PARSING du
+  # fichier, pas au démarrage du service : tout `docker compose up` sans S3_SECRET_KEY
+  # (donc le déploiement Dokploy actuel, sans variables S3) aurait cassé net. Déplacé.
 
 volumes:
   bloomcore-data:
   bloomcore-pg:
   bloomcore-redis:
   bloomcore-kuma:
-  bloomcore-minio:

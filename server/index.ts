@@ -477,7 +477,18 @@ app.delete('/api/v1/reports/:id', requireAuth, async (req, res) => {
 // la main pour /members (T4.2) et /reports (T4.4) ci-dessus (deltaToWhole + assertCanWrite +
 // applyWrite, zéro logique RBAC/merge nouvelle), factorisé pour ne pas récrire la même
 // boucle 9 fois avec le risque de divergence/copier-coller que ça implique. Comportement
-// observable IDENTIQUE à des routes écrites à la main pour chaque collection.
+// observable IDENTIQUE à des routes écrites à la main pour chaque collection — y compris
+// les effets de bord post-écriture du PUT (afterWrite ci-dessous), sinon une notification
+// créée par POST n'aurait ni fan-out email/SMS ni poke SSE alors que la même via PUT si.
+async function afterCrudWrite(name: string, added: any[]): Promise<void> {
+  // Miroir exact du PUT /api/v1/:name (plus bas) : fan-out multicanal + cloche en direct
+  // pour les notifications nouvellement créées. Les autres collections n'ont pas d'effet.
+  if (name === 'notifications' && added.length) {
+    await dispatch(added, await readCollection('members'), await getKv('settings'));
+    poke();
+  }
+}
+
 function registerCrudEndpoints(name: string, Schema: { safeParse: (v: unknown) => any }, PatchSchema: { safeParse: (v: unknown) => any }): void {
   app.post(`/api/v1/${name}`, requireAuth, async (req, res) => {
     const parsed = Schema.safeParse(req.body);
@@ -491,6 +502,7 @@ function registerCrudEndpoints(name: string, Schema: { safeParse: (v: unknown) =
       const body = await deltaToWhole(name, [item], []);
       await assertCanWrite(name, (req as any).rbac, body);
       const { added } = await applyWrite(name, body, undefined, await preservedIds(name, (req as any).rbac));
+      await afterCrudWrite(name, added);
       return res.status(201).json(added.find((it: any) => String(it.id) === String(item.id)) ?? item);
     } catch (e) {
       if (e instanceof GuardError) return res.status(e.status).json({ error: e.message });
