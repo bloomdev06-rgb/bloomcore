@@ -119,17 +119,28 @@ services:
   # Sauvegarde Postgres — pg_dump quotidien + rétention locale (voir scripts/backup-postgres.sh
   # pour le détail, scripts/restore-postgres.sh pour restaurer). Protège contre une erreur
   # applicative, une migration ratée ou une suppression accidentelle (volume bloomcore-backups
-  # séparé du volume Postgres actif). NE PROTÈGE PAS une perte du serveur/hôte : le volume
-  # reste sur cette même machine. Pour une vraie reprise après sinistre, copier PÉRIODIQUEMENT
-  # ce volume hors du serveur — options possibles (à choisir/configurer séparément) :
-  #   - la sauvegarde native de Dokploy si disponible sur votre instance ;
-  #   - un job cron sur l'hôte, ex. `docker run --rm -v bloomcore_bloomcore-backups:/b
-  #     -v /chemin/distant:/dest alpine cp -a /b/. /dest/` (ou rsync/rclone vers S3).
+  # séparé du volume Postgres actif).
+  #
+  # Copie hors-site (Cloudflare R2) — OPTIONNEL, activé dès que les 4 variables R2_* ci-dessous
+  # sont renseignées (sinon sauvegarde locale seule, comportement inchangé). Sans ça, le volume
+  # local NE PROTÈGE PAS une perte du serveur/hôte lui-même (même machine). Pour activer :
+  #   1. Créer un compte Cloudflare (gratuit) puis un bucket R2 (Stockage R2 → Créer un bucket).
+  #   2. R2 → Gérer les jetons d'API R2 → créer un jeton avec permission "Lecture et écriture
+  #      d'objets", limité à ce bucket → donne R2_ACCESS_KEY_ID et R2_SECRET_ACCESS_KEY.
+  #   3. R2_ACCOUNT_ID : visible sur la page d'accueil R2 du dashboard Cloudflare (colonne de
+  #      droite) ou dans l'URL du jeton créé.
+  #   4. R2_BUCKET : le nom donné au bucket à l'étape 1.
+  # 10 Go gratuits, aucun frais de sortie — largement suffisant pour des dumps SQL compressés.
   backup:
     image: postgres:16-alpine
     environment:
       PGPASSWORD: ${POSTGRES_PASSWORD:-bloom}
       BACKUP_RETENTION_DAYS: ${BACKUP_RETENTION_DAYS:-14}
+      R2_ACCOUNT_ID: ${R2_ACCOUNT_ID:-}
+      R2_ACCESS_KEY_ID: ${R2_ACCESS_KEY_ID:-}
+      R2_SECRET_ACCESS_KEY: ${R2_SECRET_ACCESS_KEY:-}
+      R2_BUCKET: ${R2_BUCKET:-}
+      R2_RETENTION_DAYS: ${R2_RETENTION_DAYS:-90}
     volumes:
       - bloomcore-backups:/backups
       - ./scripts/backup-postgres.sh:/backup.sh:ro

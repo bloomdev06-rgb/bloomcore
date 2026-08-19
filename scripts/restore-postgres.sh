@@ -4,6 +4,11 @@
 #
 # Usage : ./scripts/restore-postgres.sh bloomcore-20260819-030000.sql.gz
 #
+# Si le dump n'est disponible que sur Cloudflare R2 (volume local perdu — reprise après
+# sinistre) : le télécharger d'abord dans le volume, ex.
+#   docker compose exec backup rclone copyto r2:<bucket>/backups/<fichier> /backups/<fichier>
+# puis lancer ce script normalement.
+#
 # ATTENTION : écrase la base `bloomcore` actuelle. Arrêter l'API/worker avant restauration
 # évite des écritures concurrentes pendant l'import.
 set -eu
