@@ -116,6 +116,29 @@ services:
       retries: 10
     restart: unless-stopped
 
+  # Sauvegarde Postgres — pg_dump quotidien + rétention locale (voir scripts/backup-postgres.sh
+  # pour le détail, scripts/restore-postgres.sh pour restaurer). Protège contre une erreur
+  # applicative, une migration ratée ou une suppression accidentelle (volume bloomcore-backups
+  # séparé du volume Postgres actif). NE PROTÈGE PAS une perte du serveur/hôte : le volume
+  # reste sur cette même machine. Pour une vraie reprise après sinistre, copier PÉRIODIQUEMENT
+  # ce volume hors du serveur — options possibles (à choisir/configurer séparément) :
+  #   - la sauvegarde native de Dokploy si disponible sur votre instance ;
+  #   - un job cron sur l'hôte, ex. `docker run --rm -v bloomcore_bloomcore-backups:/b
+  #     -v /chemin/distant:/dest alpine cp -a /b/. /dest/` (ou rsync/rclone vers S3).
+  backup:
+    image: postgres:16-alpine
+    environment:
+      PGPASSWORD: ${POSTGRES_PASSWORD:-bloom}
+      BACKUP_RETENTION_DAYS: ${BACKUP_RETENTION_DAYS:-14}
+    volumes:
+      - bloomcore-backups:/backups
+      - ./scripts/backup-postgres.sh:/backup.sh:ro
+    entrypoint: ["sh", "/backup.sh"]
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+
   # Monitoring uptime : pinger http://bloomcore:4000/api/v1/health depuis l'UI Kuma
   # (première connexion → créer le compte admin immédiatement). Exposer via un domaine
   # dédié (ex. status.votre-domaine) dans Dockploy/Traefik plutôt que le port brut.
@@ -138,3 +161,4 @@ volumes:
   bloomcore-pg:
   bloomcore-redis:
   bloomcore-kuma:
+  bloomcore-backups:
