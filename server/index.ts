@@ -20,6 +20,8 @@ import { buildContext, assertCanWrite, filterReadable, preservedIds, RbacContext
 import { dispatch } from './notify.ts';
 import { addClient, poke } from './stream.ts';
 import { startScheduler } from './scheduler.ts';
+import { loginKey, isLocked, recordFail, clearFails } from './rateLimit.ts';
+import { redisHealthy } from './redis.ts';
 
 // M6 — importer les vraies données SQLite→Postgres AVANT le seed, pour que
 // ensureSeeded ne fasse que combler ce qui manque (idempotent, no-op en SQLite).
@@ -91,11 +93,13 @@ async function requireAuth(req: express.Request, res: express.Response, next: ex
 const isAdmin = (ctx: RbacContext) => ctx.roles.includes('Admin') || ctx.roles.includes('Super Admin');
 
 // Healthcheck public (orchestrateur / load balancer / Docker HEALTHCHECK) — pas d'auth.
-// Vérifie que le process répond ET que la base SQLite est joignable.
+// Vérifie que le process répond ET que la base (SQLite/Postgres) est joignable.
+// redis: null = non configuré (REDIS_URL absent, ne fait pas échouer le check — Redis
+// reste optionnel, cf. Phase 2) ; true/false = configuré et joignable ou non.
 app.get('/api/v1/health', async (_req, res) => {
   try {
     await readCollection('members');
-    res.json({ ok: true, ts: Date.now() });
+    res.json({ ok: true, ts: Date.now(), redis: await redisHealthy() });
   } catch {
     res.status(503).json({ ok: false });
   }
@@ -112,22 +116,9 @@ async function findByIdentifier(identifier: string) {
   );
 }
 
-// S5 — anti-brute-force en mémoire (par IP + identifiant). ponytail: per-instance ;
-// store partagé (Redis) si scale horizontal.
-const LOGIN_MAX_FAILS = 5;
-const LOGIN_LOCK_MS = 15 * 60 * 1000;
-const loginFails = new Map<string, { count: number; until: number }>();
-const loginKey = (req: express.Request, id: string) => `${req.ip}|${String(id).toLowerCase()}`;
-const loginLocked = (key: string) => {
-  const e = loginFails.get(key);
-  return !!e && e.count >= LOGIN_MAX_FAILS && Date.now() < e.until;
-};
-const loginFail = (key: string) => {
-  const e = loginFails.get(key) ?? { count: 0, until: 0 };
-  e.count += 1;
-  e.until = Date.now() + LOGIN_LOCK_MS;
-  loginFails.set(key, e);
-};
+// S5 — anti-brute-force (par IP + identifiant). Compteur déplacé vers server/rateLimit.ts
+// (Phase 2, T2.2) : partagé via Redis si REDIS_URL est défini (survit aux redéploiements,
+// partagé entre instances), repli en mémoire per-instance identique à l'original sinon.
 // Hash factice : verifyPassword tourne même si le compte n'existe pas → le temps de
 // réponse ne distingue plus « compte existant » de « inexistant » (anti-oracle de timing).
 const DUMMY_HASH = hashPassword('__nonexistent_account__');
@@ -136,16 +127,16 @@ app.post('/api/v1/auth/login', async (req, res) => {
   const { identifier, phone, password } = req.body ?? {};
   const id = identifier ?? phone;
   if (!id || !password) return res.status(400).json({ error: 'identifier and password required' });
-  const key = loginKey(req, id);
-  if (loginLocked(key)) return res.status(429).json({ error: 'trop de tentatives, réessayez plus tard' });
+  const key = loginKey(req.ip, id);
+  if (await isLocked(key)) return res.status(429).json({ error: 'trop de tentatives, réessayez plus tard' });
   const member = await findByIdentifier(id);
   const cred = member ? await getCredential(member.id) : null;
   const ok = verifyPassword(password, cred?.password_hash ?? DUMMY_HASH);
   if (!member || !cred || !ok) {
-    loginFail(key);
+    await recordFail(key);
     return res.status(401).json({ error: 'invalid credentials' });
   }
-  loginFails.delete(key);
+  await clearFails(key);
   res.json({ token: await signToken(member.id), member });
 });
 
