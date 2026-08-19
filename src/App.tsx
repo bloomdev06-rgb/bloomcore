@@ -1,5 +1,5 @@
 import React, { useState, useEffect, lazy, Suspense } from 'react';
-import { load, save, seeds, useDepartments, useMinistries, useBusLines, useAdmins, deriveTimeBasedNotifications, apiBootstrap, apiPut, clearAuthToken, enableSync, canView, openNotificationStream, apiFetchCollection, labelFor } from './data';
+import { load, save, seeds, useDepartments, useMinistries, useBusLines, useAdmins, deriveTimeBasedNotifications, apiBootstrap, apiPut, clearAuthToken, enableSync, canView, openNotificationStream, apiFetchCollection, labelFor, apiCreateMember, apiPatchMember, apiDeleteMember } from './data';
 import { reportName } from './data/reportNames';
 import { resolveMemberRole } from './data/roles';
 import { MEMBERS_TAB_DEPT_ONLY_ROLES } from './data/scope';
@@ -284,6 +284,10 @@ export default function App() {
     const enriched: Member = { ...m, ...(bus && { bloomBusId: bus.id }), departments };
 
     setMembers(prev => [enriched, ...prev]);
+    // Phase 4 (T4.3) — push immédiat via l'endpoint dédié (validé Zod côté serveur), en
+    // plus du apiPut whole-array debouncé déclenché par le useEffect qui persiste `members`
+    // (repli hors-ligne inchangé, voir commentaire de apiCreateMember dans data/api.ts).
+    void apiCreateMember(enriched).catch(() => {});
 
     if (enriched.level === 'nouveau') {
       handleAddNotification(mkNotif(
@@ -359,6 +363,8 @@ export default function App() {
     }
 
     setMembers(prev => prev.map(item => item.id === m.id ? m : item));
+    // Phase 4 (T4.3) — push immédiat via PATCH (voir commentaire équivalent dans handleAddMember).
+    void apiPatchMember(m).catch(() => {});
 
     // Log Audit — P4.16/P4.17 : le transfert de branche et la promotion méritent
     // leur propre actionType/previousValue/newValue plutôt que le générique
@@ -395,6 +401,11 @@ export default function App() {
     const isSelf = id === loggedInMemberId;
     const updated = members.filter(m => m.id !== id);
     setMembers(updated);
+    // Phase 4 (T4.3) — push immédiat via DELETE. Pour le cas isSelf (ci-dessous), c'est
+    // TOUJOURS le apiPut whole-array explicite qui est attendu avant handleLogout() (le
+    // reload immédiat de logout ne laisse pas le temps au debounce de 1,5s de partir) ;
+    // ce DELETE est un best-effort supplémentaire, pas le chemin garanti pour ce cas précis.
+    void apiDeleteMember(id).catch(() => {});
     handleAddAuditLog({
       id: genId('aud_del'),
       timestamp: new Date().toISOString(),

@@ -319,6 +319,58 @@ export async function apiPut(name: string, value: unknown): Promise<boolean> {
   }
 }
 
+// Phase 4 (T4.3) — mutations par intention pour `members` (POST/PATCH/DELETE, validées
+// Zod côté serveur), en complément du apiPut whole-array ci-dessus qui reste le repli
+// hors-ligne (via save()/enqueueSync, INCHANGÉ). Ces trois fonctions sont un push immédiat
+// best-effort : elles ne bloquent rien côté UI (l'état local a déjà changé via setMembers),
+// et n'alimentent PAS la file de rattrapage elles-mêmes en cas d'échec — le useEffect qui
+// persiste `members` déclenche de toute façon, ~1,5s plus tard, le PUT whole-array habituel
+// (voir src/data/index.ts save()), qui lui gère déjà retry/file offline. Doublon inoffensif :
+// le serveur voit alors un état déjà identique au sien (canonical égal) → no-op.
+export async function apiCreateMember(member: unknown): Promise<boolean> {
+  const token = getAuthToken();
+  if (!token) return false;
+  try {
+    const res = await fetch(`${API_BASE}/members`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: JSON.stringify(member),
+    });
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
+
+export async function apiPatchMember(member: { id: string }): Promise<boolean> {
+  const token = getAuthToken();
+  if (!token) return false;
+  try {
+    const res = await fetch(`${API_BASE}/members/${encodeURIComponent(member.id)}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: JSON.stringify(member),
+    });
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
+
+export async function apiDeleteMember(id: string): Promise<boolean> {
+  const token = getAuthToken();
+  if (!token) return false;
+  try {
+    const res = await fetch(`${API_BASE}/members/${encodeURIComponent(id)}`, {
+      method: 'DELETE',
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
+
 // Flat (non-discriminated-union) shape on purpose: this project's tsconfig
 // doesn't set `strict`, and without strictNullChecks TS fails to narrow a
 // `{ok:true;...} | {ok:false; reason...}` union at call sites — `member`/
