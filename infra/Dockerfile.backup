@@ -6,7 +6,7 @@
 # CONTEXTE DE BUILD ATTENDU : la racine du repo (pas ce dossier infra/), pour copier
 # scripts/backup-postgres.sh. Dans Dokploy : "Docker Context Path" = `.`,
 # "Dockerfile Path" = `infra/Dockerfile.backup`.
-FROM postgres:16-alpine
+FROM postgres:18-alpine
 # apk (installation de rclone si R2_* est configuré) a besoin d'internet au démarrage —
 # voir scripts/backup-postgres.sh. Alternative pour un réseau restreint : pré-installer ici
 # avec `RUN apk add --no-cache rclone` pour ne plus en dépendre au runtime.

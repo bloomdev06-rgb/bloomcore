@@ -1,5 +1,5 @@
 #!/bin/sh
-# Sauvegarde Postgres — image postgres:16-alpine (pg_dump déjà présent, pas de dépendance
+# Sauvegarde Postgres — image postgres:18-alpine (pg_dump déjà présent, pas de dépendance
 # supplémentaire à installer pour le dump local). Utilisé par le service `backup` de
 # docker-compose.yml (mode tout-en-un) ET par infra/Dockerfile.backup (architecture éclatée,
 # Application Dokploy indépendante) — d'où la connexion DB paramétrable ci-dessous plutôt que
