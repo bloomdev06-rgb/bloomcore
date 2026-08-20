@@ -513,6 +513,19 @@ export async function filterReadable(name: string, ctx: RbacContext, items: any[
       // Réservé à l'encadrement supérieur — invisible au simple membre.
       return hasAny(roles, FULL_SCOPE_ROLES) ? items : [];
 
+    case 'capability_overrides':
+      // Lecture symétrique à l'écriture (assertCanWrite ci-dessus) : la matrice dynamique
+      // de capacités n'est pas exposée plus largement en lecture qu'en écriture.
+      return hasAny(roles, ['Admin', 'Pasteur Principal', 'Super Admin']) ? items : [];
+
+    case 'special_authorizations':
+      // Lecture symétrique à l'écriture (GRANTORS dans assertCanWrite) : les exceptions
+      // nominatives (qui a accès aux rapports de suivi confidentiels de qui) ne fuitent
+      // pas à tout membre authentifié via /bootstrap.
+      return hasAny(roles, ['Ministre', 'Pasteur', 'Pasteur Principal', 'Admin', 'Super Admin'])
+        ? items
+        : [];
+
     default:
       // ministries, departments, activities, forms, settings : nécessaires au
       // fonctionnement de l'UI, entités transverses sans PII confidentielle par branche.
