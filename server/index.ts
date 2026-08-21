@@ -320,7 +320,14 @@ app.post('/api/v1/auth/register', async (req, res) => {
   const check = MemberSchema.safeParse(member);
   if (!check.success) return res.status(400).json({ error: check.error.issues.map((i) => `${i.path.join('.') || '(racine)'}: ${i.message}`).join('; ') });
 
-  await appendToCollection('members', [check.data]);
+  // `updatedAt` est OBLIGATOIRE ici. C'est ce que pose applyWrite sur toute écriture, et c'est
+  // ce qui protège l'item du tombstone-par-omission (guards.ts : `if (asOf && s.updatedAt &&
+  // s.updatedAt > asOf) → conflit` au lieu de supprimer). Sans lui, le prochain PUT whole-array
+  // d'un client dont le tableau `members` date d'AVANT cette inscription (typiquement la file
+  // de rattrapage hors-ligne, qui reste whole-array) soft-supprimerait silencieusement la
+  // demande en attente. Cet endpoint étant public, il n'a pas de contexte RBAC et ne passe donc
+  // pas par applyWrite — la métadonnée doit être posée à la main.
+  await appendToCollection('members', [{ ...check.data, updatedAt: new Date().toISOString() }]);
 
   // Notifie le(s) responsable(s) du département choisi ; à défaut, le tuteur du ministère
   // (Ministre) ; à défaut, tous les comptes Admin/Super Admin — quelqu'un doit toujours être
@@ -337,20 +344,27 @@ app.post('/api/v1/auth/register', async (req, res) => {
     recipients = members.filter((m: any) => adminIds.has(m.id));
   }
   if (recipients.length) {
-    await dispatch(
-      recipients.map((r: any) => ({
-        id: `notif_selfreg_${check.data.id}_${r.id}`,
-        timestamp: new Date().toISOString(),
-        title: 'Nouvelle demande d\'inscription',
-        message: `${input.firstName} ${input.lastName} demande à rejoindre ${department.name} — à valider.`,
-        type: 'info' as const,
-        read: false,
-        targetMemberId: r.id,
-      })),
-      members,
-      await getKv('settings'),
-    );
+    // Ids déterministes (member × destinataire) → ré-appel idempotent, comme les alertes
+    // du scheduler. On INSÈRE d'abord dans `notifications` (canal in-app = la cloche) PUIS
+    // on dispatch les canaux hors-app : dispatch() ne fait que le fan-out email/SMS/push,
+    // il n'écrit pas la collection (cf. scheduler.ts runSweep, même séquence).
+    const notifs = recipients.map((r: any) => ({
+      id: `notif_selfreg_${check.data.id}_${r.id}`,
+      timestamp: new Date().toISOString(),
+      title: 'Nouvelle demande d\'inscription',
+      message: `${input.firstName} ${input.lastName} demande à rejoindre ${department.name} — à valider.`,
+      type: 'info' as const,
+      read: false,
+      targetMemberId: r.id,
+    }));
+    const knownNotifIds = new Set((await readCollection('notifications', true)).map((n: any) => n.id));
+    const freshNotifs = notifs.filter((n) => !knownNotifIds.has(n.id));
+    if (freshNotifs.length) {
+      await appendToCollection('notifications', freshNotifs.map((n) => ({ ...n, updatedAt: new Date().toISOString() })));
+      await dispatch(freshNotifs, members, await getKv('settings'));
+    }
   }
+  poke(); // la demande en attente + la cloche apparaissent en direct chez le responsable
 
   res.status(201).json({ ok: true });
 });
