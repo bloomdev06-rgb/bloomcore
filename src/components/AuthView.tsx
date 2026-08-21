@@ -36,13 +36,15 @@ export default function AuthView({ members, onLogin }: AuthViewProps) {
   const [phone, setPhone] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
-  // Flux activation/reset : 'request' (identifiant) → 'complete' (code + nouveau mdp) → 'offline' (démo)
+  // Flux activation/reset : 'request' (identifiant) → 'sent' (vérifie ta boîte mail) → 'offline' (démo)
   // → 'setPassword' (arrivée directe depuis le lien email, token déjà connu, juste le nouveau mdp).
-  const [step, setStep] = useState<'request' | 'complete' | 'offline' | 'setPassword'>(
+  // Pas d'étape "code à saisir à la main" : le token ne voyage que dans le lien de l'email.
+  const [step, setStep] = useState<'request' | 'sent' | 'offline' | 'setPassword'>(
     linkToken ? 'setPassword' : 'request',
   );
-  const [code, setCode] = useState(linkToken?.token ?? '');
+  const [code] = useState(linkToken?.token ?? '');
   const [newPassword, setNewPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
 
   // Le token ne doit servir qu'une fois et ne pas traîner dans l'historique/URL partageable
   // (capture d'écran, etc.) — on le retire de la barre d'adresse juste après lecture.
@@ -89,16 +91,20 @@ export default function AuthView({ members, onLogin }: AuthViewProps) {
       setStep('offline'); // backend injoignable : message démo historique
       return;
     }
-    // Anti-énumération : toujours 200. En dev le devToken est prérempli.
-    setCode(data.devToken ?? '');
-    setStep('complete');
+    // Anti-énumération : toujours 200, qu'un compte corresponde ou non. Le token ne voyage
+    // que dans le lien envoyé par email/SMS — plus d'écran "code à saisir" ici.
+    setStep('sent');
   };
 
   const submitComplete = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
-    if (!code.trim() || !newPassword) {
-      setError('Code et nouveau mot de passe requis.');
+    if (!newPassword || newPassword.length < 6) {
+      setError('Mot de passe requis (min 6 caractères).');
+      return;
+    }
+    if (newPassword !== confirmPassword) {
+      setError('Les deux mots de passe ne correspondent pas.');
       return;
     }
     const result = await apiComplete(code.trim(), newPassword);
@@ -108,15 +114,15 @@ export default function AuthView({ members, onLogin }: AuthViewProps) {
     }
     setError(result.reason === 'network'
       ? 'Serveur injoignable — réessaie plus tard.'
-      : 'Code invalide, expiré ou déjà utilisé.');
+      : 'Lien invalide, expiré ou déjà utilisé — redemande un nouveau lien.');
   };
 
   const switchMode = (m: Mode) => {
     setMode(m);
     setError('');
     setStep('request');
-    setCode('');
     setNewPassword('');
+    setConfirmPassword('');
     setPassword('');
   };
 
@@ -195,51 +201,20 @@ export default function AuthView({ members, onLogin }: AuthViewProps) {
           </form>
         )}
 
-        {mode !== 'login' && step === 'complete' && (
-          <form onSubmit={submitComplete} className="space-y-4">
+        {mode !== 'login' && step === 'sent' && (
+          <div className="space-y-4 text-center py-4">
             <div className="w-12 h-12 mx-auto rounded-full bg-bc-green/10 flex items-center justify-center text-bc-green">
               <ShieldCheck size={22} />
             </div>
-            <p className="text-sm text-bc-text text-center">
-              Si un compte correspond, un lien a été envoyé (SMS/WhatsApp/email).
-              Saisis le code reçu et ton nouveau mot de passe.
+            <h1 className="text-lg font-ui font-bold text-bc-text">Vérifie ta boîte mail</h1>
+            <p className="text-sm text-bc-text-secondary">
+              Si un compte correspond à cet identifiant, un email {mode === 'activate' ? "d'activation" : 'de réinitialisation'} vient
+              d'être envoyé. Clique sur le lien qu'il contient pour {mode === 'activate' ? 'activer ton compte' : 'choisir un nouveau mot de passe'}.
             </p>
-            <div>
-              <label className="text-xs font-bold text-bc-text-secondary">Code reçu</label>
-              <div className="mt-1 flex items-center gap-2 border border-bc-border rounded-full px-4 py-2.5">
-                <ShieldCheck size={15} className="text-bc-text-secondary" />
-                <input
-                  value={code}
-                  onChange={e => setCode(e.target.value)}
-                  placeholder="Code du lien"
-                  className="flex-1 outline-none text-sm bg-transparent font-mono"
-                />
-              </div>
-            </div>
-            <div>
-              <label className="text-xs font-bold text-bc-text-secondary">Nouveau mot de passe (min 6)</label>
-              <div className="mt-1 flex items-center gap-2 border border-bc-border rounded-full px-4 py-2.5">
-                <KeyRound size={15} className="text-bc-text-secondary" />
-                <input
-                  type="password"
-                  value={newPassword}
-                  onChange={e => setNewPassword(e.target.value)}
-                  placeholder="••••••••"
-                  className="flex-1 outline-none text-sm bg-transparent"
-                />
-              </div>
-            </div>
-            {error && <p className="text-xs text-bc-danger">{error}</p>}
-            <button
-              type="submit"
-              className="w-full flex items-center justify-center gap-2 py-3 bg-bc-green text-white rounded-full text-sm font-ui font-bold hover:opacity-90"
-            >
-              {mode === 'activate' ? 'Activer et me connecter' : 'Changer et me connecter'}
-            </button>
-            <button type="button" onClick={() => switchMode('login')} className="w-full text-xs text-bc-text-secondary hover:text-bc-text">
+            <button type="button" onClick={() => switchMode('login')} className="text-xs font-bold text-bc-green hover:opacity-80">
               Retour à la connexion
             </button>
-          </form>
+          </div>
         )}
 
         {mode !== 'login' && step === 'setPassword' && (
@@ -259,6 +234,19 @@ export default function AuthView({ members, onLogin }: AuthViewProps) {
                   autoFocus
                   value={newPassword}
                   onChange={e => setNewPassword(e.target.value)}
+                  placeholder="••••••••"
+                  className="flex-1 outline-none text-sm bg-transparent"
+                />
+              </div>
+            </div>
+            <div>
+              <label className="text-xs font-bold text-bc-text-secondary">Répéter le mot de passe</label>
+              <div className="mt-1 flex items-center gap-2 border border-bc-border rounded-full px-4 py-2.5">
+                <KeyRound size={15} className="text-bc-text-secondary" />
+                <input
+                  type="password"
+                  value={confirmPassword}
+                  onChange={e => setConfirmPassword(e.target.value)}
                   placeholder="••••••••"
                   className="flex-1 outline-none text-sm bg-transparent"
                 />
