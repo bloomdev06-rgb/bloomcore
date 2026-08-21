@@ -107,10 +107,11 @@ export interface Member {
   bloomBusId?: string; // Attached bus ID
 
   // Enregistrement direct par un responsable hiérarchique Bloom Bus (hors procédure ADN
-  // "nouveau") — rattachement département en attente de validation par le responsable de
-  // département. undefined = pas concerné (membre créé normalement).
+  // "nouveau"), OU auto-inscription publique (Créer mon compte) — rattachement département
+  // en attente de validation par le responsable de département/ministère concerné.
+  // undefined = pas concerné (membre créé normalement).
   deptAttachmentStatus?: 'pending' | 'validated' | 'rejected';
-  deptAttachmentOrigin?: 'bloom_bus';
+  deptAttachmentOrigin?: 'bloom_bus' | 'self_registration';
 
   // Integration tracking for Nouveaux
   integrationState?: IntegrationState;

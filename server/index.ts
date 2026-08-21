@@ -7,7 +7,7 @@
 import 'dotenv/config';
 import path from 'node:path';
 import fs from 'node:fs';
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import express from 'express';
 import compression from 'compression';
@@ -24,6 +24,7 @@ import { startScheduler } from './scheduler.ts';
 import { loginKey, isLocked, recordFail, clearFails } from './rateLimit.ts';
 import { redisHealthy } from './redis.ts';
 import { getStorage, SIGNED_URL_TTL_SEC } from './storage.ts';
+import { z } from 'zod';
 import { MemberSchema, MemberPatchSchema } from '../packages/schemas/member.ts';
 import { ReportSchema, ReportPatchSchema } from '../packages/schemas/report.ts';
 import {
@@ -258,6 +259,102 @@ app.post('/api/v1/auth/request-reset', async (req, res) => {
   res.json({ ok: true, ...(!isProd && devToken ? { devToken } : {}) });
 });
 
+// Liste publique minimale des départements (id/nom/branche/rattachement Bloom Bus), pour le
+// sélecteur du formulaire "Créer mon compte" — SANS auth (l'inscription est publique) mais
+// sans rien exposer d'autre que ce qu'il faut pour choisir où s'inscrire.
+app.get('/api/v1/public/departments', async (_req, res) => {
+  const departments = await readCollection('departments');
+  res.json(departments.map((d: any) => ({ id: d.id, name: d.name, branch: d.branch, specialFunction: d.specialFunction })));
+});
+
+// Auto-inscription publique ("Créer mon compte") — quiconque peut s'inscrire, mais le
+// rattachement au département choisi reste 'pending' jusqu'à validation par le responsable
+// de ce département (ou, à défaut, un Admin) : même mécanisme que le rattachement direct
+// Bloom Bus (deptAttachmentStatus/Origin), voir DepartmentsView.tsx. Aucun lien d'activation
+// n'est envoyé ici — il ne l'est qu'à la validation (voir PATCH /members/:id ci-dessous),
+// pour qu'un compte non validé ne puisse jamais se connecter.
+const RegisterSchema = z.object({
+  lastName: z.string().min(1),
+  firstName: z.string().min(1),
+  phone: z.string().min(1),
+  email: z.string().min(1),
+  gender: z.enum(['H', 'F']),
+  birthDate: z.string().min(1),
+  maritalStatus: z.enum(['Célibataire', 'Marié(e)', 'Divorcé(e)', 'Veuf(ve)']),
+  profession: z.string().min(1),
+  branch: z.enum(['church', 'light', 'global']),
+  departmentId: z.string().min(1),
+}).strict();
+
+app.post('/api/v1/auth/register', async (req, res) => {
+  const parsed = RegisterSchema.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: parsed.error.issues.map((i) => `${i.path.join('.') || '(racine)'}: ${i.message}`).join('; ') });
+  const input = parsed.data;
+
+  const department = (await readCollection('departments')).find((d: any) => d.id === input.departmentId);
+  if (!department) return res.status(400).json({ error: 'département inconnu' });
+
+  const existing = await findByIdentifier(input.phone) || await findByIdentifier(input.email);
+  if (existing) return res.status(409).json({ error: 'un compte existe déjà avec ce téléphone ou cet email' });
+
+  const member = {
+    id: `mem_reg_${randomUUID()}`,
+    lastName: input.lastName,
+    firstName: input.firstName,
+    phone: input.phone,
+    email: input.email,
+    gender: input.gender,
+    birthDate: input.birthDate,
+    maritalStatus: input.maritalStatus,
+    profession: input.profession,
+    entryDate: new Date().toISOString().slice(0, 10),
+    branch: input.branch,
+    level: 'nouveau' as const,
+    pastoralCursus: 'aucun' as const,
+    departments: { [input.departmentId]: 'membre' as const },
+    deptAttachmentStatus: 'pending' as const,
+    deptAttachmentOrigin: 'self_registration' as const,
+    healthKPIs: { spirituel: 3, social: 3, financier: 3, physique: 3, presenceCulte: 3, presenceService: 3 },
+    baptismStatus: 'non_baptise' as const,
+  };
+  const check = MemberSchema.safeParse(member);
+  if (!check.success) return res.status(400).json({ error: check.error.issues.map((i) => `${i.path.join('.') || '(racine)'}: ${i.message}`).join('; ') });
+
+  await appendToCollection('members', [check.data]);
+
+  // Notifie le(s) responsable(s) du département choisi ; à défaut, le tuteur du ministère
+  // (Ministre) ; à défaut, tous les comptes Admin/Super Admin — quelqu'un doit toujours être
+  // notifié, "en fonction du champ d'action" (retour utilisateur).
+  const members = await readCollection('members');
+  const responsables = members.filter((m: any) => m.departments?.[input.departmentId] === 'responsable');
+  let recipients = responsables;
+  if (recipients.length === 0 && department.ministryId) {
+    const ministry = (await readCollection('ministries')).find((m: any) => m.id === department.ministryId);
+    if (ministry?.tuteurId) recipients = members.filter((m: any) => m.id === ministry.tuteurId);
+  }
+  if (recipients.length === 0) {
+    const adminIds = new Set((await readCollection('admins')).map((a: any) => String(a.id).replace(/^adm_/, '')));
+    recipients = members.filter((m: any) => adminIds.has(m.id));
+  }
+  if (recipients.length) {
+    await dispatch(
+      recipients.map((r: any) => ({
+        id: `notif_selfreg_${check.data.id}_${r.id}`,
+        timestamp: new Date().toISOString(),
+        title: 'Nouvelle demande d\'inscription',
+        message: `${input.firstName} ${input.lastName} demande à rejoindre ${department.name} — à valider.`,
+        type: 'info' as const,
+        read: false,
+        targetMemberId: r.id,
+      })),
+      members,
+      await getKv('settings'),
+    );
+  }
+
+  res.status(201).json({ ok: true });
+});
+
 app.post('/api/v1/auth/complete', async (req, res) => {
   const { token, password } = req.body ?? {};
   if (!token || !password) return res.status(400).json({ error: 'token and password required' });
@@ -412,7 +509,20 @@ app.patch('/api/v1/members/:id', requireAuth, async (req, res) => {
     const body = await deltaToWhole('members', [merged], []);
     await assertCanWrite('members', (req as any).rbac, body);
     const { added, changed } = await applyWrite('members', body, undefined, await preservedIds('members', (req as any).rbac));
-    return res.json([...added, ...changed].find((m: any) => String(m.id) === String(req.params.id)) ?? merged);
+    const result = [...added, ...changed].find((m: any) => String(m.id) === String(req.params.id)) ?? merged;
+    // Validation d'un rattachement en attente (Bloom Bus ou auto-inscription, cf.
+    // deptAttachmentStatus/Origin) : c'est SEULEMENT à ce moment-là que le compte reçoit son
+    // lien d'activation — pas à la création (le membre ne doit pas pouvoir se connecter avant
+    // validation). Idempotent : si un credential existe déjà, on ne renvoie pas de lien.
+    if (
+      stored.deptAttachmentStatus === 'pending'
+      && patch.deptAttachmentStatus === 'validated'
+      && (result.deptAttachmentOrigin === 'bloom_bus' || result.deptAttachmentOrigin === 'self_registration')
+      && !(await getCredential(result.id))
+    ) {
+      await issueAuthLink(result, 'activate');
+    }
+    return res.json(result);
   } catch (e) {
     if (e instanceof GuardError) return res.status(e.status).json({ error: e.message });
     throw e;

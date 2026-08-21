@@ -490,6 +490,37 @@ async function postJson(path: string, body: unknown, token?: string | null): Pro
 export const apiRequestActivation = (identifier: string) => postJson('/auth/request-activation', { identifier });
 export const apiRequestReset = (identifier: string) => postJson('/auth/request-reset', { identifier });
 
+// --- Auto-inscription publique ("Créer mon compte") ---
+// Liste des départements pour le sélecteur du formulaire — endpoint public (pas de session).
+export async function apiPublicDepartments(): Promise<{ id: string; name: string; branch?: string; specialFunction?: string }[] | null> {
+  try {
+    const res = await fetch(`${API_BASE}/public/departments`);
+    if (!res.ok) return null;
+    const data = await res.json();
+    return Array.isArray(data) ? data : null;
+  } catch {
+    return null;
+  }
+}
+
+export interface RegisterInput {
+  lastName: string;
+  firstName: string;
+  phone: string;
+  email: string;
+  gender: 'H' | 'F';
+  birthDate: string;
+  maritalStatus: 'Célibataire' | 'Marié(e)' | 'Divorcé(e)' | 'Veuf(ve)';
+  profession: string;
+  branch: 'church' | 'light' | 'global';
+  departmentId: string;
+}
+
+// null = serveur injoignable ; { status, error? } sinon (201 = demande envoyée).
+export async function apiRegister(input: RegisterInput): Promise<{ status: number; error?: string } | null> {
+  return postJson('/auth/register', input);
+}
+
 // Consomme le token d'activation/réinit et connecte directement le membre.
 export async function apiComplete(token: string, password: string): Promise<LoginResult> {
   const data = await postJson('/auth/complete', { token, password });

@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Member } from '../types';
 import { apiLogin } from '../data';
-import { apiRequestActivation, apiRequestReset, apiComplete } from '../data/api';
+import { apiRequestActivation, apiRequestReset, apiComplete, apiPublicDepartments, apiRegister, RegisterInput } from '../data/api';
 import { Phone, KeyRound, ArrowRight, ShieldCheck, Sparkles } from 'lucide-react';
 
 interface AuthViewProps {
@@ -9,7 +9,15 @@ interface AuthViewProps {
   onLogin: (memberId: string) => void;
 }
 
-type Mode = 'login' | 'activate' | 'reset';
+// 'activate' reste un mode interne (arrivée directe depuis le lien d'activation envoyé à la
+// validation d'une inscription) — il n'est plus accessible depuis un bouton de l'écran de
+// connexion (remplacé par 'register', cf. retour terrain : "activer mon compte n'a pas d'utilité").
+type Mode = 'login' | 'activate' | 'reset' | 'register';
+
+const EMPTY_REGISTER: RegisterInput = {
+  lastName: '', firstName: '', phone: '', email: '', gender: 'H', birthDate: '',
+  maritalStatus: 'Célibataire', profession: '', branch: 'church', departmentId: '',
+};
 
 // Lien d'activation/reset (server/index.ts issueAuthLink) : ${APP_URL}/?activate=<token>
 // ou ${APP_URL}/?reset=<token>. Lu une seule fois au premier rendu — le clic sur le lien
@@ -45,6 +53,16 @@ export default function AuthView({ members, onLogin }: AuthViewProps) {
   const [code] = useState(linkToken?.token ?? '');
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
+  const [registerForm, setRegisterForm] = useState<RegisterInput>(EMPTY_REGISTER);
+  const [departments, setDepartments] = useState<{ id: string; name: string }[]>([]);
+
+  // Charge la liste des départements (public, pas de session) au premier passage en mode
+  // inscription — évite l'aller-retour réseau tant que l'utilisateur n'a pas cliqué "Créer mon compte".
+  useEffect(() => {
+    if (mode !== 'register' || departments.length > 0) return;
+    apiPublicDepartments().then(list => { if (list) setDepartments(list); });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mode]);
 
   // Le token ne doit servir qu'une fois et ne pas traîner dans l'historique/URL partageable
   // (capture d'écran, etc.) — on le retire de la barre d'adresse juste après lecture.
@@ -117,6 +135,26 @@ export default function AuthView({ members, onLogin }: AuthViewProps) {
       : 'Lien invalide, expiré ou déjà utilisé — redemande un nouveau lien.');
   };
 
+  const submitRegister = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError('');
+    const f = registerForm;
+    if (!f.lastName || !f.firstName || !f.phone || !f.email || !f.birthDate || !f.profession || !f.departmentId) {
+      setError('Tous les champs sont requis.');
+      return;
+    }
+    const data = await apiRegister(f);
+    if (!data) {
+      setStep('offline');
+      return;
+    }
+    if (data.status !== 201) {
+      setError(data.error || 'Inscription impossible — réessaie plus tard.');
+      return;
+    }
+    setStep('sent');
+  };
+
   const switchMode = (m: Mode) => {
     setMode(m);
     setError('');
@@ -124,6 +162,7 @@ export default function AuthView({ members, onLogin }: AuthViewProps) {
     setNewPassword('');
     setConfirmPassword('');
     setPassword('');
+    setRegisterForm(EMPTY_REGISTER);
   };
 
   const identifierField = (
@@ -176,13 +215,13 @@ export default function AuthView({ members, onLogin }: AuthViewProps) {
               Se connecter <ArrowRight size={15} />
             </button>
             <div className="flex justify-between text-xs text-bc-text-secondary pt-1">
-              <button type="button" onClick={() => switchMode('activate')} className="hover:text-bc-text">Activer mon compte</button>
+              <button type="button" onClick={() => switchMode('register')} className="hover:text-bc-text">Créer mon compte</button>
               <button type="button" onClick={() => switchMode('reset')} className="hover:text-bc-text">Mot de passe oublié ?</button>
             </div>
           </form>
         )}
 
-        {mode !== 'login' && step === 'request' && (
+        {(mode === 'reset' || mode === 'activate') && step === 'request' && (
           <form onSubmit={submitRequest} className="space-y-4">
             <h1 className="text-lg font-ui font-bold text-bc-text">
               {mode === 'activate' ? 'Activer mon compte' : 'Réinitialiser mon mot de passe'}
@@ -201,15 +240,111 @@ export default function AuthView({ members, onLogin }: AuthViewProps) {
           </form>
         )}
 
+        {mode === 'register' && step === 'request' && (
+          <form onSubmit={submitRegister} className="space-y-3">
+            <h1 className="text-lg font-ui font-bold text-bc-text">Créer mon compte</h1>
+            <p className="text-xs text-bc-text-secondary -mt-2">
+              Ton inscription sera examinée par le responsable du département choisi avant activation.
+            </p>
+            <div className="grid grid-cols-2 gap-2">
+              <div>
+                <label className="text-xs font-bold text-bc-text-secondary">Prénom</label>
+                <input value={registerForm.firstName} onChange={e => setRegisterForm({ ...registerForm, firstName: e.target.value })}
+                  className="mt-1 w-full border border-bc-border rounded-xl px-3 py-2 text-sm outline-none" />
+              </div>
+              <div>
+                <label className="text-xs font-bold text-bc-text-secondary">Nom</label>
+                <input value={registerForm.lastName} onChange={e => setRegisterForm({ ...registerForm, lastName: e.target.value })}
+                  className="mt-1 w-full border border-bc-border rounded-xl px-3 py-2 text-sm outline-none" />
+              </div>
+            </div>
+            <div>
+              <label className="text-xs font-bold text-bc-text-secondary">Téléphone</label>
+              <input value={registerForm.phone} onChange={e => setRegisterForm({ ...registerForm, phone: e.target.value })}
+                placeholder="+225 07 07 12 34 56" className="mt-1 w-full border border-bc-border rounded-xl px-3 py-2 text-sm outline-none" />
+            </div>
+            <div>
+              <label className="text-xs font-bold text-bc-text-secondary">Email</label>
+              <input type="email" value={registerForm.email} onChange={e => setRegisterForm({ ...registerForm, email: e.target.value })}
+                className="mt-1 w-full border border-bc-border rounded-xl px-3 py-2 text-sm outline-none" />
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              <div>
+                <label className="text-xs font-bold text-bc-text-secondary">Genre</label>
+                <select value={registerForm.gender} onChange={e => setRegisterForm({ ...registerForm, gender: e.target.value as 'H' | 'F' })}
+                  className="mt-1 w-full border border-bc-border rounded-xl px-3 py-2 text-sm outline-none bg-white">
+                  <option value="H">Homme</option>
+                  <option value="F">Femme</option>
+                </select>
+              </div>
+              <div>
+                <label className="text-xs font-bold text-bc-text-secondary">Date de naissance</label>
+                <input type="date" value={registerForm.birthDate} onChange={e => setRegisterForm({ ...registerForm, birthDate: e.target.value })}
+                  className="mt-1 w-full border border-bc-border rounded-xl px-3 py-2 text-sm outline-none" />
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              <div>
+                <label className="text-xs font-bold text-bc-text-secondary">Situation matrimoniale</label>
+                <select value={registerForm.maritalStatus} onChange={e => setRegisterForm({ ...registerForm, maritalStatus: e.target.value as RegisterInput['maritalStatus'] })}
+                  className="mt-1 w-full border border-bc-border rounded-xl px-3 py-2 text-sm outline-none bg-white">
+                  <option value="Célibataire">Célibataire</option>
+                  <option value="Marié(e)">Marié(e)</option>
+                  <option value="Divorcé(e)">Divorcé(e)</option>
+                  <option value="Veuf(ve)">Veuf(ve)</option>
+                </select>
+              </div>
+              <div>
+                <label className="text-xs font-bold text-bc-text-secondary">Profession</label>
+                <input value={registerForm.profession} onChange={e => setRegisterForm({ ...registerForm, profession: e.target.value })}
+                  className="mt-1 w-full border border-bc-border rounded-xl px-3 py-2 text-sm outline-none" />
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              <div>
+                <label className="text-xs font-bold text-bc-text-secondary">Branche</label>
+                <select value={registerForm.branch} onChange={e => setRegisterForm({ ...registerForm, branch: e.target.value as RegisterInput['branch'] })}
+                  className="mt-1 w-full border border-bc-border rounded-xl px-3 py-2 text-sm outline-none bg-white">
+                  <option value="church">Church</option>
+                  <option value="light">Light</option>
+                  <option value="global">Global</option>
+                </select>
+              </div>
+              <div>
+                <label className="text-xs font-bold text-bc-text-secondary">Département</label>
+                <select value={registerForm.departmentId} onChange={e => setRegisterForm({ ...registerForm, departmentId: e.target.value })}
+                  className="mt-1 w-full border border-bc-border rounded-xl px-3 py-2 text-sm outline-none bg-white">
+                  <option value="">— Choisir —</option>
+                  {departments.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
+                </select>
+              </div>
+            </div>
+            {error && <p className="text-xs text-bc-danger">{error}</p>}
+            <button
+              type="submit"
+              className="w-full flex items-center justify-center gap-2 py-3 bg-bc-green text-white rounded-full text-sm font-ui font-bold hover:opacity-90"
+            >
+              Envoyer ma demande d'inscription
+            </button>
+            <button type="button" onClick={() => switchMode('login')} className="w-full text-xs text-bc-text-secondary hover:text-bc-text">
+              Retour à la connexion
+            </button>
+          </form>
+        )}
+
         {mode !== 'login' && step === 'sent' && (
           <div className="space-y-4 text-center py-4">
             <div className="w-12 h-12 mx-auto rounded-full bg-bc-green/10 flex items-center justify-center text-bc-green">
               <ShieldCheck size={22} />
             </div>
-            <h1 className="text-lg font-ui font-bold text-bc-text">Vérifie ta boîte mail</h1>
+            <h1 className="text-lg font-ui font-bold text-bc-text">
+              {mode === 'register' ? 'Demande envoyée' : 'Vérifie ta boîte mail'}
+            </h1>
             <p className="text-sm text-bc-text-secondary">
-              Si un compte correspond à cet identifiant, un email {mode === 'activate' ? "d'activation" : 'de réinitialisation'} vient
-              d'être envoyé. Clique sur le lien qu'il contient pour {mode === 'activate' ? 'activer ton compte' : 'choisir un nouveau mot de passe'}.
+              {mode === 'register'
+                ? "Ta demande d'inscription a été transmise au responsable concerné. Tu recevras un email d'activation dès qu'elle sera validée."
+                : <>Si un compte correspond à cet identifiant, un email {mode === 'activate' ? "d'activation" : 'de réinitialisation'} vient
+                  d'être envoyé. Clique sur le lien qu'il contient pour {mode === 'activate' ? 'activer ton compte' : 'choisir un nouveau mot de passe'}.</>}
             </p>
             <button type="button" onClick={() => switchMode('login')} className="text-xs font-bold text-bc-green hover:opacity-80">
               Retour à la connexion

@@ -75,7 +75,7 @@ export const MemberSchema = z.object({
   testRole: z.string().optional(),
   bloomBusId: z.string().optional(),
   deptAttachmentStatus: z.enum(['pending', 'validated', 'rejected']).optional(),
-  deptAttachmentOrigin: z.literal('bloom_bus').optional(),
+  deptAttachmentOrigin: z.enum(['bloom_bus', 'self_registration']).optional(),
   integrationState: integrationState.optional(),
   integrationFollowStatus: integrationFollowStatus.optional(),
   membershipWish: z.enum(['Membre', 'Visiteur']).optional(),

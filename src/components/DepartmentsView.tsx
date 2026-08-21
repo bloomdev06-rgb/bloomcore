@@ -174,7 +174,7 @@ export default function DepartmentsView({ activeBranch, simulatedRole, members =
   const canValidate = ['Responsable', 'Coach', 'Leader', 'Pasteur', 'Ministre', 'Admin', 'Super Admin'].includes(simulatedRole);
   // Membres enregistrés directement par un responsable hiérarchique Bloom Bus (chemin distinct
   // de la procédure ADN "nouveau") — rattachement à ce département en attente de validation.
-  const pendingBloomBusAttachment = deptMembers.filter(m => m.deptAttachmentStatus === 'pending' && m.deptAttachmentOrigin === 'bloom_bus');
+  const pendingBloomBusAttachment = deptMembers.filter(m => m.deptAttachmentStatus === 'pending' && (m.deptAttachmentOrigin === 'bloom_bus' || m.deptAttachmentOrigin === 'self_registration'));
   // Chaque changement de statut passe par une confirmation explicite (popup) au clic sur la
   // personne, plutôt qu'une mutation directe au clic sur un bouton.
   const applyStatusTransition = () => {
@@ -821,7 +821,7 @@ export default function DepartmentsView({ activeBranch, simulatedRole, members =
                       réunies dans cette même section (cf. spec). */}
                   <div className="bg-white rounded-2xl border border-bc-border p-6">
                     <h3 className="font-bold text-bc-text text-sm mb-1 flex items-center gap-2"><UserCheck size={15} /> Réceptions à valider ({pendingReception.length + pendingBloomBusAttachment.length})</h3>
-                    <p className="text-[11px] text-bc-text-secondary mb-4">Nouveaux affectés à ce département par l'ADN, ou membres enregistrés directement par un responsable Bloom Bus, en attente de ta validation.</p>
+                    <p className="text-[11px] text-bc-text-secondary mb-4">Nouveaux affectés à ce département par l'ADN, membres enregistrés directement par un responsable Bloom Bus, ou inscriptions faites par les intéressés eux-mêmes ("Créer mon compte"), en attente de ta validation.</p>
                     <div className="space-y-2">
                       {pendingReception.length === 0 && pendingBloomBusAttachment.length === 0 && <p className="text-xs text-bc-text-secondary italic">Aucune réception en attente.</p>}
                       {pendingReception.map(m => (
@@ -847,7 +847,9 @@ export default function DepartmentsView({ activeBranch, simulatedRole, members =
                           <div>
                             <span className="text-sm font-bold text-bc-text">{m.firstName} {m.lastName}</span>
                             <span className="text-[10px] text-bc-text-secondary ml-2">{m.phone}</span>
-                            <span className="ml-2 text-[9px] font-bold px-2 py-0.5 rounded-full bg-bc-green/10 text-bc-green">Origine : Bloom Bus</span>
+                            <span className="ml-2 text-[9px] font-bold px-2 py-0.5 rounded-full bg-bc-green/10 text-bc-green">
+                              Origine : {m.deptAttachmentOrigin === 'self_registration' ? 'Auto-inscription' : 'Bloom Bus'}
+                            </span>
                           </div>
                           {canManageDeptMembers ? (
                             <div className="flex items-center gap-2">
