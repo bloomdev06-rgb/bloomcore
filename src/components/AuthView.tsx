@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Member } from '../types';
 import { apiLogin } from '../data';
 import { apiRequestActivation, apiRequestReset, apiComplete } from '../data/api';
@@ -11,20 +11,45 @@ interface AuthViewProps {
 
 type Mode = 'login' | 'activate' | 'reset';
 
+// Lien d'activation/reset (server/index.ts issueAuthLink) : ${APP_URL}/?activate=<token>
+// ou ${APP_URL}/?reset=<token>. Lu une seule fois au premier rendu — le clic sur le lien
+// de l'email doit amener DIRECTEMENT à l'écran "nouveau mot de passe", sans repasser par
+// la demande d'identifiant ni faire saisir le token à la main (UX day-1, cf. retour terrain).
+function readLinkToken(): { mode: Mode; token: string } | null {
+  if (typeof window === 'undefined') return null;
+  const params = new URLSearchParams(window.location.search);
+  const activate = params.get('activate');
+  const reset = params.get('reset');
+  if (activate) return { mode: 'activate', token: activate };
+  if (reset) return { mode: 'reset', token: reset };
+  return null;
+}
+
 // P4.19 + phase 5 — real auth when the backend (server/) is reachable : login
 // par téléphone OU email, activation/réinitialisation réelles (token à usage
 // unique, envoi simulé par les adapters serveur ; en dev le token revient dans
 // la réponse et est prérempli). Backend injoignable → repli hors-ligne : login
 // mock (n'importe quel mot de passe) et message démo pour activation/reset.
 export default function AuthView({ members, onLogin }: AuthViewProps) {
-  const [mode, setMode] = useState<Mode>('login');
+  const linkToken = readLinkToken();
+  const [mode, setMode] = useState<Mode>(linkToken?.mode ?? 'login');
   const [phone, setPhone] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   // Flux activation/reset : 'request' (identifiant) → 'complete' (code + nouveau mdp) → 'offline' (démo)
-  const [step, setStep] = useState<'request' | 'complete' | 'offline'>('request');
-  const [code, setCode] = useState('');
+  // → 'setPassword' (arrivée directe depuis le lien email, token déjà connu, juste le nouveau mdp).
+  const [step, setStep] = useState<'request' | 'complete' | 'offline' | 'setPassword'>(
+    linkToken ? 'setPassword' : 'request',
+  );
+  const [code, setCode] = useState(linkToken?.token ?? '');
   const [newPassword, setNewPassword] = useState('');
+
+  // Le token ne doit servir qu'une fois et ne pas traîner dans l'historique/URL partageable
+  // (capture d'écran, etc.) — on le retire de la barre d'adresse juste après lecture.
+  useEffect(() => {
+    if (linkToken) window.history.replaceState(null, '', window.location.pathname);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const submitLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -197,6 +222,41 @@ export default function AuthView({ members, onLogin }: AuthViewProps) {
                 <KeyRound size={15} className="text-bc-text-secondary" />
                 <input
                   type="password"
+                  value={newPassword}
+                  onChange={e => setNewPassword(e.target.value)}
+                  placeholder="••••••••"
+                  className="flex-1 outline-none text-sm bg-transparent"
+                />
+              </div>
+            </div>
+            {error && <p className="text-xs text-bc-danger">{error}</p>}
+            <button
+              type="submit"
+              className="w-full flex items-center justify-center gap-2 py-3 bg-bc-green text-white rounded-full text-sm font-ui font-bold hover:opacity-90"
+            >
+              {mode === 'activate' ? 'Activer et me connecter' : 'Changer et me connecter'}
+            </button>
+            <button type="button" onClick={() => switchMode('login')} className="w-full text-xs text-bc-text-secondary hover:text-bc-text">
+              Retour à la connexion
+            </button>
+          </form>
+        )}
+
+        {mode !== 'login' && step === 'setPassword' && (
+          <form onSubmit={submitComplete} className="space-y-4">
+            <div className="w-12 h-12 mx-auto rounded-full bg-bc-green/10 flex items-center justify-center text-bc-green">
+              <ShieldCheck size={22} />
+            </div>
+            <h1 className="text-lg font-ui font-bold text-bc-text text-center">
+              {mode === 'activate' ? 'Activer mon compte' : 'Choisir un nouveau mot de passe'}
+            </h1>
+            <div>
+              <label className="text-xs font-bold text-bc-text-secondary">Nouveau mot de passe (min 6)</label>
+              <div className="mt-1 flex items-center gap-2 border border-bc-border rounded-full px-4 py-2.5">
+                <KeyRound size={15} className="text-bc-text-secondary" />
+                <input
+                  type="password"
+                  autoFocus
                   value={newPassword}
                   onChange={e => setNewPassword(e.target.value)}
                   placeholder="••••••••"
