@@ -228,6 +228,14 @@ app.post('/api/v1/auth/logout', (_req, res) => {
 const APP_URL = process.env.APP_URL || 'http://localhost:3000';
 const isProd = IS_PROD;
 
+// Une adresse à laquelle on peut réellement expédier le lien d'activation. Volontairement
+// permissif (pas de regex RFC 5322) : on écarte le vide et l'évidemment malformé, la vraie
+// vérification reste la livraison SMTP, dont l'échec est tracé dans outbox.error.
+function isDeliverableEmail(email: unknown): boolean {
+  const v = String(email ?? '').trim();
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v);
+}
+
 async function issueAuthLink(member: any, purpose: 'activate' | 'reset'): Promise<string> {
   const token = await createOneTimeToken(member.id, purpose);
   const label = purpose === 'activate' ? 'Activation de votre compte BloomCore' : 'Réinitialisation de votre mot de passe BloomCore';
@@ -290,6 +298,11 @@ app.post('/api/v1/auth/register', async (req, res) => {
   const parsed = RegisterSchema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: parsed.error.issues.map((i) => `${i.path.join('.') || '(racine)'}: ${i.message}`).join('; ') });
   const input = parsed.data;
+  // Même exigence qu'à la création par un opérateur : sans email livrable, le lien
+  // d'activation émis à la validation n'atteindrait jamais la personne.
+  if (!isDeliverableEmail(input.email)) {
+    return res.status(400).json({ error: 'email: une adresse email valide est requise (elle recevra ton lien d\'activation)' });
+  }
 
   const department = (await readCollection('departments')).find((d: any) => d.id === input.departmentId);
   if (!department) return res.status(400).json({ error: 'département inconnu' });
@@ -493,6 +506,16 @@ app.post('/api/v1/members', requireAuth, async (req, res) => {
   const parsed = MemberSchema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: parsed.error.issues.map((i) => `${i.path.join('.') || '(racine)'}: ${i.message}`).join('; ') });
   const member = parsed.data;
+  // Email OBLIGATOIRE à la création. C'est le seul canal par lequel part le lien
+  // d'activation (issueAuthLink → dispatch → recipientAddress renvoie null sans email) :
+  // sans lui le compte était créé, un token était consommé, AUCUN mail ne partait et
+  // personne n'était averti — la personne ne pouvait jamais activer son compte.
+  // Contrôle volontairement placé ICI et non dans MemberSchema : le schéma sert aussi au
+  // PATCH (MemberPatchSchema), qui reçoit la fiche entière depuis le client — l'y mettre
+  // bloquerait l'ÉDITION des fiches d'avant cette règle, qui ont un email vide.
+  if (!isDeliverableEmail(member.email)) {
+    return res.status(400).json({ error: 'email: une adresse email valide est requise (elle reçoit le lien d\'activation du compte)' });
+  }
   try {
     const existing = await readCollection('members', true);
     if (existing.some((m: any) => String(m.id) === String(member.id) && !m.deletedAt)) {

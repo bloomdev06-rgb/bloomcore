@@ -500,15 +500,25 @@ export default function MemberFormModal({
           {/* Profession and email */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
-              <label className="block text-xs font-bold text-bc-text mb-1">{membreLabel('f7', 'Email')}</label>
+              {/* Email obligatoire à la CRÉATION : c'est le canal du lien d'activation du
+                  compte (server issueAuthLink). Sans lui, la fiche est créée mais la personne
+                  ne peut jamais activer son compte, et rien ne le signale. Pas exigé en
+                  ÉDITION, pour ne pas bloquer la modification des fiches d'avant cette règle. */}
+              <label className="block text-xs font-bold text-bc-text mb-1">
+                {membreLabel('f7', 'Email')}{!isEditing && ' *'}
+              </label>
               <input
                 id="form-email"
                 type="email"
+                required={!isEditing}
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 placeholder="email@example.com"
                 className="w-full border border-bc-border rounded-full px-3 py-2 text-xs focus:outline-none focus:border-bc-green"
               />
+              {!isEditing && (
+                <p className="mt-1 text-[10px] text-bc-text-secondary">Reçoit le lien d'activation du compte.</p>
+              )}
             </div>
             <div>
               <label className="block text-xs font-bold text-bc-text mb-1">{membreLabel('f8', 'Profession')}</label>
