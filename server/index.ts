@@ -21,7 +21,7 @@ import { buildContext, assertCanWrite, filterReadable, preservedIds, RbacContext
 import { dispatch } from './notify.ts';
 import { addClient, poke, initPokeSubscriber } from './stream.ts';
 import { startScheduler } from './scheduler.ts';
-import { loginKey, isLocked, recordFail, clearFails } from './rateLimit.ts';
+import { loginKey, isLocked, recordFail, clearFails, tooManyRequests } from './rateLimit.ts';
 import { redisHealthy } from './redis.ts';
 import { getStorage, SIGNED_URL_TTL_SEC } from './storage.ts';
 import { z } from 'zod';
@@ -255,13 +255,29 @@ async function issueAuthLink(member: any, purpose: 'activate' | 'reset'): Promis
   return token;
 }
 
+// Ces deux routes sont publiques ET expédient un email. Sans borne, n'importe qui pouvait
+// bombarder la boîte d'un membre dont il connaît l'adresse, et épuiser le quota d'envoi.
+// Clé = IP + identifiant, comme le verrou de login. Le 429 est renvoyé AVANT toute recherche
+// de membre, pour ne pas transformer le limiteur en oracle d'existence de compte
+// (l'anti-énumération de ces routes — toujours 200 — serait sinon contournable).
+const AUTH_LINK_MAX = 5;
+const AUTH_LINK_WINDOW_SEC = 15 * 60;
+
 app.post('/api/v1/auth/request-activation', async (req, res) => {
+  const key = loginKey(req.ip, String(req.body?.identifier ?? ''));
+  if (await tooManyRequests('authlink', key, AUTH_LINK_MAX, AUTH_LINK_WINDOW_SEC)) {
+    return res.status(429).json({ error: 'trop de demandes, réessayez plus tard' });
+  }
   const member = req.body?.identifier ? await findByIdentifier(req.body.identifier) : null;
   const devToken = member ? await issueAuthLink(member, 'activate') : null;
   res.json({ ok: true, ...(!isProd && devToken ? { devToken } : {}) });
 });
 
 app.post('/api/v1/auth/request-reset', async (req, res) => {
+  const key = loginKey(req.ip, String(req.body?.identifier ?? ''));
+  if (await tooManyRequests('authlink', key, AUTH_LINK_MAX, AUTH_LINK_WINDOW_SEC)) {
+    return res.status(429).json({ error: 'trop de demandes, réessayez plus tard' });
+  }
   const member = req.body?.identifier ? await findByIdentifier(req.body.identifier) : null;
   const devToken = member ? await issueAuthLink(member, 'reset') : null;
   res.json({ ok: true, ...(!isProd && devToken ? { devToken } : {}) });
@@ -298,6 +314,14 @@ const RegisterSchema = z.object({
 }).strict();
 
 app.post('/api/v1/auth/register', async (req, res) => {
+  // Route PUBLIQUE qui ÉCRIT en base : sans borne, n'importe qui pouvait créer un nombre
+  // illimité de fiches en attente et noyer les responsables sous les notifications de
+  // validation. Clé = IP seule (l'identité déclarée n'est pas fiable ici, contrairement aux
+  // routes de lien où l'identifiant cible ce qu'on protège). 3 inscriptions / heure / IP :
+  // large pour une famille sur une même connexion, inexploitable pour du remplissage.
+  if (await tooManyRequests('register', String(req.ip ?? 'unknown'), 3, 3600)) {
+    return res.status(429).json({ error: 'trop d\'inscriptions depuis cette connexion, réessayez plus tard' });
+  }
   const parsed = RegisterSchema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: parsed.error.issues.map((i) => `${i.path.join('.') || '(racine)'}: ${i.message}`).join('; ') });
   const input = parsed.data;

@@ -65,3 +65,41 @@ export async function clearFails(key: string): Promise<void> {
     memClear(key);
   }
 }
+
+// --- Compteur générique par fenêtre glissante (endpoints PUBLICS) -------------------------
+// Le verrou ci-dessus est spécifique au login : il compte des ÉCHECS. Les routes publiques
+// non authentifiées ont un autre besoin — borner le nombre d'appels RÉUSSIS, parce que chaque
+// appel coûte quelque chose : /auth/register écrit une fiche en base et notifie un responsable,
+// /auth/request-reset et /auth/request-activation expédient un email (quota Brevo, et
+// bombardement possible de la boîte d'un membre dont on connaît l'adresse).
+//
+// Repli identique au reste du module : Redis quand il est là (compteur partagé entre les
+// process API et worker, survit au redéploiement), sinon Map mémoire de CE process. Redis
+// configuré mais injoignable → on retombe sur la mémoire plutôt que de renvoyer une erreur :
+// un limiteur ne doit jamais rendre le service indisponible.
+const memHits = new Map<string, { count: number; until: number }>();
+
+function memHit(key: string, max: number, windowMs: number): boolean {
+  const now = Date.now();
+  const e = memHits.get(key);
+  if (!e || now >= e.until) {
+    memHits.set(key, { count: 1, until: now + windowMs });
+    return false;
+  }
+  e.count += 1;
+  return e.count > max;
+}
+
+/** true = quota dépassé, l'appelant doit répondre 429. Ne lève jamais. */
+export async function tooManyRequests(bucket: string, key: string, max: number, windowSec: number): Promise<boolean> {
+  const full = `${REDIS_KEY_PREFIX}rl:${bucket}:${key}`;
+  const c = await getRedis().catch(() => null);
+  if (!c) return memHit(full, max, windowSec * 1000);
+  try {
+    const n = await c.incr(full);
+    if (n === 1) await c.expire(full, windowSec);
+    return n > max;
+  } catch {
+    return memHit(full, max, windowSec * 1000);
+  }
+}

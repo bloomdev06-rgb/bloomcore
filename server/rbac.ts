@@ -242,6 +242,23 @@ export async function assertCanWrite(name: string, ctx: RbacContext, incoming: a
           for (const f of blockedFields) (item as any).healthKPIs[f] = stored.healthKPIs?.[f];
         }
       }
+      // §9.2 — jalons de baptême, même repinçage, pour la capacité déléguable
+      // `modifier_jalons_bapteme_integration`. Elle n'était appliquée QUE côté client
+      // (ProgrammesView, boutons « Inscrire au baptême » / avancement d'étape) : la révoquer
+      // dans la matrice masquait les boutons mais n'empêchait pas l'écriture par appel API
+      // direct — vérifié en test, un Responsable sans la capacité passait un membre à
+      // « baptisé » en HTTP 200. Les champs sont exactement ceux que ces boutons écrivent.
+      // Placé APRÈS le court-circuit full-scope, comme le masquage santé ci-dessus : la ligne
+      // Admin/Pasteur reste souveraine sur ces jalons.
+      if (!(await hasCapAnyRole(ctx, 'modifier_jalons_bapteme_integration'))) {
+        for (const item of await touchedItems(name, incoming)) {
+          const stored = storedById.get(String((item as any).id));
+          if (!stored) continue; // création : le formulaire membre porte déjà ces champs
+          for (const f of ['baptismStatus', 'baptismDate', 'baptismViaDepartment', 'currentStepId']) {
+            (item as any)[f] = stored[f];
+          }
+        }
+      }
       return;
     }
 
