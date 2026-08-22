@@ -76,6 +76,8 @@ export function deriveTimeBasedNotifications(
           read: false,
           branch: m.branch,
           targetMemberId: t.rid,
+          resourceType: 'member',
+          resourceId: m.id,
         });
       }
     }
@@ -94,6 +96,8 @@ export function deriveTimeBasedNotifications(
           type: 'warning',
           read: false,
           branch: m.branch,
+          resourceType: 'member',
+          resourceId: m.id,
         });
       }
     }

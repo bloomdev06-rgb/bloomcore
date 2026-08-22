@@ -234,3 +234,10 @@ body {
 .animate-skeleton {
   animation: skeleton-pulse 1.5s cubic-bezier(0.4, 0, 0.6, 1) infinite;
 }
+
+/* Leaflet pousse ses panes/contrôles jusqu'à z-index 1000, au-dessus des modales (z-50).
+   isolation crée un nouveau contexte d'empilement : la hiérarchie interne de Leaflet reste
+   intacte, mais elle ne fuit plus au-dessus du reste de la page. */
+.leaflet-container {
+  isolation: isolate;
+}

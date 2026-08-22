@@ -80,6 +80,9 @@ interface MembersViewProps {
   audits?: AuditLog[];
   permissionMatrix: PermissionMatrix;
   forms?: FormDef[];
+  // Point 3b — ouvre directement la Fiche 360° de ce membre (venu d'un clic sur notification).
+  focusMemberId?: string | null;
+  onFocusMemberHandled?: () => void;
 }
 
 export default function MembersView({
@@ -95,6 +98,8 @@ export default function MembersView({
   audits = [],
   permissionMatrix,
   forms = [],
+  focusMemberId,
+  onFocusMemberHandled,
 }: MembersViewProps) {
   const INITIAL_DEPARTMENTS = useDepartments();
   const INITIAL_BUS_LINES = useBusLines();
@@ -183,6 +188,19 @@ export default function MembersView({
   useEffect(() => {
     setVisibleCount(PAGE_SIZE);
   }, [deferredSearch, filterLevel, filterPastoralCursus, filterDept, filterFunction, filterBaptism, filterSchoolLevel, filterRed, activeBranch]);
+
+  // Point 3b — clic sur une notification de membre : ouvre sa Fiche 360° directement, même
+  // si le membre est filtré hors de la grille (ex. 'nouveau' pas encore intégré).
+  useEffect(() => {
+    if (!focusMemberId) return;
+    const m = members.find((x) => x.id === focusMemberId);
+    if (m) {
+      setSelectedMember(m);
+      setShowMember360(true);
+    }
+    onFocusMemberHandled?.();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [focusMemberId]);
 
   const open360View = (member: Member) => {
     setSelectedMember(member);

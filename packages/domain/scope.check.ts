@@ -47,6 +47,17 @@ assert.equal(inMemberScope(mk({ gps: { lat: 0, lng: 0, commune: 'Cocody' } }), m
 assert.equal(inMemberScope(mk({ departments: { dept_1: 'responsable' } }), mk({ departments: { dept_1: 'membre' } }), 'Responsable', busLines, departments), true);
 assert.equal(inMemberScope(mk({ departments: { dept_1: 'responsable' } }), mk({ departments: { dept_2: 'membre' } }), 'Responsable', busLines, departments), false);
 
+// Correctif audit (Phase 4) — même département partagé, mais branches différentes : plus
+// de fuite cross-branche pour les rôles proxy-département.
+assert.equal(inMemberScope(mk({ branch: 'church', departments: { dept_1: 'responsable' } }), mk({ branch: 'light', departments: { dept_1: 'membre' } }), 'Responsable', busLines, departments), false);
+// deptBranches (Coach+ en département secondaire dans l'autre branche) rétablit la portée
+// pour CE département précis, sans affecter sa branche d'attache par ailleurs.
+assert.equal(inMemberScope(
+  mk({ branch: 'church', departments: { dept_1: 'membre' }, deptBranches: { dept_1: 'light' } }),
+  mk({ branch: 'light', departments: { dept_1: 'membre' } }),
+  'Coach', busLines, departments,
+), true);
+
 // Unhandled role fails open
 assert.equal(inMemberScope(mk(), mk(), 'Nouveau', busLines, departments), true);
 

@@ -125,7 +125,7 @@ export const INITIAL_MINISTRIES: Ministry[] = [
   { id: 'min_art', name: "Ministère de l'Art", description: 'Bloom Dancers, Bloom Cinema, Trap Church, Bloom Art' },
   { id: 'min_tech_scene', name: "Ministère de la Tech & Scène", description: 'Prod & Tech, Décoration, Traduction, Dirigeants' },
   { id: 'min_retention', name: "Ministère de la Rétention", description: 'Resho Bloom, ADN, Social, Intégration, OJ', tuteurId: 'mem_1' },
-  { id: 'min_expansion', name: "Ministère de l'Expansion", description: 'Team Media, Bloom Inter, Bloom Bus, Happy Club, Bloom Vie, La Wev' },
+  { id: 'min_expansion', name: "Ministère de l'Expansion", description: 'Team Media, Bloom Inter, Département Bloom Bus, Happy Club, Bloom Vie, La Wev' },
   { id: 'min_coordination', name: "Ministère de la Coordination", description: 'Ushers, GDC, Protocole, Dress Code' },
   { id: 'min_affermissement', name: "Ministère de l'Affermissement", description: 'Eden Zero, Académie, GEMS, Réunion des C&L, Bible Coffee, Baptême' },
 ];
@@ -159,7 +159,7 @@ export const INITIAL_DEPARTMENTS: Department[] = [
   // 5. Ministère de l'Expansion
   { id: 'dept_media', name: 'Team Media', type: 'normal', ministryId: 'min_expansion', description: '' },
   { id: 'dept_inter', name: 'Bloom Inter', type: 'normal', ministryId: 'min_expansion', description: '' },
-  { id: 'dept_bloom_bus', name: 'Bloom Bus', type: 'special', specialFunction: 'bloom_bus', ministryId: 'min_expansion', description: 'Evangélisation territoriale' },
+  { id: 'dept_bloom_bus', name: 'Département Bloom Bus', type: 'special', specialFunction: 'bloom_bus', ministryId: 'min_expansion', description: 'Evangélisation territoriale' },
   { id: 'dept_happy_club', name: 'Happy Club', type: 'normal', ministryId: 'min_expansion', description: '' },
   { id: 'dept_bloom_vie', name: 'Bloom Vie', type: 'normal', ministryId: 'min_expansion', description: '' },
   { id: 'dept_la_wev', name: 'La Wev', type: 'normal', ministryId: 'min_expansion', description: '' },

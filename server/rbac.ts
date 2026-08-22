@@ -4,7 +4,7 @@
 // pas diverger sur la sémantique des capacités et du scope.
 import { Member, Ministry, PermissionMatrix, Delegation, AdminAccount, Department, BloomBusEntity, SpecialAuthorization, CapabilityOverride } from '../packages/domain/types.ts';
 import { resolveCapability } from '../packages/domain/permissions.ts';
-import { inMemberScope, canFillReportFor, busInScope, fullBloomBusAccess, bloomBusRoleOf, MULTI_BRANCH_ROLES } from '../packages/domain/scope.ts';
+import { inMemberScope, canFillReportFor, busInScope, fullBloomBusAccess, bloomBusRoleOf, MULTI_BRANCH_ROLES, COACH_AND_ABOVE } from '../packages/domain/scope.ts';
 import { isBusReportLocked } from '../packages/domain/reportLock.ts';
 import { getKv } from './datastore.ts';
 import { GuardError, readCollection, canonical } from './guards.ts';
@@ -179,6 +179,20 @@ export async function assertCanWrite(name: string, ctx: RbacContext, incoming: a
 
     case 'members': {
       if (!(await hasCapAnyRole(ctx, 'view_members'))) throw new GuardError(403, 'members: capacité view_members requise');
+      // Point 1 (Phase 4) — département secondaire dans l'AUTRE branche (deptBranches) réservé
+      // aux rôles Coach+ (COACH_AND_ABOVE, scope.ts). Contrôle sur la CIBLE de l'écriture, donc
+      // placé AVANT le court-circuit full-scope ci-dessous : même un Admin ne doit pas pouvoir
+      // doter un Membre/Leader d'un rattachement secondaire hors de sa branche d'attache.
+      {
+        const adminsForRole = await readCollection('admins') as AdminAccount[];
+        const ministriesForRole = await readCollection('ministries') as Ministry[];
+        for (const item of await touchedItems(name, incoming)) {
+          const db = (item as Member).deptBranches;
+          if (db && Object.keys(db).length && !hasAny(resolveRoles(item as Member, adminsForRole, ministriesForRole), COACH_AND_ABOVE)) {
+            throw new GuardError(403, `members: ${item.id} — département secondaire (deptBranches) réservé aux rôles Coach et plus`);
+          }
+        }
+      }
       if (hasAny(roles, FULL_SCOPE_ROLES)) return;
       // Symétrique de la lecture (filterReadable, fail-closed) : sans rôle de périmètre
       // déterminé, un opérateur n'écrit QUE sur sa propre fiche. Sinon inMemberScope ferait

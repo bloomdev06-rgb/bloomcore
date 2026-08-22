@@ -55,6 +55,16 @@ const ctxSA = (await buildContext('mem_sa'))!;
 await assertCanWrite('permissions', ctxSA, []); // ne lève pas
 await assertCanWrite('members', ctxSA, []);
 
+// Point 1 (Phase 4) — deptBranches (département secondaire dans l'autre branche) réservé
+// aux rôles Coach+ (COACH_AND_ABOVE). Contrôlé sur la CIBLE, donc même un opérateur
+// full-scope (Super Admin) ne peut pas en doter un simple Membre.
+await assert.rejects(
+  () => assertCanWrite('members', ctxSA, [{ ...simple, deptBranches: { d1: 'light' } }]),
+  (e: any) => e instanceof GuardError && e.status === 403,
+  'deptBranches refusé pour un Membre (rôle < Coach)',
+);
+await assertCanWrite('members', ctxSA, [{ ...resp, deptBranches: { d1: 'light' } }]); // Responsable = Coach+ → OK
+
 // Responsable : capacité OK (matrice), scope département — m6 partage d1, m5 non.
 const ctxResp = (await buildContext('m4'))!;
 const allMembers = [superAdmin, pasteur, ministre, resp, simple, baseMember({ id: 'm6', departments: { d1: 'membre' } })];

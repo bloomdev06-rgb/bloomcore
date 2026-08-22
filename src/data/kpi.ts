@@ -75,6 +75,14 @@ export function consecutiveCulteAbsences(m: Member, busReports: Report[], now: D
   return streak;
 }
 
+// integrationState n'est écrit que par la Console Intégration (NouveauxView), pas par la
+// promotion Stagiaire/Boss d'un département — sans ce garde, quelqu'un déjà promu resterait
+// compté « en attente » (et donc au rouge) tant que personne ne repasse par Console Intégration
+// pour faire avancer integrationState. Partagé entre isRed et les compteurs de dashboards.
+export function isWaitingIntegration(m: Member): boolean {
+  return m.level === 'nouveau' && m.integrationState === 'en_attente';
+}
+
 // KPIS.md "au rouge" — clauses (D5) : (1) en attente de validation > 7j, OU (2) en cours
 // d'intégration mais sans contact/suivi > 7j (horloge démarrée à l'enregistrement, remise à
 // zéro à chaque contact via lastContact), OU (3, §5.2) membre rattaché à un bus absent au culte
@@ -83,10 +91,10 @@ export function consecutiveCulteAbsences(m: Member, busReports: Report[], now: D
 export function isRed(m: Member, now: Date = new Date(), busReports?: Report[]): boolean {
   const cutoff = now.getTime() - 7 * 24 * 60 * 60 * 1000;
   const pendingTooLong =
-    m.integrationState === 'en_attente' &&
+    isWaitingIntegration(m) &&
     !!m.integrationDateRegistered &&
     new Date(m.integrationDateRegistered).getTime() < cutoff;
-  const followed = m.integrationState === 'en_attente' || m.integrationState === 'suivi';
+  const followed = m.level === 'nouveau' && (m.integrationState === 'en_attente' || m.integrationState === 'suivi');
   const lastTouch = m.lastContact || m.integrationDateRegistered;
   const staleContact = followed && !!lastTouch && new Date(lastTouch).getTime() < cutoff;
   const culteAbsent =

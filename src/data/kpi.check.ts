@@ -29,6 +29,7 @@ assert.equal(dominantHealthLevel([], 'spirituel'), 0);
 // isRed: true only past the 7-day threshold, false when the date field is missing (no crash)
 const nowRed = new Date(2026, 5, 30, 12); // mardi 30/6/2026, en heure locale (semaine calendaire = lundi 29/6)
 const mkMember = (over: Partial<Member> = {}): Member => ({
+  level: 'nouveau',
   integrationState: 'en_attente',
   integrationDateRegistered: '2026-06-20',
   ...over,
@@ -41,6 +42,10 @@ assert.equal(isRed(mkMember({ integrationState: 'suivi' }), nowRed), true); // e
 assert.equal(isRed(mkMember({ integrationState: 'suivi', lastContact: '2026-06-28' }), nowRed), false); // contact il y a 2j → reset
 assert.equal(isRed(mkMember({ integrationState: 'suivi', lastContact: '2026-06-18' }), nowRed), true); // contact il y a 12j → stale
 assert.equal(isRed(mkMember({ integrationState: 'integre' }), nowRed), false); // hors pipeline
+// Promu Stagiaire depuis Départements (DepartmentsView) sans repasser par Console Intégration :
+// integrationState reste 'en_attente' (seul site d'écriture = NouveauxView), mais level a avancé
+// → ne doit plus être compté « en attente » ni marqué au rouge pour ce motif.
+assert.equal(isRed(mkMember({ level: 'stagiaire' }), nowRed), false);
 
 // busMobilisationRate: (mobilisés / rattachés) x 100, null when no rattachés / no report in period
 const busMembers: Member[] = [

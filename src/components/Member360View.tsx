@@ -529,13 +529,25 @@ export default function Member360View({ member, onClose, onEdit, onUpdate, repor
                     <p className="text-xs text-bc-text-secondary italic mb-4">Les affectations sont gérées depuis les modules respectifs.</p>
                     <div className="space-y-4">
                       <div>
+                        <p className="text-xs font-bold text-bc-text-secondary uppercase">Branche d'attache</p>
+                        <div className="mt-2">
+                          <span className="px-3 py-1 bg-bc-canvas text-bc-text-secondary text-xs font-bold rounded-full">
+                            {member.branch === 'church' ? 'Bloom Church' : member.branch === 'light' ? 'Bloom Light' : 'Global'}
+                          </span>
+                        </div>
+                      </div>
+                      <div>
                         <p className="text-xs font-bold text-bc-text-secondary uppercase">Départements</p>
                         <div className="mt-2 flex flex-wrap gap-2">
                           {Object.keys(member.departments).map(deptId => {
                             const dept = INITIAL_DEPARTMENTS.find(d => d.id === deptId);
+                            const secondaryBranch = member.deptBranches?.[deptId];
                             return (
                               <span key={deptId} className="px-3 py-1 bg-bc-canvas text-bc-text-secondary text-xs font-bold rounded-full">
                                 {dept ? dept.name : deptId}
+                                {secondaryBranch && (
+                                  <span className="ml-1 text-bc-purple">· {secondaryBranch === 'church' ? 'Church' : 'Light'}</span>
+                                )}
                               </span>
                             );
                           })}

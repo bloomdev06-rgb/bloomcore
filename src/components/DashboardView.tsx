@@ -8,7 +8,7 @@ import { motion } from 'motion/react';
 import MiniCalendar from './MiniCalendar';
 import { HealthSmiley } from './ui/HealthSmiley';
 import {
-  isRed, activeMemberIds, activeBusIds, moissonBySource, pendingFollowUps,
+  isRed, isWaitingIntegration, activeMemberIds, activeBusIds, moissonBySource, pendingFollowUps,
   periodHealthLevels, projectProgress, periodRange, Period, PeriodInput,
   weeklyBaptismCounts, weeklyActiveCounts, weeklyMoissonCounts, weeklyGrowthSeries,
   ojTotal, weeklyOjCounts, weeklyCulteCounts,
@@ -105,9 +105,9 @@ export default function DashboardView({ activeBranch, simulatedRole, members = [
     const branchMembers = scope.members.filter(m => activeBranch === 'global' || m.branch === activeBranch);
     const branchReports = scope.reports.filter(r => activeBranch === 'global' || r.targetBranch === activeBranch);
     const branchEvents = events.filter(e => activeBranch === 'global' || e.branch === activeBranch || e.branch === 'global');
-    const waitingCount = branchMembers.filter(m => m.integrationState === 'en_attente').length;
+    const waitingCount = branchMembers.filter(isWaitingIntegration).length;
     const redCount = branchMembers.filter(m => isRed(m, undefined, reports)).length;
-    const pendingReceptionsCount = branchMembers.filter(m => m.integrationState === 'en_attente' && m.receptionValidated === false).length;
+    const pendingReceptionsCount = branchMembers.filter(m => isWaitingIntegration(m) && m.receptionValidated === false).length;
     // Actif = a servi ≥ 1 fois sur la période du sélecteur.
     const activeCount = activeMemberIds(branchReports, effectivePeriod).size;
     // Agenda Proche : les 3 prochains événements réels non clôturés de la branche.

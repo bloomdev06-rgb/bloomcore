@@ -3,7 +3,7 @@ import { BarChart3, Download, Printer, SlidersHorizontal } from 'lucide-react';
 import { Report, Branch, Member, Event } from '../types';
 import { useBusLines, labelFor } from '../data';
 import { weekId } from '../data/week';
-import { isRed, moissonTotal, busVisitesTotal, busPresenceCulteTotal, busActivitesTotal } from '../data/kpi';
+import { isRed, isWaitingIntegration, moissonTotal, busVisitesTotal, busPresenceCulteTotal, busActivitesTotal } from '../data/kpi';
 
 // Onglet Rapports = GÉNÉRATEUR à la carte (lot 4) : on choisit les indicateurs et la
 // période, l'app génère le rapport (tableau + export CSV/impression). Le registre brut
@@ -128,7 +128,7 @@ export default function ReportsView({ reports, activeBranch, simulatedRole, memb
     }
     if (synthOn.nouveaux) {
       const S = 'Nouveaux & intégration';
-      add(S, 'En attente', scopeMembers.filter(m => m.integrationState === 'en_attente').length);
+      add(S, 'En attente', scopeMembers.filter(isWaitingIntegration).length);
       add(S, 'En suivi', scopeMembers.filter(m => m.integrationState === 'suivi').length);
       add(S, 'Intégrés', scopeMembers.filter(m => m.integrationState === 'integre').length);
       add(S, 'Réception non validée', scopeMembers.filter(m => m.receptionValidated === false).length);

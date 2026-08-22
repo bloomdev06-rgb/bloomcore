@@ -317,9 +317,15 @@ export default function ProfileView({ operator, simulatedRole, onUpdateMember, o
               <div className="space-y-2">
                 {deptEntries.map(([deptId, fn]) => {
                   const dept = departments.find(d => d.id === deptId);
+                  const secondaryBranch = operator.deptBranches?.[deptId];
                   return (
                     <div key={deptId} className="flex items-center justify-between px-4 py-2.5 rounded-full bg-bc-canvas">
-                      <span className="text-sm font-semibold text-bc-text">{dept ? dept.name : deptId}</span>
+                      <span className="text-sm font-semibold text-bc-text">
+                        {dept ? dept.name : deptId}
+                        {secondaryBranch && (
+                          <span className="ml-2 text-[10px] font-bold text-bc-purple">{BRANCH_LABEL[secondaryBranch]}</span>
+                        )}
+                      </span>
                       <span className="text-[11px] font-bold px-3 py-1 rounded-full bg-white text-bc-text-secondary">{labelFor(fn)}</span>
                     </div>
                   );

@@ -45,10 +45,16 @@ export interface Department {
   ministryId: string;
   description: string;
   specialFunction?: SpecialFunction;
-  // SEED: chaque département existe en 2 instances (une par branche).
-  // ponytail: undefined = instance partagée entre branches; la duplication
-  // bi-branche des seeds (+ migration des refs membres) attend le backend.
+  // undefined = département autonome, sans portée de branche (comportement historique).
+  // Défini = département scopé à une branche ; deux fiches (church + light) qui représentent
+  // le même département fonctionnel partagent un familyId pour rester liées malgré des noms
+  // et rosters distincts — voir CreateDepartmentModal (création) et DepartmentsView (rattachement
+  // a posteriori de la branche manquante).
   branch?: Branch;
+  // Identité fonctionnelle stable et permanente entre les fiches church/light d'un même
+  // département — jamais recalculé par un renommage, jamais dérivé du nom. Absent = fiche
+  // autonome, aucune fiche liée dans l'autre branche.
+  familyId?: string;
   // Organisation interne — pôles/sections créés librement par le Responsable.
   sections?: { id: string; name: string }[];
 }
@@ -96,6 +102,12 @@ export interface Member {
 
   // Organisation interne — appartenance à une section/pôle du département: deptId -> sectionId
   deptSections?: { [deptId: string]: string };
+
+  // Point 1 — département secondaire multi-branche : un membre Coach+ (COACH_AND_ABOVE,
+  // packages/domain/scope.ts) peut servir dans un département partagé au nom de l'AUTRE
+  // branche que la sienne (`branch`, son attache). deptId absent de cette map = branche
+  // d'attache (comportement historique, rétrocompatible — même idiome que deptSections).
+  deptBranches?: { [deptId: string]: Branch };
   
   // Profil de test : rôle UI forcé pour ce compte (remplace le panneau « Simuler profil »
   // retiré). Quand présent, App l'utilise tel quel comme simulatedRole au lieu de le dériver
@@ -195,6 +207,10 @@ export interface AppNotification {
   // §6.2 — escalade à J+7 : ciblée sur le Ministre de tutelle plutôt qu'une alerte
   // générique par branche. Absent = notification visible par tous (comportement historique).
   targetMemberId?: string;
+  // Point 3b — référence structurée vers la ressource concernée, pour rendre la notification
+  // cliquable (Header.tsx). Absent = notification sans cible navigable (comportement historique).
+  resourceType?: 'member' | 'report' | 'event';
+  resourceId?: string;
 }
 
 export type EventRecurrence = 'none' | 'daily' | 'weekly' | 'biweekly' | 'monthly';

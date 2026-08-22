@@ -34,7 +34,10 @@ import { staggerParent, staggerItem } from "./ui/motion";
 import { Avatar } from "./ui/Avatar";
 import { Modal } from "./ui/Modal";
 import { ConfirmDialog } from "./ui/ConfirmDialog";
-import { TerritoryMap, TerritoryMapMode } from "./ui/TerritoryMap";
+import { TerritoryMap, TerritoryMapMode, dotIcon } from "./ui/TerritoryMap";
+import { MapContainer, TileLayer, Marker, useMapEvents } from "react-leaflet";
+import { parseGoogleMapsLink, isValidCoordinate } from "../data/geo";
+import { normalizePhone } from "../data/phone";
 import MemberFormModal from "./MemberFormModal";
 
 // §Accueil-1.3/§5 — les 4 critères réellement saisis par le rapport de suivi Bloom Bus
@@ -120,7 +123,9 @@ export default function BloomBusView({
   const santeLabel = (fieldId: string, fallback: string) =>
     santeForm?.fields.find((f) => f.id === fieldId)?.label ?? fallback;
   const seedBus = useBusLines();
-  // ponytail: local session state; persist via ./data at backend time.
+  // 'bus_lines' est dans SYNCED_NAMES (src/data/index.ts) : save() ci-dessous pousse déjà au
+  // serveur (apiPut débouncé) comme departments/ministries — pas de persistance manquante ici,
+  // seulement le refresh multi-onglet en direct qu'aucune collection "component-owned" n'a.
   const [busLines, setBusLines] = useState<BloomBusEntity[]>(seedBus);
   useEffect(() => { save('bc_bus_lines', busLines); }, [busLines]);
   const [deletingBus, setDeletingBus] = useState<BloomBusEntity | null>(null);
@@ -175,6 +180,7 @@ export default function BloomBusView({
 
   const [showAddBus, setShowAddBus] = useState(false);
   const [showDirectRegister, setShowDirectRegister] = useState(false);
+  const [showAttachExisting, setShowAttachExisting] = useState(false);
   const [expandedCommunes, setExpandedCommunes] = useState<string[]>([
     defaultCommune,
   ]);
@@ -729,7 +735,7 @@ export default function BloomBusView({
         {/* Dashboard Grid — statistiques territoriales, masquées pour un Membre */}
         {!isMembre && (
         <>
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 shrink-0">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 shrink-0">
           <div className="bg-white p-4 rounded-2xl border border-bc-border shadow-sm flex flex-col justify-center items-center">
             <div className="flex justify-between items-center w-full mb-2">
               <span className="text-[10px] font-bold uppercase text-bc-text-secondary tracking-wider">
@@ -950,6 +956,8 @@ export default function BloomBusView({
                 mode={mapMode}
                 members={mapMode === "members" ? busMembers : undefined}
                 leaders={mapMode === "leaders" ? leaderPins : undefined}
+                buses={activeBuses.map((bus) => ({ id: bus.id, name: bus.name, lat: bus.centerLat, lng: bus.centerLng }))}
+                onSelectBus={(busId) => setSelectedLevel({ type: "bus", id: busId })}
               />
             </div>
             <div className="flex flex-wrap gap-1.5 mt-3">
@@ -1015,13 +1023,21 @@ export default function BloomBusView({
                   )}
                 </div>
                 {canRegisterMember && (
-                  <button
-                    id="bloombus-add-member-btn"
-                    onClick={() => setShowDirectRegister(true)}
-                    className="flex items-center gap-1 px-3 py-1.5 rounded-full bg-bc-green text-white text-[10px] font-bold active:scale-95 transition-transform"
-                  >
-                    <Plus size={12} /> Ajouter un membre
-                  </button>
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={() => setShowAttachExisting(true)}
+                      className="flex items-center gap-1 px-3 py-1.5 rounded-full bg-white border border-bc-border text-bc-text text-[10px] font-bold active:scale-95 transition-transform"
+                    >
+                      <Users size={12} /> Membre existant
+                    </button>
+                    <button
+                      id="bloombus-add-member-btn"
+                      onClick={() => setShowDirectRegister(true)}
+                      className="flex items-center gap-1 px-3 py-1.5 rounded-full bg-bc-green text-white text-[10px] font-bold active:scale-95 transition-transform"
+                    >
+                      <Plus size={12} /> Nouvelle fiche
+                    </button>
+                  </div>
                 )}
               </div>
               <p className="text-[10px] text-bc-text-secondary mb-3">Clique un membre pour faire son rapport de suivi.</p>
@@ -1429,6 +1445,21 @@ export default function BloomBusView({
         />
       )}
 
+      {showAttachExisting && (
+        <AttachExistingMemberModal
+          members={members}
+          busLines={busLines}
+          activeBuses={activeBuses}
+          defaultBusId={selectedLevel.type === "bus" ? selectedLevel.id : activeBuses[0]?.id}
+          onClose={() => setShowAttachExisting(false)}
+          onAttach={(m, busId) => {
+            onUpdateMember({ ...m, bloomBusId: busId });
+            setShowAttachExisting(false);
+            toast.success(`${m.firstName} ${m.lastName} rattaché(e) au bus.`);
+          }}
+        />
+      )}
+
       <ConfirmDialog
         open={!!deletingBus}
         onCancel={() => setDeletingBus(null)}
@@ -1441,7 +1472,123 @@ export default function BloomBusView({
   );
 }
 
+// §7 — rattacher un membre déjà connu (n'importe quel département, ou "Nouveau" déjà saisi par
+// l'ADN — c'est le même Member, level: 'nouveau') plutôt que ressaisir une fiche en double.
+// La recherche nom/téléphone normalisé EST la déduplication : si le résultat existe, on le
+// choisit au lieu de passer par "Nouvelle fiche".
+function AttachExistingMemberModal({
+  members,
+  busLines,
+  activeBuses,
+  defaultBusId,
+  onClose,
+  onAttach,
+}: {
+  members: Member[];
+  busLines: BloomBusEntity[];
+  activeBuses: BloomBusEntity[];
+  defaultBusId?: string;
+  onClose: () => void;
+  onAttach: (member: Member, busId: string) => void;
+}) {
+  const [query, setQuery] = useState("");
+  const [busId, setBusId] = useState(defaultBusId ?? "");
+
+  const normalizedQuery = query.trim().toLowerCase();
+  const normalizedQueryPhone = normalizePhone(query);
+  const results = normalizedQuery.length < 2
+    ? []
+    : members
+        .filter((m) => {
+          const fullName = `${m.firstName} ${m.lastName}`.toLowerCase();
+          const matchesName = fullName.includes(normalizedQuery);
+          const matchesPhone = normalizedQueryPhone.length >= 4 && normalizePhone(String(m.phone)).includes(normalizedQueryPhone);
+          return matchesName || matchesPhone;
+        })
+        .slice(0, 20);
+
+  return (
+    <Modal open={true} onClose={onClose} title="Rattacher un membre existant" maxWidth="max-w-md">
+      <div className="space-y-3">
+        <div>
+          <label className="block text-[10px] font-bold uppercase tracking-wider text-bc-text-secondary mb-1">Bloom Bus</label>
+          <select value={busId} onChange={(e) => setBusId(e.target.value)} className="w-full border border-bc-border rounded-xl px-3 py-2 text-sm bg-white">
+            <option value="">— Sélectionner —</option>
+            {activeBuses.map((b) => (
+              <option key={b.id} value={b.id}>{b.name} ({b.commune} · {b.zone})</option>
+            ))}
+          </select>
+        </div>
+
+        <input
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder="Nom ou téléphone…"
+          className="w-full border border-bc-border rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-bc-green"
+        />
+
+        <div className="max-h-64 overflow-y-auto flex flex-col gap-1">
+          {results.map((m) => {
+            const currentBus = m.bloomBusId ? busLines.find((b) => b.id === m.bloomBusId) : undefined;
+            return (
+              <button
+                key={m.id}
+                type="button"
+                disabled={!busId}
+                onClick={() => busId && onAttach(m, busId)}
+                className="flex items-center justify-between gap-2 px-3 py-2 rounded-xl border border-bc-border hover:bg-bc-canvas text-left disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                <span className="text-sm font-bold text-bc-text">
+                  {m.firstName} {m.lastName}
+                  {m.level === "nouveau" && <span className="ml-2 text-[10px] font-normal text-bc-text-secondary">(Nouveau)</span>}
+                  {currentBus && <span className="ml-2 text-[10px] font-normal text-bc-warning">déjà dans {currentBus.name}</span>}
+                </span>
+                <span className="text-[10px] text-bc-text-secondary shrink-0">{m.phone}</span>
+              </button>
+            );
+          })}
+          {normalizedQuery.length >= 2 && results.length === 0 && (
+            <p className="text-xs text-bc-text-secondary px-1">Aucun membre trouvé.</p>
+          )}
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
 const NEW_OPTION = "__new__";
+
+// Sélection du centre du bus au clic / par glisser-déposer du repère — pas de géocodage
+// d'adresse libre (nécessiterait un service externe + un proxy backend, hors scope ici) ;
+// couvert à la place par clic carte, glisser-déposer, et collage de lien Google Maps.
+function LocationPicker({ lat, lng, onPick }: { lat: number; lng: number; onPick: (lat: number, lng: number) => void }) {
+  function ClickHandler() {
+    useMapEvents({ click: (e) => onPick(e.latlng.lat, e.latlng.lng) });
+    return null;
+  }
+  return (
+    <div className="h-48 rounded-xl overflow-hidden border border-bc-border">
+      <MapContainer center={[lat, lng]} zoom={13} className="w-full h-full" scrollWheelZoom={false}>
+        <TileLayer
+          attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
+          url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+        />
+        <ClickHandler />
+        <Marker
+          position={[lat, lng]}
+          icon={dotIcon("var(--color-bc-orange, #F38B36)")}
+          draggable
+          eventHandlers={{
+            dragend: (e) => {
+              const pos = e.target.getLatLng();
+              onPick(pos.lat, pos.lng);
+            },
+          }}
+        />
+      </MapContainer>
+    </div>
+  );
+}
 
 function AddBusModal({ busLines, onClose, onAdd }: { busLines: BloomBusEntity[]; onClose: () => void; onAdd: (b: BloomBusEntity) => void }) {
   // Chaque bus porte sa propre paire commune+zone (pas d'entité Zone séparée avec une
@@ -1461,16 +1608,48 @@ function AddBusModal({ busLines, onClose, onAdd }: { busLines: BloomBusEntity[];
 
   const [lat, setLat] = useState("5.35");
   const [lng, setLng] = useState("-4.02");
+  // Dernière position valide connue — la carte/le marqueur s'y ancrent tant que la saisie
+  // manuelle en cours est hors bornes, au lieu de retomber silencieusement sur un défaut.
+  const [lastValid, setLastValid] = useState({ lat: 5.35, lng: -4.02 });
+  const [mapKey, setMapKey] = useState(0);
+  const [gmapsLink, setGmapsLink] = useState("");
+  const [gmapsLinkError, setGmapsLinkError] = useState(false);
+
+  const parsedLat = parseFloat(lat);
+  const parsedLng = parseFloat(lng);
+  const coordsValid = isValidCoordinate(parsedLat, parsedLng);
+
+  const pick = (la: number, ln: number) => {
+    setLat(la.toFixed(6));
+    setLng(ln.toFixed(6));
+    if (isValidCoordinate(la, ln)) setLastValid({ lat: la, lng: ln });
+  };
+
+  const handleGmapsLinkChange = (val: string) => {
+    setGmapsLink(val);
+    if (!val.trim()) {
+      setGmapsLinkError(false);
+      return;
+    }
+    const parsed = parseGoogleMapsLink(val);
+    if (!parsed || !isValidCoordinate(parsed.lat, parsed.lng)) {
+      setGmapsLinkError(true);
+      return;
+    }
+    setGmapsLinkError(false);
+    pick(parsed.lat, parsed.lng);
+    setMapKey((k) => k + 1); // recentre la carte sur le point importé, sans perturber le clic/glisser
+  };
 
   const submit = () => {
-    if (!name.trim() || !effectiveCommune || !effectiveZone) return;
+    if (!name.trim() || !effectiveCommune || !effectiveZone || !coordsValid) return;
     onAdd({
       id: `bus_${Date.now()}`,
       name: name.trim(),
       commune: effectiveCommune,
       zone: effectiveZone,
-      centerLat: parseFloat(lat) || 5.35,
-      centerLng: parseFloat(lng) || -4.02,
+      centerLat: parsedLat,
+      centerLng: parsedLng,
     });
   };
 
@@ -1501,6 +1680,32 @@ function AddBusModal({ busLines, onClose, onAdd }: { busLines: BloomBusEntity[];
             )}
           </div>
 
+          <div>
+            <label className="block text-[10px] font-bold uppercase tracking-wider text-bc-text-secondary mb-1">Lien Google Maps (optionnel)</label>
+            <input
+              value={gmapsLink}
+              onChange={(e) => handleGmapsLinkChange(e.target.value)}
+              placeholder="Coller un lien Google Maps…"
+              className="w-full border border-bc-border rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-bc-green"
+            />
+            {gmapsLinkError && (
+              <p className="text-[10px] text-red-600 mt-1">
+                Lien non reconnu — collez un lien complet (avec les coordonnées, ex: "…/@5.35,-4.02,15z") ou placez le repère sur la carte ci-dessous.
+              </p>
+            )}
+          </div>
+
+          <div>
+            <label className="block text-[10px] font-bold uppercase tracking-wider text-bc-text-secondary mb-1">Centre du bus (cliquer ou glisser le repère)</label>
+            <div key={mapKey}>
+              <LocationPicker
+                lat={lastValid.lat}
+                lng={lastValid.lng}
+                onPick={(la, ln) => pick(la, ln)}
+              />
+            </div>
+          </div>
+
           <div className="grid grid-cols-2 gap-2">
             <div>
               <label className="block text-[10px] font-bold uppercase tracking-wider text-bc-text-secondary mb-1">Centre — Latitude</label>
@@ -1511,8 +1716,13 @@ function AddBusModal({ busLines, onClose, onAdd }: { busLines: BloomBusEntity[];
               <input value={lng} onChange={(e) => setLng(e.target.value)} className="w-full border border-bc-border rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-bc-green" />
             </div>
           </div>
+          {!coordsValid && (
+            <p className="text-[10px] text-red-600">
+              Coordonnées invalides — latitude entre -90 et 90, longitude entre -180 et 180.
+            </p>
+          )}
         </div>
-        <button onClick={submit} disabled={!name.trim() || !effectiveCommune || !effectiveZone} className="w-full mt-5 bg-bc-green text-white rounded-full py-2.5 text-sm font-bold hover:opacity-90 disabled:opacity-40 active-scale">
+        <button onClick={submit} disabled={!name.trim() || !effectiveCommune || !effectiveZone || !coordsValid} className="w-full mt-5 bg-bc-green text-white rounded-full py-2.5 text-sm font-bold hover:opacity-90 disabled:opacity-40 active-scale">
           Ajouter le bus
         </button>
     </Modal>

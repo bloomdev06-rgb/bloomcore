@@ -391,8 +391,10 @@ export async function apiPut(name: string, value: unknown): Promise<boolean> {
 // persiste `members` déclenche de toute façon, ~1,5s plus tard, le PUT whole-array habituel
 // (voir src/data/index.ts save()), qui lui gère déjà retry/file offline. Doublon inoffensif :
 // le serveur voit alors un état déjà identique au sien (canonical égal) → no-op.
-export async function apiCreateMember(member: unknown): Promise<boolean> {
-  if (!isAuthed()) return false;
+// null = serveur injoignable (repli offline, pas d'erreur à afficher) ; { ok, error? } sinon —
+// error porte le message Zod (ex. "email requis", "un compte existe déjà") pour affichage.
+export async function apiCreateMember(member: unknown): Promise<{ ok: boolean; error?: string } | null> {
+  if (!isAuthed()) return null;
   try {
     const res = await fetch(`${API_BASE}/members`, {
       credentials: 'include', // Phase 6 (T6.1)
@@ -400,9 +402,11 @@ export async function apiCreateMember(member: unknown): Promise<boolean> {
       headers: { 'Content-Type': 'application/json', ...authHeaders() },
       body: JSON.stringify(member),
     });
-    return res.ok;
+    if (res.ok) return { ok: true };
+    const data = await res.json().catch(() => ({}));
+    return { ok: false, error: data.error };
   } catch {
-    return false;
+    return null;
   }
 }
 

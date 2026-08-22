@@ -4,6 +4,7 @@ import { Member, Report, Event, AuditLog, PermissionMatrix, FormDef, Branch } fr
 import { useBusLines, useDepartments } from '../data';
 import { downscaleAndUpload } from '../lib/image';
 import { adnByEvent } from '../data/adn';
+import { normalizePhone } from '../data/phone';
 import { Period, PeriodInput } from '../data/kpi';
 import { Avatar } from './ui/Avatar';
 import { PeriodSelector } from './ui/PeriodSelector';
@@ -59,6 +60,7 @@ export default function AdnView({
   const [quickFirstname, setQuickFirstname] = useState('');
   const [quickLastname, setQuickLastname] = useState('');
   const [quickPhone, setQuickPhone] = useState('');
+  const [quickEmail, setQuickEmail] = useState('');
   const [quickCommune, setQuickCommune] = useState('Cocody');
   const [quickOj, setQuickOj] = useState(false); // true = OJ, false = Nouveau (NV)
   const [quickWish, setQuickWish] = useState<'Membre' | 'Visiteur'>('Membre');
@@ -80,11 +82,15 @@ export default function AdnView({
 
   const handleSaveQuickNouveau = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!quickFirstname || !quickLastname || !quickPhone || !quickPhotoUrl) {
-      toast.error('Veuillez remplir les informations obligatoires (Prénom, Nom, Contact, Photo).');
+    if (!quickFirstname || !quickLastname || !quickPhone || !quickEmail || !quickPhotoUrl) {
+      toast.error('Veuillez remplir les informations obligatoires (Prénom, Nom, Contact, Email, Photo).');
       return;
     }
-    if (members.some((m) => m.phone === quickPhone)) {
+    // Même normalisation que findByIdentifier côté serveur (server/index.ts) : ignore les espaces
+    // de saisie ("07 12 34 56 78" vs "0712345678"). Ne résout pas l'équivalence +225/local — pas
+    // couvert ici, demanderait un vrai parseur de numéros.
+    const normalizedPhone = normalizePhone(quickPhone);
+    if (members.some((m) => normalizePhone(String(m.phone)) === normalizedPhone)) {
       toast.error('Ce numéro de téléphone est déjà utilisé par un autre membre.');
       return;
     }
@@ -96,7 +102,7 @@ export default function AdnView({
       firstName: quickFirstname,
       lastName: quickLastname,
       phone: quickPhone,
-      email: `${quickFirstname.toLowerCase()}.${quickLastname.toLowerCase()}@gmail.com`,
+      email: quickEmail,
       gender: quickGender,
       birthDate: quickBirthDate || '2000-01-01',
       maritalStatus: 'Célibataire',
@@ -302,6 +308,11 @@ export default function AdnView({
                   <option value="F">Femme</option>
                 </select>
               </div>
+            </div>
+
+            <div>
+              <label className={labelCls}>Email *</label>
+              <input id="quick-email" type="email" required placeholder="prenom.nom@exemple.com" value={quickEmail} onChange={(e) => setQuickEmail(e.target.value)} className={inputCls} />
             </div>
 
             <div className="grid grid-cols-2 gap-3">

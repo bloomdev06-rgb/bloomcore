@@ -17,6 +17,7 @@ interface HeaderProps {
   notifications: AppNotification[];
   markNotificationAsRead: (id: string) => void;
   markAllNotificationsAsRead?: () => void;
+  onNotificationClick?: (notif: AppNotification) => void;
   simulatedRole: string;
   operator?: Member;
   setSidebarCollapsed?: (collapsed: boolean) => void;
@@ -33,6 +34,7 @@ export default function Header({
   notifications,
   markNotificationAsRead,
   markAllNotificationsAsRead,
+  onNotificationClick,
   simulatedRole,
   operator,
   setSidebarCollapsed,
@@ -54,15 +56,22 @@ export default function Header({
 
   const renderNotifList = (list: AppNotification[]) => list.length === 0 ? (
     <div className="p-6 text-center text-xs text-bc-text-secondary">Aucune notification.</div>
-  ) : list.map((notif) => (
+  ) : list.map((notif) => {
+    const clickable = !!onNotificationClick && !!notif.resourceType && !!notif.resourceId;
+    return (
     <div
       key={notif.id}
-      className={`p-3 text-xs transition-colors hover:bg-bc-canvas/30 ${notif.read ? 'opacity-60' : 'bg-bc-green/5'}`}
+      onClick={clickable ? () => {
+        onNotificationClick!(notif);
+        setShowNotifDropdown(false);
+        setShowAllNotifModal(false);
+      } : undefined}
+      className={`p-3 text-xs transition-colors hover:bg-bc-canvas/30 ${notif.read ? 'opacity-60' : 'bg-bc-green/5'} ${clickable ? 'cursor-pointer' : ''}`}
     >
       <div className="flex items-start justify-between">
         <span className="font-semibold text-bc-text tracking-tight">{notif.title}</span>
         {!notif.read && (
-          <button onClick={() => markNotificationAsRead(notif.id)} className="text-[10px] text-bc-text hover:underline font-bold">
+          <button onClick={(e) => { e.stopPropagation(); markNotificationAsRead(notif.id); }} className="text-[10px] text-bc-text hover:underline font-bold">
             Lu
           </button>
         )}
@@ -75,7 +84,8 @@ export default function Header({
         </Badge>
       </div>
     </div>
-  ));
+    );
+  });
 
   const handleBranchSwitch = (branch: Branch) => {
     if (branch === activeBranch) return;

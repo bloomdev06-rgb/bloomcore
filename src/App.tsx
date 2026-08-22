@@ -6,6 +6,7 @@ import { MEMBERS_TAB_DEPT_ONLY_ROLES } from './data/scope';
 import { isLegacySeedEventId } from './data/events';
 import { DEFAULT_OPERATOR_NAME, operatorDisplayName } from './data/operator';
 import { MULTI_BRANCH_ROLES, GLOBAL_VIEW_ROLES } from './data/scope';
+import { nearestBusLines, MAX_AUTO_ASSIGN_KM } from './data/geo';
 
 import {
   Member,
@@ -67,7 +68,7 @@ const DenombrementView = lazyRetry(() => import('./components/DenombrementView')
 const ProfileView = lazyRetry(() => import('./components/ProfileView'));
 import AuthView from './components/AuthView';
 import CreateDepartmentModal from './components/CreateDepartmentModal';
-import { ToastContainer } from './components/ui/Toast';
+import { ToastContainer, toast } from './components/ui/Toast';
 import { PageSkeleton } from './components/ui/Skeleton';
 
 import { UserCheck, Sparkles, X, Heart } from 'lucide-react';
@@ -76,6 +77,7 @@ export default function App() {
   // Navigation states
   const [activeTab, setActiveTab] = useState('dashboard');
   const [selectedDept, setSelectedDept] = useState<string | null>(null); // département sélectionné depuis la Sidebar
+  const [focusMemberId, setFocusMemberId] = useState<string | null>(null); // point 3b — membre ciblé par un clic sur notification
   const [activeBranch, setActiveBranch] = useState<Branch>('church');
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [simulatedRole, setSimulatedRole] = useState('Pasteur');
@@ -256,6 +258,7 @@ export default function App() {
     message: string,
     type: AppNotification['type'],
     branch?: Branch,
+    resource?: { type: AppNotification['resourceType']; id: string },
   ): AppNotification => ({
     id: `notif_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
     timestamp: new Date().toISOString(),
@@ -264,6 +267,8 @@ export default function App() {
     type,
     read: false,
     branch,
+    resourceType: resource?.type,
+    resourceId: resource?.id,
   });
 
   const handleAddNotification = (n: AppNotification) => {
@@ -275,13 +280,17 @@ export default function App() {
   };
 
   const handleAddMember = (m: Member) => {
-    // P4.15 (b) — affectation auto au Bloom Bus de la commune, si pas déjà rattaché.
-    // Exclut l'enregistrement direct Bloom Bus : là le bus est choisi explicitement dans le
-    // formulaire (cascade Commune→Zone→Bus) ; ne pas le remplacer par le 1er bus de la commune
-    // (souvent d'une autre zone) quand un Resp. de Zone/Commune l'a laissé vide.
-    const bus = !m.bloomBusId && m.gps?.commune && m.deptAttachmentOrigin !== 'bloom_bus'
-      ? busLines.find(b => b.commune === m.gps!.commune)
+    // P4.15 (b) — affectation auto au Bloom Bus le plus proche (haversine), si pas déjà
+    // rattaché. Exclut l'enregistrement direct Bloom Bus : là le bus est choisi explicitement
+    // dans le formulaire (cascade Commune→Zone→Bus) ; ne pas le remplacer par le plus proche
+    // (parfois d'une autre zone) quand un Resp. de Zone/Commune l'a laissé vide.
+    // Corrige l'audit Phase 0 : l'égalité de commune prenait le 1er bus trouvé sans égard à
+    // la zone/distance réelle. Au-delà de MAX_AUTO_ASSIGN_KM, mieux vaut laisser le bus vide
+    // (visible comme « à traiter ») qu'assigner un bus trop loin.
+    const nearest = !m.bloomBusId && m.gps && m.deptAttachmentOrigin !== 'bloom_bus'
+      ? nearestBusLines(m.gps, busLines)[0]
       : undefined;
+    const bus = nearest && nearest.distanceKm <= MAX_AUTO_ASSIGN_KM ? nearest : undefined;
     // P4.15 (c) — un "Oui à Jésus" rejoint aussi le département Baptême (parcours à étapes).
     const departments = m.ojFlag ? { ...m.departments, dept_bapteme: 'membre' as const } : m.departments;
     const enriched: Member = { ...m, ...(bus && { bloomBusId: bus.id }), departments };
@@ -290,7 +299,15 @@ export default function App() {
     // Phase 4 (T4.3) — push immédiat via l'endpoint dédié (validé Zod côté serveur), en
     // plus du apiPut whole-array debouncé déclenché par le useEffect qui persiste `members`
     // (repli hors-ligne inchangé, voir commentaire de apiCreateMember dans data/api.ts).
-    void apiCreateMember(enriched).catch(() => {});
+    // Un rejet Zod (ex. email manquant/invalide, téléphone déjà utilisé) laissait la fiche
+    // dans l'état local avec un toast de succès, sans jamais atteindre le serveur — on annule
+    // l'ajout optimiste et on affiche le message renvoyé par l'API.
+    void apiCreateMember(enriched).then((result) => {
+      if (result && !result.ok) {
+        setMembers(prev => prev.filter(x => x.id !== enriched.id));
+        toast.error(result.error ?? "Échec de l'enregistrement — réessayez.");
+      }
+    });
 
     if (enriched.level === 'nouveau') {
       handleAddNotification(mkNotif(
@@ -298,6 +315,7 @@ export default function App() {
         `${enriched.firstName} ${enriched.lastName} enregistré(e) par l'ADN.`,
         'info',
         enriched.branch,
+        { type: 'member', id: enriched.id },
       ));
     }
 
@@ -323,6 +341,7 @@ export default function App() {
         `${enriched.firstName} ${enriched.lastName} partage le téléphone ${enriched.phone} avec ${dupe.firstName} ${dupe.lastName}.`,
         'alert',
         enriched.branch,
+        { type: 'member', id: enriched.id },
       ));
       handleAddAuditLog({
         id: genId('aud_dup'),
@@ -343,25 +362,25 @@ export default function App() {
     const before = members.find(item => item.id === m.id);
     if (before) {
       if (!before.receptionValidated && m.receptionValidated) {
-        handleAddNotification(mkNotif('Réception validée', `Réception de ${m.firstName} ${m.lastName} validée.`, 'success', m.branch));
+        handleAddNotification(mkNotif('Réception validée', `Réception de ${m.firstName} ${m.lastName} validée.`, 'success', m.branch, { type: 'member', id: m.id }));
       }
       if (before.integrationState !== m.integrationState) {
-        handleAddNotification(mkNotif('Changement de statut', `${m.firstName} ${m.lastName} : ${before.integrationState ?? '—'} → ${m.integrationState ?? '—'}.`, 'info', m.branch));
+        handleAddNotification(mkNotif('Changement de statut', `${m.firstName} ${m.lastName} : ${before.integrationState ?? '—'} → ${m.integrationState ?? '—'}.`, 'info', m.branch, { type: 'member', id: m.id }));
       }
       if (before.level !== m.level || before.pastoralCursus !== m.pastoralCursus) {
-        handleAddNotification(mkNotif('Promotion', `${m.firstName} ${m.lastName} est passé(e) à ${labelFor(m.level)}${m.pastoralCursus && m.pastoralCursus !== 'aucun' ? ` · ${labelFor(m.pastoralCursus)}` : ''}.`, 'success', m.branch));
+        handleAddNotification(mkNotif('Promotion', `${m.firstName} ${m.lastName} est passé(e) à ${labelFor(m.level)}${m.pastoralCursus && m.pastoralCursus !== 'aucun' ? ` · ${labelFor(m.pastoralCursus)}` : ''}.`, 'success', m.branch, { type: 'member', id: m.id }));
       }
       if (JSON.stringify(before.departments) !== JSON.stringify(m.departments)) {
-        handleAddNotification(mkNotif('Changement d\'affectation', `Affectations départementales de ${m.firstName} ${m.lastName} mises à jour.`, 'info', m.branch));
+        handleAddNotification(mkNotif('Changement d\'affectation', `Affectations départementales de ${m.firstName} ${m.lastName} mises à jour.`, 'info', m.branch, { type: 'member', id: m.id }));
       }
       if (before.branch !== m.branch) {
-        handleAddNotification(mkNotif('Transfert de branche', `${m.firstName} ${m.lastName} transféré(e) vers ${m.branch === 'church' ? 'Bloom Church' : 'Bloom Light'}.`, 'warning', m.branch));
+        handleAddNotification(mkNotif('Transfert de branche', `${m.firstName} ${m.lastName} transféré(e) vers ${m.branch === 'church' ? 'Bloom Church' : 'Bloom Light'}.`, 'warning', m.branch, { type: 'member', id: m.id }));
       }
       if (before.baptismStatus !== 'baptise' && m.baptismStatus === 'baptise') {
-        handleAddNotification(mkNotif('Baptême complété', `${m.firstName} ${m.lastName} a été baptisé(e).`, 'success', m.branch));
+        handleAddNotification(mkNotif('Baptême complété', `${m.firstName} ${m.lastName} a été baptisé(e).`, 'success', m.branch, { type: 'member', id: m.id }));
       }
       if (!before.isDrachme && m.isDrachme) {
-        handleAddNotification(mkNotif('Membre Drachme (perdu)', `${m.firstName} ${m.lastName} signalé(e) Drachme (perdu).`, 'alert', m.branch));
+        handleAddNotification(mkNotif('Membre Drachme (perdu)', `${m.firstName} ${m.lastName} signalé(e) Drachme (perdu).`, 'alert', m.branch, { type: 'member', id: m.id }));
       }
     }
 
@@ -452,6 +471,7 @@ export default function App() {
       `${r.authorName} a soumis un ${r.reportType.replace('rapport_', 'rapport ')}.`,
       isObservation ? 'warning' : 'info',
       r.targetBranch,
+      { type: 'report', id: r.id },
     ));
 
     // Log Audit
@@ -475,6 +495,7 @@ export default function App() {
       `"${e.title}" programmé le ${e.date}.`,
       'info',
       e.branch,
+      { type: 'event', id: e.id },
     ));
 
     // Log Audit
@@ -528,6 +549,29 @@ export default function App() {
     setNotifications(prev => prev.map(n => n.id === id ? { ...n, read: true } : n));
   };
 
+  // Point 3b — clic sur une notification : navigue vers sa ressource. Pas de resourceType/Id
+  // (notifications historiques, ou système sans cible) → pas de navigation, clic neutre.
+  // Ressource introuvable (membre supprimé) ou onglet non autorisé pour le rôle courant →
+  // toast plutôt que de laisser le garde de activeTab renvoyer silencieusement sur dashboard.
+  const handleNotificationClick = (n: AppNotification) => {
+    if (!n.resourceType || !n.resourceId) return;
+    const tab = n.resourceType === 'member' ? 'members' : n.resourceType === 'report' ? 'reports' : 'events';
+    const allowed = canView(permissionMatrix, tab, simulatedRole) &&
+      !(tab === 'members' && MEMBERS_TAB_DEPT_ONLY_ROLES.includes(simulatedRole));
+    if (!allowed) {
+      toast.error("Vous n'avez pas accès à cette section.");
+      return;
+    }
+    if (n.resourceType === 'member') {
+      if (!members.some(m => m.id === n.resourceId)) {
+        toast.error('Ce membre n\'existe plus.');
+        return;
+      }
+      setFocusMemberId(n.resourceId);
+    }
+    setActiveTab(tab);
+  };
+
   // P4.19 — membre connecté (remplace les anciens hardcodes mem_1).
   const operator = members.find(m => m.id === loggedInMemberId) ?? members[0];
   // Cloisonnement par branche (PROFILS-INTERFACES) : un profil mono-branche est verrouillé
@@ -544,9 +588,11 @@ export default function App() {
   }, [simulatedRole, activeBranch, operator?.id]);
   // §6.2 — une notification ciblée (escalade J+7) n'est visible que du Ministre visé ;
   // Admin/Super Admin gardent une vue d'ensemble (même principe que le journal d'audit).
-  const visibleNotifications = notifications.filter(n =>
-    !n.targetMemberId || n.targetMemberId === operator?.id || ['Admin', 'Super Admin'].includes(simulatedRole)
-  );
+  const visibleNotifications = notifications
+    .filter(n =>
+      !n.targetMemberId || n.targetMemberId === operator?.id || ['Admin', 'Super Admin'].includes(simulatedRole)
+    )
+    .sort((a, b) => b.timestamp.localeCompare(a.timestamp));
 
   // Render view depending on activeTab and simulated role permissions
   const renderActiveView = () => {
@@ -581,6 +627,8 @@ export default function App() {
             audits={audits}
             permissionMatrix={permissionMatrix}
             forms={forms}
+            focusMemberId={focusMemberId}
+            onFocusMemberHandled={() => setFocusMemberId(null)}
           />
         );
       case 'integration':
@@ -754,6 +802,7 @@ export default function App() {
           notifications={visibleNotifications}
           markNotificationAsRead={markNotificationAsRead}
           markAllNotificationsAsRead={markAllNotificationsAsRead}
+          onNotificationClick={handleNotificationClick}
           simulatedRole={simulatedRole}
           operator={operator}
           setSidebarCollapsed={setSidebarCollapsed}
@@ -800,9 +849,9 @@ export default function App() {
         <CreateDepartmentModal
           ministries={ministrySeeds}
           onClose={() => setShowCreateDept(false)}
-          onCreate={(d) => {
-            setDepartments(prev => [...prev, d]);
-            handleAddAuditLog({
+          onCreate={(created) => {
+            setDepartments(prev => [...prev, ...created]);
+            created.forEach((d) => handleAddAuditLog({
               id: genId('aud_dept'),
               timestamp: new Date().toISOString(),
               actionType: 'DEPT_CREATED',
@@ -810,9 +859,9 @@ export default function App() {
               operatorId: operator?.id ?? '',
               entity: 'department',
               details: `Département « ${d.name} » créé depuis la barre latérale.`,
-            });
+            }));
             setShowCreateDept(false);
-            setSelectedDept(d.id);
+            setSelectedDept(created[0].id);
             setActiveTab('departments');
           }}
         />

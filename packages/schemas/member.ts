@@ -72,6 +72,7 @@ export const MemberSchema = z.object({
   // contrôlée par l'enum deptFunction.
   departments: z.record(z.string(), deptFunction),
   deptSections: z.record(z.string(), z.string()).optional(),
+  deptBranches: z.record(z.string(), branch).optional(),
   testRole: z.string().optional(),
   bloomBusId: z.string().optional(),
   deptAttachmentStatus: z.enum(['pending', 'validated', 'rejected']).optional(),

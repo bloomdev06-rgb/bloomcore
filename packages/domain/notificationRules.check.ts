@@ -67,4 +67,18 @@ assert.deepEqual(relanceRecipients('2026-06-19'), new Set(['coach1', 'resp1', 't
   );
 }
 
+// Point 3b — les deux familles de notifications générées ici portent une référence
+// navigable vers le membre concerné (Header.tsx en dépend pour rendre la ligne cliquable).
+{
+  const relance = deriveTimeBasedNotifications([target({ integrationDateRegistered: '2026-06-19' }), responsable], now, delays, departments, ministries)
+    .find(n => n.title === 'Relance suivi')!;
+  assert.equal(relance.resourceType, 'member');
+  assert.equal(relance.resourceId, 'mR', 'resourceId = le membre suivi, pas le destinataire (t.rid)');
+
+  const pending = mk({ id: 'mP3', integrationState: 'en_attente', integrationDateRegistered: '2026-06-26' });
+  const reception = deriveTimeBasedNotifications([pending], now, delays).find(n => n.title === 'Réception à valider')!;
+  assert.equal(reception.resourceType, 'member');
+  assert.equal(reception.resourceId, 'mP3');
+}
+
 console.log('notificationRules.check OK');

@@ -8,6 +8,7 @@ import {
   weeklyGrowthSeries, weeklyMoissonCounts, weeklyOjCounts,
 } from '../data/kpi';
 import { ROLE_HOME_DEPT } from '../data/scope';
+import { linkMissingBranch } from '../data/departmentFamily';
 import { motion } from 'motion/react';
 import { AreaChart, Area, XAxis, Tooltip, ResponsiveContainer } from 'recharts';
 import { ResponsiveChart } from './ui/ResponsiveChart';
@@ -156,9 +157,20 @@ export default function DepartmentsView({ activeBranch, simulatedRole, members =
   const selectedMinistryData = INITIAL_MINISTRIES.find(m => m.id === selectedDeptData?.ministryId);
   const sf = specialFn(selectedDeptData);
 
+  // Branche manquante d'un département scopé : présente si `branch` est défini et qu'aucune
+  // fiche liée (même familyId, ou même id pour une fiche pas encore ratachée) ne couvre l'autre
+  // branche. Le bouton crée la fiche liée et rétrofit un familyId partagé — sans toucher aux
+  // membres/permissions/historiques déjà attachés à la fiche existante.
+  const otherBranch = selectedDeptData?.branch === 'church' ? 'light' : selectedDeptData?.branch === 'light' ? 'church' : null;
+  const deptFamily = selectedDeptData?.familyId ? departments.filter(d => d.familyId === selectedDeptData.familyId) : [];
+  const missingBranch = otherBranch && !deptFamily.some(d => d.branch === otherBranch) ? otherBranch : null;
+  const addMissingBranch = () => {
+    if (!selectedDeptData || !missingBranch) return;
+    const { updatedExisting, linked } = linkMissingBranch(selectedDeptData, missingBranch);
+    onUpdateDepartments(prev => [...prev.map(d => d.id === selectedDeptData.id ? updatedExisting : d), linked]);
+  };
+
   const deptMembers = members.filter(m => selectedDept && Object.keys(m.departments).includes(selectedDept));
-  // Membres actifs du dept sur la période du sélecteur (aligné Accueil).
-  const deptActiveCount = selectedDept ? activeMemberIds(reports, effectivePeriod, new Date(), selectedDept).size : 0;
   const deptResponsable = deptMembers.find(m => selectedDept && m.departments[selectedDept] === 'responsable');
   const byFunction = (fn: string) => deptMembers.filter(m => selectedDept && m.departments[selectedDept] === fn);
   // Nouveaux affectés à ce département, suivis par le Responsable jusqu'à Boss :
@@ -167,7 +179,11 @@ export default function DepartmentsView({ activeBranch, simulatedRole, members =
   // qu'elle n'a pas atteint Boss ; elle sort de cet onglet Intégration une fois membre.
   const deptNouveaux = deptMembers.filter(m => m.level === 'nouveau');
   const pendingReception = deptNouveaux.filter(m => m.receptionValidated === false);
-  const receivedNouveaux = deptNouveaux.filter(m => m.receptionValidated !== false);
+  // Un rattachement encore 'pending' (Bloom Bus ou auto-inscription, cf. pendingBloomBusAttachment
+  // ci-dessous) ne doit PAS apparaître aussi ici : receptionValidated reste undefined pour ces
+  // origines (elles ne passent jamais par la réception ADN), donc `!== false` les laissait passer
+  // et affichait la même personne dans « Réceptions à valider » ET « En attente d'entretien ».
+  const receivedNouveaux = deptNouveaux.filter(m => m.receptionValidated !== false && m.deptAttachmentStatus !== 'pending');
   // Un membre en attente de validation Bloom Bus ne doit PAS apparaître aussi dans l'onglet
   // Stagiaires : sinon on le promeut Boss depuis là en court-circuitant « Réceptions à valider ».
   const deptStagiaires = deptMembers.filter(m => m.level === 'stagiaire' && m.deptAttachmentStatus !== 'pending');
@@ -213,13 +229,25 @@ export default function DepartmentsView({ activeBranch, simulatedRole, members =
   // Synthèse — mêmes KPI que l'Accueil (kpi.ts), scopés aux membres/rapports du département.
   // Pas de tuile "Bloom Bus" ici : les lignes de bus ne sont pas rattachées à un département.
   const { from: deptPFrom, to: deptPTo } = periodRange(effectivePeriod);
-  const deptPeriodBaptised = deptMembers.filter(m => m.baptismDate && new Date(m.baptismDate) >= deptPFrom && new Date(m.baptismDate) <= deptPTo);
-  const deptBaptisedViaDept = deptPeriodBaptised.filter(m => m.baptismViaDepartment).length;
-  const deptMoisson = moissonBySource(deptReports, effectivePeriod);
-  const deptOj = ojTotal(deptReports, effectivePeriod);
-  const deptFollowUps = pendingFollowUps(deptReports);
-  const deptRedCount = deptMembers.filter(m => isRed(m)).length;
-  const deptGrowthData = weeklyGrowthSeries(deptMembers, deptReports, effectivePeriod);
+
+  // Synthèse regroupée par familyId — uniquement les tuiles KPI de l'onglet Synthèse (ci-dessous),
+  // jamais la liste Membres/les actions de statut : celles-ci restent scopées à selectedDept
+  // (roster et appartenances séparés par branche, cf. linkMissingBranch). Le toggle n'apparaît
+  // que si une fiche liée existe (deptFamily.length > 1).
+  const [statsScope, setStatsScope] = useState<'branch' | 'combined'>('branch');
+  const statsDeptIds = statsScope === 'combined' && deptFamily.length > 1 ? deptFamily.map(d => d.id) : (selectedDept ? [selectedDept] : []);
+  const statsMembers = members.filter(m => Object.keys(m.departments).some(id => statsDeptIds.includes(id)));
+  const statsReports = reports.filter(r => r.departmentId && statsDeptIds.includes(r.departmentId));
+  const statsActivities = activities.filter(a => statsDeptIds.includes(a.departmentId));
+  const statsActiveCount = new Set(statsDeptIds.flatMap(id => [...activeMemberIds(reports, effectivePeriod, new Date(), id)])).size;
+  const statsPeriodBaptised = statsMembers.filter(m => m.baptismDate && new Date(m.baptismDate) >= deptPFrom && new Date(m.baptismDate) <= deptPTo);
+  const statsBaptisedViaDept = statsPeriodBaptised.filter(m => m.baptismViaDepartment).length;
+  const statsMoisson = moissonBySource(statsReports, effectivePeriod);
+  const statsOj = ojTotal(statsReports, effectivePeriod);
+  const statsFollowUps = pendingFollowUps(statsReports);
+  const statsRedCount = statsMembers.filter(m => isRed(m)).length;
+  const statsGrowthData = weeklyGrowthSeries(statsMembers, statsReports, effectivePeriod);
+  const statsPendingReception = statsMembers.filter(m => m.level === 'nouveau' && m.receptionValidated === false);
 
   // P1.4 — labels read live from FormBuilder's fd_service/fd_rsa FormDefs, id-matched.
   const serviceForm = forms.find((f) => f.id === 'fd_service');
@@ -383,8 +411,21 @@ export default function DepartmentsView({ activeBranch, simulatedRole, members =
                         <Sparkles size={10} /> {SPECIAL_LABEL[sf]}
                       </span>
                     )}
+                    {selectedDeptData.branch && (selectedDeptData.branch === 'church' || selectedDeptData.branch === 'light') && (
+                      <span className="text-[10px] font-bold text-bc-text-secondary bg-bc-canvas border border-bc-border px-2 py-0.5 rounded-full">
+                        {selectedDeptData.branch === 'church' ? 'Bloom Church' : 'Bloom Light'}
+                      </span>
+                    )}
                   </p>
                 </div>
+                {missingBranch && (
+                  <button
+                    onClick={addMissingBranch}
+                    className="text-xs font-bold text-bc-green border border-bc-green/30 bg-bc-green/10 rounded-full px-3 py-1.5 hover:bg-bc-green/20 active-scale whitespace-nowrap"
+                  >
+                    + Ajouter la branche {missingBranch === 'church' ? 'Bloom Church' : 'Bloom Light'}
+                  </button>
+                )}
               </div>
 
               {/* Tab bar — synthèse (accueil) + onglets internes du responsable */}
@@ -433,7 +474,23 @@ export default function DepartmentsView({ activeBranch, simulatedRole, members =
                     </div>
                   )}
                   {/* Sélecteur de période — mêmes options que l'Accueil, pilote Baptisés/Moisson/OJ ci-dessous */}
-                  <div className="flex justify-end">
+                  <div className="flex justify-end items-center gap-3">
+                    {deptFamily.length > 1 && (
+                      <div className="flex rounded-full border border-bc-border bg-white p-0.5 text-[10px] font-bold">
+                        <button
+                          onClick={() => setStatsScope('branch')}
+                          className={`px-3 py-1 rounded-full transition-colors ${statsScope === 'branch' ? 'bg-bc-green text-white' : 'text-bc-text-secondary'}`}
+                        >
+                          Cette branche
+                        </button>
+                        <button
+                          onClick={() => setStatsScope('combined')}
+                          className={`px-3 py-1 rounded-full transition-colors ${statsScope === 'combined' ? 'bg-bc-green text-white' : 'text-bc-text-secondary'}`}
+                        >
+                          Regroupé
+                        </button>
+                      </div>
+                    )}
                     <PeriodSelector
                       period={period}
                       onPeriodChange={setPeriod}
@@ -452,8 +509,8 @@ export default function DepartmentsView({ activeBranch, simulatedRole, members =
                         <Users size={14} />
                         <span className="text-[9px] font-bold uppercase tracking-wider">Actifs</span>
                       </div>
-                      <div className="text-xl font-ui font-extrabold text-bc-text tracking-tight">{deptActiveCount}</div>
-                      <Spark data={weeklyActiveCounts(deptReports, effectivePeriod)} color="var(--color-bc-green)" />
+                      <div className="text-xl font-ui font-extrabold text-bc-text tracking-tight">{statsActiveCount}</div>
+                      <Spark data={weeklyActiveCounts(statsReports, effectivePeriod)} color="var(--color-bc-green)" />
                       <p className="text-[9px] text-bc-text-secondary mt-1">Ont servi sur la période</p>
                     </div>
 
@@ -461,9 +518,9 @@ export default function DepartmentsView({ activeBranch, simulatedRole, members =
                       <div className="flex items-center gap-2 text-bc-text-secondary mb-2">
                         <span className="text-[9px] font-bold uppercase tracking-wider">Baptisés</span>
                       </div>
-                      <div className="text-xl font-ui font-extrabold text-bc-text tracking-tight">{deptPeriodBaptised.length}</div>
-                      <Spark data={weeklyBaptismCounts(deptMembers, effectivePeriod)} color="var(--color-bc-success)" />
-                      <p className="text-[9px] text-bc-text-secondary mt-1">Sur la période · {deptBaptisedViaDept} Dépt · {deptPeriodBaptised.length - deptBaptisedViaDept} Fiche</p>
+                      <div className="text-xl font-ui font-extrabold text-bc-text tracking-tight">{statsPeriodBaptised.length}</div>
+                      <Spark data={weeklyBaptismCounts(statsMembers, effectivePeriod)} color="var(--color-bc-success)" />
+                      <p className="text-[9px] text-bc-text-secondary mt-1">Sur la période · {statsBaptisedViaDept} Dépt · {statsPeriodBaptised.length - statsBaptisedViaDept} Fiche</p>
                     </div>
 
                     <div className="bg-white p-4 rounded-2xl border border-bc-border shadow-soft hover:shadow-md transition-shadow">
@@ -471,9 +528,9 @@ export default function DepartmentsView({ activeBranch, simulatedRole, members =
                         <TrendingUp size={14} />
                         <span className="text-[9px] font-bold uppercase tracking-wider">Moisson</span>
                       </div>
-                      <div className="text-xl font-ui font-extrabold text-bc-text tracking-tight">{deptMoisson.adn + deptMoisson.bus}</div>
-                      <Spark data={weeklyMoissonCounts(deptReports, effectivePeriod)} color="var(--color-bc-gold)" />
-                      <p className="text-[9px] text-bc-text-secondary mt-1">Intégrés · {deptMoisson.adn} ADN · {deptMoisson.bus} Bus</p>
+                      <div className="text-xl font-ui font-extrabold text-bc-text tracking-tight">{statsMoisson.adn + statsMoisson.bus}</div>
+                      <Spark data={weeklyMoissonCounts(statsReports, effectivePeriod)} color="var(--color-bc-gold)" />
+                      <p className="text-[9px] text-bc-text-secondary mt-1">Intégrés · {statsMoisson.adn} ADN · {statsMoisson.bus} Bus</p>
                     </div>
 
                     <div className="bg-white p-4 rounded-2xl border border-bc-border shadow-soft hover:shadow-md transition-shadow">
@@ -481,8 +538,8 @@ export default function DepartmentsView({ activeBranch, simulatedRole, members =
                         <Sparkles size={14} />
                         <span className="text-[9px] font-bold uppercase tracking-wider">OJ « Oui à Jésus »</span>
                       </div>
-                      <div className="text-xl font-ui font-extrabold text-bc-text tracking-tight">{deptOj}</div>
-                      <Spark data={weeklyOjCounts(deptReports, effectivePeriod)} color="var(--color-bc-cerulean)" />
+                      <div className="text-xl font-ui font-extrabold text-bc-text tracking-tight">{statsOj}</div>
+                      <Spark data={weeklyOjCounts(statsReports, effectivePeriod)} color="var(--color-bc-cerulean)" />
                       <p className="text-[9px] text-bc-text-secondary mt-1">Sur la période · rapports ADN</p>
                     </div>
 
@@ -494,7 +551,7 @@ export default function DepartmentsView({ activeBranch, simulatedRole, members =
                       <div className="flex items-center gap-2 text-bc-text-secondary mb-2">
                         <span className="text-[9px] font-bold uppercase tracking-wider">À traiter</span>
                       </div>
-                      <div className="text-xl font-ui font-extrabold text-bc-text tracking-tight">{deptFollowUps.length}</div>
+                      <div className="text-xl font-ui font-extrabold text-bc-text tracking-tight">{statsFollowUps.length}</div>
                       <p className="text-[9px] text-bc-warning font-bold mt-1">Remontées avec suivi · voir Rapports</p>
                     </button>
 
@@ -504,9 +561,9 @@ export default function DepartmentsView({ activeBranch, simulatedRole, members =
                         <span className="text-[9px] font-bold uppercase tracking-wider">Nouveau en attente</span>
                       </div>
                       <div className="flex items-center gap-2.5">
-                        <Ring value={pendingReception.length} total={deptMembers.length} color="var(--color-bc-warning)" />
+                        <Ring value={statsPendingReception.length} total={statsMembers.length} color="var(--color-bc-warning)" />
                         <div>
-                          <div className="text-lg font-ui font-extrabold text-bc-warning tracking-tight leading-none">{pendingReception.length}</div>
+                          <div className="text-lg font-ui font-extrabold text-bc-warning tracking-tight leading-none">{statsPendingReception.length}</div>
                           <p className="text-[9px] text-bc-warning mt-1">Pas encore reçus en dépt</p>
                         </div>
                       </div>
@@ -518,9 +575,9 @@ export default function DepartmentsView({ activeBranch, simulatedRole, members =
                         <span className="text-[9px] font-bold uppercase tracking-wider">Au rouge</span>
                       </div>
                       <div className="flex items-center gap-2.5">
-                        <Ring value={deptRedCount} total={deptMembers.length} color="var(--color-bc-danger)" />
+                        <Ring value={statsRedCount} total={statsMembers.length} color="var(--color-bc-danger)" />
                         <div>
-                          <div className="text-lg font-ui font-extrabold text-bc-danger tracking-tight leading-none">{deptRedCount}</div>
+                          <div className="text-lg font-ui font-extrabold text-bc-danger tracking-tight leading-none">{statsRedCount}</div>
                           <p className="text-[9px] text-bc-danger mt-1">Délais dépassés</p>
                         </div>
                       </div>
@@ -529,13 +586,13 @@ export default function DepartmentsView({ activeBranch, simulatedRole, members =
                     {/* Santé spirituelle — même ligne que les KPI, juste après "Au rouge" */}
                     <div className="bg-white p-4 rounded-2xl border border-bc-border shadow-soft hover:shadow-md transition-shadow col-span-2">
                       <h3 className="text-[9px] font-bold uppercase tracking-wider text-bc-text-secondary mb-2">Santé spirituelle du département</h3>
-                      {deptMembers.length === 0 ? (
+                      {statsMembers.length === 0 ? (
                         <p className="text-xs text-bc-text-secondary italic text-center py-2">Aucun membre rattaché à ce département.</p>
                       ) : (
                         <div className="grid grid-cols-5 gap-1 w-full text-center">
                           {HEALTH_AXES.filter(a => a.key !== 'presenceService').map(axis => (
                             <div key={axis.key} className="min-w-0">
-                              <HealthSmiley value={dominantHealthLevel(deptMembers, axis.key)} size={20} />
+                              <HealthSmiley value={dominantHealthLevel(statsMembers, axis.key)} size={20} />
                               <div className="text-[7px] sm:text-[8px] font-bold text-bc-text-secondary truncate mt-1">{axis.label}</div>
                             </div>
                           ))}
@@ -548,7 +605,7 @@ export default function DepartmentsView({ activeBranch, simulatedRole, members =
                         <Calendar size={14} />
                         <span className="text-[9px] font-bold uppercase tracking-wider">Réunions à venir</span>
                       </div>
-                      <div className="text-xl font-ui font-extrabold text-bc-text tracking-tight">{deptActivities.length}</div>
+                      <div className="text-xl font-ui font-extrabold text-bc-text tracking-tight">{statsActivities.length}</div>
                       <p className="text-[9px] text-bc-text-secondary mt-1">Activités récurrentes du département</p>
                     </div>
                   </div>
@@ -563,7 +620,7 @@ export default function DepartmentsView({ activeBranch, simulatedRole, members =
                       </div>
                       <div className="h-48 mt-2 min-w-0">
                         <ResponsiveChart height="100%" minHeight={150}>
-                          <AreaChart data={deptGrowthData}>
+                          <AreaChart data={statsGrowthData}>
                             <defs>
                               <linearGradient id="deptColorNouveaux" x1="0" y1="0" x2="0" y2="1">
                                 <stop offset="5%" stopColor="var(--color-bc-text)" stopOpacity={0.1}/>

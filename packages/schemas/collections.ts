@@ -37,6 +37,8 @@ export const NotificationSchema = z.object({
   read: z.boolean(),
   branch: branch.optional(),
   targetMemberId: z.string().optional(),
+  resourceType: z.enum(['member', 'report', 'event']).optional(),
+  resourceId: z.string().optional(),
 }).strict();
 export const NotificationPatchSchema = NotificationSchema.partial().extend({ id: z.string().min(1) });
 
@@ -88,6 +90,7 @@ export const DepartmentSchema = z.object({
   description: z.string(),
   specialFunction: z.enum(['adn', 'portiers', 'integration', 'bloom_bus', 'gestion_cultes', 'parcours_etapes']).optional(),
   branch: branch.optional(),
+  familyId: z.string().optional(),
   sections: z.array(z.object({ id: z.string(), name: z.string() }).strict()).optional(),
 }).strict();
 export const DepartmentPatchSchema = DepartmentSchema.partial().extend({ id: z.string().min(1) });

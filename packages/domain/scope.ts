@@ -58,6 +58,18 @@ export const GLOBAL_VIEW_ROLES = ['Super Admin', 'Admin', 'Pasteur Principal', '
 // to a dedicated relation once that model exists.
 const DEPARTMENT_PROXY_ROLES = ['Responsable', 'Adjoint', 'Coach', 'Leader'];
 
+// Point 1 — seuls ces rôles peuvent tenir un département secondaire dans l'AUTRE branche
+// (Member.deptBranches) ; Leader et Membre restent cantonnés à leur branche d'attache.
+// Appliqué aussi côté serveur (server/rbac.ts) — rien ne doit dépendre uniquement de l'UI.
+export const COACH_AND_ABOVE = ['Coach', 'Adjoint', 'Responsable', 'Ministre', 'Pasteur', 'Pasteur Principal', 'Admin', 'Super Admin'];
+
+// Branche effective d'un membre POUR un département donné : son override (deptBranches)
+// si posé, sinon sa branche d'attache. Utilisé partout où « même branche » doit être
+// évalué au niveau du rattachement départemental plutôt qu'au niveau du membre entier.
+export function effectiveBranchFor(m: Member, deptId: string): Member['branch'] {
+  return m.deptBranches?.[deptId] ?? m.branch;
+}
+
 // Rôles qui gèrent leurs membres uniquement depuis l'onglet Membres de leur page
 // Département, pas depuis l'onglet Membres global de la barre latérale.
 export const MEMBERS_TAB_DEPT_ONLY_ROLES = ['Responsable', 'Adjoint'];
@@ -104,7 +116,13 @@ export function inMemberScope(
   if (DEPARTMENT_PROXY_ROLES.includes(role)) {
     const operatorDeptIds = Object.keys(operator.departments);
     const targetDeptIds = Object.keys(target.departments);
-    return operatorDeptIds.some(id => targetDeptIds.includes(id));
+    // Correctif audit (validé, Phase 4) — un même département partagé entre les deux branches
+    // ne donne portée que sur les membres qui y servent au nom de LA MÊME branche que
+    // l'opérateur (branche d'attache, ou deptBranches pour un Coach+ en département
+    // secondaire). Sans ce test, un Responsable Church voyait/gérait aussi les membres
+    // Light du même département — la branche n'était jamais comparée.
+    return operatorDeptIds.some(id =>
+      targetDeptIds.includes(id) && effectiveBranchFor(operator, id) === effectiveBranchFor(target, id));
   }
 
   // ponytail: fail-open for roles not covered above — the page-level
