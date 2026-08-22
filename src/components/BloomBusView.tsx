@@ -740,23 +740,27 @@ export default function BloomBusView({
               <p className="text-xs text-bc-text-secondary flex-1">Aucun membre rattaché à ce bus pour l'instant.</p>
             ) : (
               <div className="flex items-center -space-x-2 flex-1 min-w-0">
-                {busMembers.slice(0, 8).map((m) => (
+                {/* 32 → 64 px : à 32 px un visage était illisible, la photo n'apportait rien.
+                    Le nombre affiché passe de 8 à 6 en conséquence — la rangée occuperait
+                    sinon deux fois plus de large et déborderait sur mobile ; le bouton « +N »
+                    qui suit mène déjà à la liste complète, aucun membre n'est inaccessible. */}
+                {busMembers.slice(0, 6).map((m) => (
                   <Avatar
                     key={m.id}
                     src={m.avatarUrl}
                     initials={`${m.firstName[0]}${m.lastName[0]}`}
                     size="sm"
-                    className="w-8 h-8 text-[10px] bg-bc-green/15 text-bc-green border-2 border-white"
+                    className="w-16 h-16 text-base bg-bc-green/15 text-bc-green border-2 border-white"
                   />
                 ))}
-                {busMembers.length > 8 && (
+                {busMembers.length > 6 && (
                   <button
                     type="button"
                     onClick={() => rosterPanelRef.current?.scrollIntoView({ behavior: "smooth", block: "start" })}
-                    className="w-8 h-8 rounded-full bg-bc-border border-2 border-white text-[10px] font-bold text-bc-text-secondary flex items-center justify-center shrink-0 hover:opacity-80 transition-colors"
+                    className="w-16 h-16 rounded-full bg-bc-border border-2 border-white text-sm font-bold text-bc-text-secondary flex items-center justify-center shrink-0 hover:opacity-80 transition-colors"
                     title="Voir tous les membres"
                   >
-                    +{busMembers.length - 8}
+                    +{busMembers.length - 6}
                   </button>
                 )}
               </div>
