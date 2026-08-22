@@ -143,12 +143,24 @@ Variables d'environnement :
 
 ## Notes
 
-**SMTP/Twilio vides** = les liens d'activation de compte restent seulement loggés, aucun
-membre ne peut activer son compte en pratique. À faire dès que tu as des identifiants
-SMTP/Twilio réels.
+**SMTP vide** = les liens d'activation de compte restent seulement loggés, aucun membre ne
+peut activer son compte en pratique. (SMTP est configuré depuis — Brevo.) **Twilio vide** =
+les canaux SMS et WhatsApp ne partent jamais : `notify.ts` écrit la ligne outbox en statut
+`simulated` et personne n'est prévenu de rien. Sans conséquence tant qu'aucun déclencheur
+n'a `sms`/`whatsapp` coché dans Réglages.
 
-**Photos sans volume dédié** : si tu préfères ne pas gérer de volume `/data` pour le
-backend, tu peux réutiliser ton compte Cloudflare R2 (déjà configuré pour les sauvegardes)
-en créant un second bucket dédié aux photos et en renseignant `S3_ENDPOINT`,
-`S3_ACCESS_KEY`, `S3_SECRET_KEY`, `S3_BUCKET` sur le backend — `server/storage.ts` bascule
-alors automatiquement en mode S3. Optionnel, à faire plus tard si besoin.
+**Le volume `/data` du backend n'est PAS optionnel en mode disque.** `UPLOAD_DIR` vaut
+`dirname(BLOOMCORE_DB)/uploads`, ou `<dossier du code>/uploads` si `BLOOMCORE_DB` est
+absent — dans ce dernier cas les photos sont écrites DANS le conteneur et **disparaissent à
+chaque redéploiement**. Il faut donc, sur l'Application backend : un volume persistant monté
+sur `/data` ET `BLOOMCORE_DB=/data/bloomcore.db` (la valeur sert de racine aux uploads, y
+compris en mode Postgres où le fichier SQLite lui-même n'est plus utilisé pour les données).
+
+**Bascule R2/S3 pour les photos : PAS prête, ne pas activer telle quelle.** Renseigner
+`S3_ENDPOINT` & co. fait bien basculer `server/storage.ts` en mode S3 côté écriture, mais
+`storeImage()` renvoie toujours un chemin `/uploads/<clé>` et le front l'affiche tel quel
+(`photoSrc`, src/data/api.ts). Or en mode S3 le dossier servi par la route `/uploads` est
+vide : l'upload réussirait et **toutes les photos s'afficheraient en 404**. Le hook front des
+URLs signées (`GET /api/v1/uploads/sign`, déjà présent côté serveur) n'a jamais été écrit —
+c'est ce qu'il faut faire AVANT d'envisager cette bascule. Voir le backlog du rapport de
+séparation (« hook front des URLs signées si MinIO est activé »).
