@@ -1,6 +1,6 @@
 // Test du fan-out Web Push (pur) + garde transport. Lancé via `npm test` (tsx).
 import assert from 'node:assert';
-import { webpushRows, transportConfigured } from './notify.ts';
+import { webpushRows, transportConfigured, emailAllowed } from './notify.ts';
 
 const subs = [
   { endpoint: 'https://push.example/aaa', p256dh: 'p1', auth: 'a1' },
@@ -33,5 +33,15 @@ assert.equal(transportConfigured('webpush'), false, 'sans VAPID → simulé');
 process.env.VAPID_PRIVATE_KEY = 'x';
 assert.equal(transportConfigured('webpush'), true, 'avec VAPID → réel');
 if (saved === undefined) delete process.env.VAPID_PRIVATE_KEY; else process.env.VAPID_PRIVATE_KEY = saved;
+
+// 5) #18 — emailAllowed() : coupure fonctionnelle, auth (notif_auth_*) toujours autorisé.
+const savedFlag = process.env.FUNCTIONAL_EMAILS_ENABLED;
+delete process.env.FUNCTIONAL_EMAILS_ENABLED;
+assert.equal(emailAllowed('notif_pending3j_m1'), false, 'fonctionnel bloqué par défaut');
+assert.equal(emailAllowed('notif_auth_reset_m1_123'), true, 'reset toujours envoyé');
+assert.equal(emailAllowed('notif_auth_activate_m1_123'), true, 'activation toujours envoyée');
+process.env.FUNCTIONAL_EMAILS_ENABLED = 'true';
+assert.equal(emailAllowed('notif_pending3j_m1'), true, 'réactivable via le flag');
+if (savedFlag === undefined) delete process.env.FUNCTIONAL_EMAILS_ENABLED; else process.env.FUNCTIONAL_EMAILS_ENABLED = savedFlag;
 
 console.log('notify.check OK');

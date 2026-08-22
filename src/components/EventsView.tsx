@@ -14,7 +14,8 @@ import {
   FileText,
   Activity,
   Clock,
-  Building2
+  Building2,
+  Pencil
 } from 'lucide-react';
 import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts';
 import { Modal } from './ui/Modal';
@@ -107,6 +108,15 @@ export default function EventsView({
     adnForm?.fields.find((f) => f.id === fieldId)?.label ?? fallback;
   const [showAddEventModal, setShowAddEventModal] = useState(false);
   const [showCounterModal, setShowCounterModal] = useState(false);
+  const [showEditEventModal, setShowEditEventModal] = useState(false);
+  // Édition d'une occurrence unique (#20) : chaque Event est déjà un enregistrement indépendant
+  // (id stable, pas de lien de série — cf. buildCanonicalEvents/reconcileMissingById), donc
+  // muter ces champs via onUpdateEvent ne touche que cette occurrence, jamais le reste de la série.
+  const [editTitle, setEditTitle] = useState('');
+  const [editType, setEditType] = useState('');
+  const [editDate, setEditDate] = useState('');
+  const [editTime, setEditTime] = useState('');
+  const [editEndTime, setEditEndTime] = useState('');
   const [presentServiteurs, setPresentServiteurs] = useState<string[]>([]);
   const [filterType, setFilterType] = useState<string>('all');
   const [filterProject, setFilterProject] = useState('all');
@@ -422,6 +432,22 @@ export default function EventsView({
           </div>
 
           <div className="flex items-center gap-2">
+            {/* Édition d'une occurrence unique (#20) : ne modifie que cet enregistrement, la série continue inchangée. */}
+            {!selectedEvent.closed && ['Pasteur', 'Pasteur Principal', 'Admin', 'Super Admin', 'GDC'].includes(simulatedRole) && (
+              <button
+                onClick={() => {
+                  setEditTitle(selectedEvent.title);
+                  setEditType(selectedEvent.type);
+                  setEditDate(selectedEvent.date);
+                  setEditTime(selectedEvent.time ?? '');
+                  setEditEndTime(selectedEvent.endTime ?? '');
+                  setShowEditEventModal(true);
+                }}
+                className="px-5 py-2.5 bg-white border border-bc-border text-bc-text font-bold text-xs rounded-full hover:bg-bc-canvas transition-colors flex items-center gap-2 shadow-sm active:scale-95"
+              >
+                <Pencil size={14} /> Modifier cette occurrence
+              </button>
+            )}
             {/* Annulation d'une occurrence : ce jour-là l'événement n'a pas lieu, la série continue. */}
             {!selectedEvent.closed && ['Pasteur', 'Pasteur Principal', 'Admin', 'Super Admin', 'GDC'].includes(simulatedRole) && (
               <button
@@ -753,6 +779,108 @@ export default function EventsView({
         </Modal>
       )}
 
+      {showEditEventModal && selectedEvent && (
+        <Modal
+          open={showEditEventModal}
+          onClose={() => setShowEditEventModal(false)}
+          title="Modifier cette occurrence"
+          icon={<Pencil size={18} className="text-bc-text" />}
+          maxWidth="max-w-md"
+        >
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              if (!editTitle || !editDate) return;
+              onUpdateEvent?.({
+                ...(selectedEvent as Event),
+                title: editTitle,
+                type: editType,
+                date: editDate,
+                time: editTime || undefined,
+                endTime: editEndTime || undefined,
+              });
+              setShowEditEventModal(false);
+            }}
+            className="space-y-4"
+          >
+            <p className="text-[11px] text-bc-text-secondary bg-bc-canvas rounded-xl px-3 py-2">
+              Seule cette occurrence est modifiée — le reste de la série n'est pas affecté.
+            </p>
+
+            <div>
+              <label className="block text-xs font-bold text-bc-text mb-1">Titre de l'événement *</label>
+              <input
+                type="text"
+                required
+                value={editTitle}
+                onChange={(e) => setEditTitle(e.target.value)}
+                className="w-full border border-bc-border rounded-full px-3 py-2 text-xs focus:outline-none focus:border-bc-green"
+              />
+            </div>
+
+            <div>
+              <label className="block text-xs font-bold text-bc-text mb-1">Type d'événement</label>
+              <select
+                value={editType}
+                onChange={(e) => setEditType(e.target.value)}
+                className="w-full border border-bc-border rounded-full px-3 py-2 text-xs bg-white focus:outline-none"
+              >
+                {eventTypes.map((t) => (
+                  <option key={t} value={t}>{t}</option>
+                ))}
+              </select>
+            </div>
+
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="block text-xs font-bold text-bc-text mb-1">Date *</label>
+                <input
+                  type="date"
+                  required
+                  value={editDate}
+                  onChange={(e) => setEditDate(e.target.value)}
+                  className="w-full border border-bc-border rounded-full px-3 py-2 text-xs focus:outline-none focus:border-bc-green"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-bold text-bc-text mb-1">Heure de début</label>
+                <input
+                  type="time"
+                  value={editTime}
+                  onChange={(e) => setEditTime(e.target.value)}
+                  className="w-full border border-bc-border rounded-full px-3 py-2 text-xs focus:outline-none focus:border-bc-green"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-bold text-bc-text mb-1">Heure de fin</label>
+                <input
+                  type="time"
+                  value={editEndTime}
+                  onChange={(e) => setEditEndTime(e.target.value)}
+                  className="w-full border border-bc-border rounded-full px-3 py-2 text-xs focus:outline-none focus:border-bc-green"
+                />
+              </div>
+            </div>
+
+            <div className="flex gap-3 justify-end pt-3 border-t border-bc-border">
+              <button
+                type="button"
+                onClick={() => setShowEditEventModal(false)}
+                className="px-4 py-2 border border-bc-border text-bc-text-secondary rounded-full text-xs hover:bg-bc-canvas active:scale-95"
+              >
+                Annuler
+              </button>
+              <button
+                type="submit"
+                className="px-5 py-2 text-white rounded-full text-xs font-ui font-bold hover:opacity-90 active:scale-95 bg-bc-green"
+              >
+                Enregistrer
+              </button>
+            </div>
+          </form>
+        </Modal>
+      )}
+
       </div>
     );
   }
@@ -993,7 +1121,6 @@ export default function EventsView({
             </form>
         </Modal>
       )}
-
 
     </div>
   );

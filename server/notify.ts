@@ -21,6 +21,14 @@ export function webpushRows(notifId: string, subs: { endpoint: string; p256dh: s
   }));
 }
 
+// #18 — coupure temporaire des emails fonctionnels (tout sauf activation/réinitialisation,
+// reconnaissables au préfixe d'id notif_auth_ posé par issueAuthLink() dans server/index.ts).
+// Défaut coupé ; FUNCTIONAL_EMAILS_ENABLED=true réactive sans toucher les appelants — dispatch()
+// reste l'unique point de fan-out email, donc l'unique endroit à garder.
+export function emailAllowed(notifId: string): boolean {
+  return notifId.startsWith('notif_auth_') || process.env.FUNCTIONAL_EMAILS_ENABLED === 'true';
+}
+
 // ponytail: adapters simulés — les clés env décident. Twilio/Nodemailer/web-push plus tard.
 export function transportConfigured(channel: Channel): boolean {
   if (channel === 'email') return !!process.env.SMTP_HOST;
@@ -152,6 +160,7 @@ export async function dispatch(newNotifs: AppNotification[], members: Member[], 
     for (const m of recipients) {
       const prefs = m.notifChannels ?? DEFAULT_CHANNELS;
       for (const channel of ['email', 'sms', 'whatsapp'] as Channel[]) {
+        if (channel === 'email' && !emailAllowed(n.id)) continue;
         if (triggerChannels[channel] && prefs[channel]) {
           await send(channel, m, n.title, n.message, `${n.id}:${channel}:${m.id}`);
         }

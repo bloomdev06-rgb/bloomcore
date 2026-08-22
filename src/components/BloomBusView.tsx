@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import {
   Bus,
   Map as MapIcon,
@@ -15,7 +15,7 @@ import {
   ClipboardList,
 } from "lucide-react";
 import { LineChart, Line, XAxis, YAxis, Tooltip, Legend } from "recharts";
-import { Member, Branch, BloomBusEntity, Report, Event, FormDef } from "../types";
+import { Member, Branch, BloomBusEntity, Report, Event, FormDef, Department } from "../types";
 import { useBusLines, useDepartments, save } from "../data";
 import { CULTE_SLOT_KEYS, culteSlotLabel } from "../data/events";
 import { isBusReportLocked } from "../data/reportLock";
@@ -181,6 +181,7 @@ export default function BloomBusView({
   const [showAddBus, setShowAddBus] = useState(false);
   const [showDirectRegister, setShowDirectRegister] = useState(false);
   const [showAttachExisting, setShowAttachExisting] = useState(false);
+  const rosterPanelRef = useRef<HTMLDivElement>(null);
   const [expandedCommunes, setExpandedCommunes] = useState<string[]>([
     defaultCommune,
   ]);
@@ -732,6 +733,45 @@ export default function BloomBusView({
           )}
         </div>
 
+        {/* Rang 1 : membres du bus (avatars) + ajout — avant les statistiques */}
+        {selectedLevel.type === "bus" && !isMembre && (
+          <div className="bg-white p-4 rounded-[2rem] border border-bc-border shadow-sm flex items-center gap-3 flex-wrap shrink-0">
+            {busMembers.length === 0 ? (
+              <p className="text-xs text-bc-text-secondary flex-1">Aucun membre rattaché à ce bus pour l'instant.</p>
+            ) : (
+              <div className="flex items-center -space-x-2 flex-1 min-w-0">
+                {busMembers.slice(0, 8).map((m) => (
+                  <Avatar
+                    key={m.id}
+                    src={m.avatarUrl}
+                    initials={`${m.firstName[0]}${m.lastName[0]}`}
+                    size="sm"
+                    className="w-8 h-8 text-[10px] bg-bc-green/15 text-bc-green border-2 border-white"
+                  />
+                ))}
+                {busMembers.length > 8 && (
+                  <button
+                    type="button"
+                    onClick={() => rosterPanelRef.current?.scrollIntoView({ behavior: "smooth", block: "start" })}
+                    className="w-8 h-8 rounded-full bg-bc-border border-2 border-white text-[10px] font-bold text-bc-text-secondary flex items-center justify-center shrink-0 hover:opacity-80 transition-colors"
+                    title="Voir tous les membres"
+                  >
+                    +{busMembers.length - 8}
+                  </button>
+                )}
+              </div>
+            )}
+            {canRegisterMember && (
+              <button
+                onClick={() => setShowAttachExisting(true)}
+                className="flex items-center gap-1.5 px-4 py-2 rounded-full bg-bc-green text-white text-xs font-bold hover:opacity-90 active-scale shrink-0"
+              >
+                <Plus size={14} /> Ajouter un membre
+              </button>
+            )}
+          </div>
+        )}
+
         {/* Dashboard Grid — statistiques territoriales, masquées pour un Membre */}
         {!isMembre && (
         <>
@@ -1012,7 +1052,7 @@ export default function BloomBusView({
           {(selectedLevel.type === "bus" || isHierarchicalOperator) && !isMembre && (
             // max-h borne le panneau → la liste interne (flex-1 overflow-y-auto) défile
             // au lieu d'allonger la page quand les membres sont nombreux.
-            <div className="bg-white p-5 rounded-[2rem] border border-bc-border shadow-sm flex flex-col max-h-[80vh]">
+            <div ref={rosterPanelRef} className="bg-white p-5 rounded-[2rem] border border-bc-border shadow-sm flex flex-col max-h-[80vh]">
               <div className="flex items-center justify-between mb-4">
                 <div className="flex items-center gap-2">
                   <h3 className="text-sm font-ui font-bold text-bc-text">{rosterTitle}</h3>
@@ -1448,6 +1488,7 @@ export default function BloomBusView({
       {showAttachExisting && (
         <AttachExistingMemberModal
           members={members}
+          departments={departments}
           busLines={busLines}
           activeBuses={activeBuses}
           defaultBusId={selectedLevel.type === "bus" ? selectedLevel.id : activeBuses[0]?.id}
@@ -1478,6 +1519,7 @@ export default function BloomBusView({
 // choisit au lieu de passer par "Nouvelle fiche".
 function AttachExistingMemberModal({
   members,
+  departments,
   busLines,
   activeBuses,
   defaultBusId,
@@ -1485,6 +1527,7 @@ function AttachExistingMemberModal({
   onAttach,
 }: {
   members: Member[];
+  departments: Department[];
   busLines: BloomBusEntity[];
   activeBuses: BloomBusEntity[];
   defaultBusId?: string;
@@ -1503,9 +1546,16 @@ function AttachExistingMemberModal({
           const fullName = `${m.firstName} ${m.lastName}`.toLowerCase();
           const matchesName = fullName.includes(normalizedQuery);
           const matchesPhone = normalizedQueryPhone.length >= 4 && normalizePhone(String(m.phone)).includes(normalizedQueryPhone);
-          return matchesName || matchesPhone;
+          const matchesEmail = m.email.toLowerCase().includes(normalizedQuery);
+          return matchesName || matchesPhone || matchesEmail;
         })
         .slice(0, 20);
+
+  const deptNamesOf = (m: Member) =>
+    Object.keys(m.departments)
+      .map((id) => departments.find((d) => d.id === id)?.name)
+      .filter(Boolean)
+      .join(", ") || "Sans département";
 
   return (
     <Modal open={true} onClose={onClose} title="Rattacher un membre existant" maxWidth="max-w-md">
@@ -1523,7 +1573,7 @@ function AttachExistingMemberModal({
         <input
           value={query}
           onChange={(e) => setQuery(e.target.value)}
-          placeholder="Nom ou téléphone…"
+          placeholder="Nom, téléphone ou email…"
           className="w-full border border-bc-border rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-bc-green"
         />
 
@@ -1536,14 +1586,19 @@ function AttachExistingMemberModal({
                 type="button"
                 disabled={!busId}
                 onClick={() => busId && onAttach(m, busId)}
-                className="flex items-center justify-between gap-2 px-3 py-2 rounded-xl border border-bc-border hover:bg-bc-canvas text-left disabled:opacity-40 disabled:cursor-not-allowed"
+                className="flex items-center gap-3 px-3 py-2 rounded-xl border border-bc-border hover:bg-bc-canvas text-left disabled:opacity-40 disabled:cursor-not-allowed"
               >
-                <span className="text-sm font-bold text-bc-text">
-                  {m.firstName} {m.lastName}
-                  {m.level === "nouveau" && <span className="ml-2 text-[10px] font-normal text-bc-text-secondary">(Nouveau)</span>}
-                  {currentBus && <span className="ml-2 text-[10px] font-normal text-bc-warning">déjà dans {currentBus.name}</span>}
+                <Avatar src={m.avatarUrl} initials={`${m.firstName[0]}${m.lastName[0]}`} size="sm" />
+                <span className="min-w-0 flex-1">
+                  <span className="flex items-center gap-2 text-sm font-bold text-bc-text">
+                    {m.firstName} {m.lastName}
+                    {m.level === "nouveau" && <span className="text-[10px] font-normal text-bc-text-secondary">(Nouveau)</span>}
+                    {currentBus && <span className="text-[10px] font-normal text-bc-warning">déjà dans {currentBus.name}</span>}
+                  </span>
+                  <span className="block text-[10px] text-bc-text-secondary truncate">
+                    {deptNamesOf(m)} · {m.branch === "church" ? "Bloom Church" : "Bloom Light"} · {m.phone}
+                  </span>
                 </span>
-                <span className="text-[10px] text-bc-text-secondary shrink-0">{m.phone}</span>
               </button>
             );
           })}

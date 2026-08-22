@@ -109,7 +109,7 @@ export default function NouveauxView({ members, onUpdateMember, activeBranch, si
 
   const selectMember = (m: Member) => {
     setSelectedId(m.id);
-    setDraftStatus(statusOf(m) === 'Non suivi' ? 'En cours' : statusOf(m));
+    setDraftStatus(statusOf(m));
     setDraftContact(false);
     setDraftVisit(false);
     setDraftNotes('');
