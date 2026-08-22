@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { MapPin, UserPlus, Wrench } from "lucide-react";
 import { Member, Branch, CommunityLevel, PastoralCursus, Department, BloomBusEntity, FormDef } from "../types";
-import { downscaleAndUpload } from "../lib/image";
+import PhotoCropModal from "./ui/PhotoCropModal";
 import { Avatar } from "./ui/Avatar";
 import { PhotoLightbox } from "./ui/PhotoLightbox";
 import { Modal } from "./ui/Modal";
@@ -70,6 +70,8 @@ export default function MemberFormModal({
 
   const [avatarUrl, setAvatarUrl] = useState("");
   const [showPhotoLightbox, setShowPhotoLightbox] = useState(false);
+  // Fichier choisi en attente de cadrage — non nul = la modale de cadrage est ouverte.
+  const [cropFile, setCropFile] = useState<File | null>(null);
   const [firstName, setFirstName] = useState("");
   const [lastName, setLastName] = useState("");
   const [phone, setPhone] = useState("");
@@ -207,9 +209,24 @@ export default function MemberFormModal({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
 
+  // Choisir un fichier n'envoie plus directement : on passe d'abord par le cadrage (le
+  // recadrage automatique au centre coupait les visages sur les photos en pied ou de groupe).
   const handlePhotoUpload = (file: File | undefined) => {
     if (!file) return;
-    downscaleAndUpload(file).then(setAvatarUrl).catch((e) => toast.error(e.message));
+    setCropFile(file);
+  };
+
+  // Sortie du cadrage : les deux tailles sont déjà produites et recadrées, il ne reste qu'à
+  // téléverser. Hors-ligne (apiUpload renvoie null) → on garde la vignette en dataURL, exactement
+  // comme le faisait downscaleAndUpload : le repli offline-first n'est pas perdu.
+  const handleCropped = async (thumb: string, large: string) => {
+    setCropFile(null);
+    try {
+      const { apiUpload } = await import("../data/api");
+      setAvatarUrl((await apiUpload(thumb, large)) ?? thumb);
+    } catch (e) {
+      toast.error((e as Error).message);
+    }
   };
 
   const handleUseMyPosition = () => {
@@ -985,6 +1002,14 @@ export default function MemberFormModal({
 
       {showPhotoLightbox && avatarUrl && (
         <PhotoLightbox src={avatarUrl} alt={`${firstName} ${lastName}`} onClose={() => setShowPhotoLightbox(false)} />
+      )}
+
+      {cropFile && (
+        <PhotoCropModal
+          file={cropFile}
+          onCancel={() => setCropFile(null)}
+          onConfirm={handleCropped}
+        />
       )}
     </>
   );

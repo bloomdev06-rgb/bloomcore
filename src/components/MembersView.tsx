@@ -492,11 +492,14 @@ export default function MembersView({
                   <div className="flex justify-between items-start">
                     <div className="flex items-center space-x-3 min-w-0">
                       <div className="relative shrink-0">
+                        {/* w-12/h-12 = 48 px, le double du `sm` (24 px) : à 24 px un visage
+                            était illisible, la photo ne servait à rien. Les initiales passent
+                            à text-sm en conséquence. */}
                         <Avatar
                           src={member.avatarUrl}
                           initials={`${member.firstName[0]}${member.lastName[0]}`}
                           size="sm"
-                          className={`font-black border-2 text-[10px] ${
+                          className={`w-12 h-12 font-black border-2 text-sm ${
                             member.branch === "church"
                               ? "bg-bc-green/10 text-bc-text border-bc-cerulean/30"
                               : "bg-bc-green/10 text-bc-text border-bc-orange/30"
@@ -655,11 +658,14 @@ export default function MembersView({
                             <span className="w-2 h-2 rounded-full bg-bc-danger shrink-0" title="Au rouge" />
                           )}
                           <div className="relative shrink-0">
+                            {/* Vue liste : 32 → 48 px. Pas 64 px (le double strict) — la hauteur
+                                de ligne d'un tableau dense en dépend, et 48 px suffit à
+                                reconnaître un visage. */}
                             <Avatar
                               src={member.avatarUrl}
                               initials={`${member.firstName[0]}${member.lastName[0]}`}
                               size="sm"
-                              className={`w-8 h-8 font-black border-2 text-[9px] ${
+                              className={`w-12 h-12 font-black border-2 text-sm ${
                                 member.branch === "church"
                                   ? "bg-bc-green/10 text-bc-text border-bc-cerulean/30"
                                   : "bg-bc-green/10 text-bc-text border-bc-orange/30"

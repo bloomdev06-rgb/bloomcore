@@ -147,13 +147,31 @@ export async function apiLogout(): Promise<void> {
   }
 }
 
+// Racine du serveur d'API, déduite d'API_BASE en retirant le suffixe de version. Vaut ''
+// quand API_BASE est relatif (mono-service same-origin) → comportement historique inchangé.
+// `/uploads` n'est PAS sous /api/v1 côté serveur (app.use('/uploads', …)), d'où le besoin
+// de la racine plutôt que d'API_BASE.
+const API_ORIGIN = /^https?:\/\//.test(API_BASE) ? API_BASE.replace(/\/api\/v1\/?$/, '') : '';
+
 // /uploads est authentifié (voir server/index.ts). Les <img> ne portent pas de header →
-// token en query quand on l'a en mémoire ; sinon URL nue : le navigateur joint le cookie
-// de session automatiquement en same-origin (le serveur l'accepte sur /uploads, T6.1).
+// token en query quand on l'a en mémoire ; sinon URL nue et c'est le cookie de session qui
+// authentifie (le serveur l'accepte sur /uploads, T6.1).
+//
+// L'URL doit être ABSOLUE dès que le front est servi sur un autre hôte que l'API (Phase 6 :
+// app.<domaine> pour le front, api.app.<domaine> pour l'API). Avec un chemin relatif, le
+// navigateur demandait la photo au nginx du FRONTEND, dont le `try_files … /index.html`
+// répond 200 avec la page HTML : la requête réussissait et l'image ne s'affichait jamais
+// (aucune erreur en console — le symptôme « elle charge mais ne s'affiche pas »).
+//
+// Le cookie suit bien cette requête cross-ORIGIN : SameSite s'évalue par SITE (domaine
+// enregistrable), et app.<domaine> et api.app.<domaine> partagent le même — un cookie
+// SameSite=Lax est donc envoyé sur cette sous-ressource. Le `?token=` reste utile quand on
+// a le token en mémoire (avant tout rechargement de page).
 export function photoSrc(url?: string): string | undefined {
   if (!url || !url.startsWith('/uploads/')) return url;
   const token = getAuthToken();
-  return token ? `${url}?token=${encodeURIComponent(token)}` : url;
+  const absolute = `${API_ORIGIN}${url}`;
+  return token ? `${absolute}?token=${encodeURIComponent(token)}` : absolute;
 }
 
 export async function apiBootstrap(): Promise<Record<string, unknown> | null> {

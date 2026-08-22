@@ -2,7 +2,8 @@ import React, { useState } from 'react';
 import { UserCheck, ClipboardList, BarChart3, ChevronDown, ChevronRight, Users } from 'lucide-react';
 import { Member, Report, Event, AuditLog, PermissionMatrix, FormDef, Branch } from '../types';
 import { useBusLines, useDepartments } from '../data';
-import { downscaleAndUpload } from '../lib/image';
+import { photoSrc, apiUpload } from '../data/api';
+import PhotoCropModal from './ui/PhotoCropModal';
 import { adnByEvent } from '../data/adn';
 import { normalizePhone } from '../data/phone';
 import { Period, PeriodInput } from '../data/kpi';
@@ -70,6 +71,8 @@ export default function AdnView({
   const [quickBirthDate, setQuickBirthDate] = useState('');
   const [quickDept, setQuickDept] = useState('dept_louange');
   const [quickPhotoUrl, setQuickPhotoUrl] = useState('');
+  // Fichier en attente de cadrage — non nul = modale de cadrage ouverte.
+  const [quickCropFile, setQuickCropFile] = useState<File | null>(null);
   const [quickGps, setQuickGps] = useState<{ lat: number; lng: number } | null>(null);
   const [quickSource, setQuickSource] = useState('Invitation');
   // Rattachement Bloom Bus optionnel — indépendant du département d'intérêt.
@@ -342,13 +345,17 @@ export default function AdnView({
                   onChange={(e) => {
                     const file = e.target.files?.[0];
                     if (!file) return;
-                    // Resize + gestion d'erreur (C2/B6) — une photo pleine résolution
-                    // faisait exploser le quota localStorage et crasher en boucle.
-                    downscaleAndUpload(file).then(setQuickPhotoUrl).catch((err) => toast.error(err.message));
+                    // Passe par le cadrage, comme la fiche membre : le recadrage automatique au
+                    // centre coupait les visages. Le resize (C2/B6 — une photo pleine résolution
+                    // faisait exploser le quota et crashait en boucle) est fait par la modale,
+                    // qui produit directement les deux tailles bornées.
+                    setQuickCropFile(file);
                   }}
                   className="w-full border border-bc-border rounded-full px-3 py-1.5 text-[10px] bg-white focus:outline-none"
                 />
-                {quickPhotoUrl && <img src={quickPhotoUrl} alt="Aperçu" className="mt-2 w-12 h-12 rounded-full object-cover border border-bc-border" />}
+                {/* photoSrc : l'URL stockée est un chemin /uploads/… relatif, qui viserait le
+                    nginx du FRONTEND quand l'API est sur un autre hôte — l'aperçu restait vide. */}
+                {quickPhotoUrl && <img src={photoSrc(quickPhotoUrl)} alt="Aperçu" className="mt-2 w-12 h-12 rounded-full object-cover border border-bc-border" />}
               </div>
               <div>
                 <label className={labelCls}>{nouveauLabel('f10', 'Comment nous a-t-il connu ?')}</label>
@@ -639,6 +646,23 @@ export default function AdnView({
           operator={operator}
           permissionMatrix={permissionMatrix}
           forms={forms}
+        />
+      )}
+
+      {quickCropFile && (
+        <PhotoCropModal
+          file={quickCropFile}
+          onCancel={() => setQuickCropFile(null)}
+          onConfirm={async (thumb, large) => {
+            setQuickCropFile(null);
+            // Hors-ligne (apiUpload → null) : on garde la vignette en dataURL, repli
+            // offline-first identique à celui de downscaleAndUpload.
+            try {
+              setQuickPhotoUrl((await apiUpload(thumb, large)) ?? thumb);
+            } catch (err) {
+              toast.error((err as Error).message);
+            }
+          }}
         />
       )}
     </div>
