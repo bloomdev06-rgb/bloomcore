@@ -104,8 +104,17 @@ Build arg (pas une variable d'env classique — champ "Build Args" dans Dokploy)
 
 - Dockerfile Path : `infra/Dockerfile.backup`
 - **Pas de domaine public.**
-- **Volume persistant obligatoire sur `/backups`** — sinon les dumps disparaissent à
-  chaque redéploiement.
+- **Deux volumes à monter :**
+  - `/backups` — **obligatoire**, sinon les dumps disparaissent à chaque redéploiement ;
+  - **le volume `/data` du backend, en lecture seule** — c'est celui qui contient les photos.
+    `pg_dump` ne sauvegarde que Postgres : sans ce montage, une perte du volume backend
+    laisse la base restaurable mais **toutes les photos définitivement perdues**. En lecture
+    seule : un job de sauvegarde n'a aucune raison de pouvoir écrire dans les données de prod.
+    Si le chemin monté n'est pas `/data`, ajuster `BACKUP_UPLOADS_DIR` ci-dessous.
+
+Les photos sont copiées **sans suppression et sans rétention**, contrairement aux dumps : leur
+nom est le hash de leur contenu (donc immuables et dédupliquées), et une photo ancienne reste
+référencée par la fiche d'un membre. Voir l'en-tête de `scripts/backup-postgres.sh`.
 
 Variables d'environnement :
 
@@ -117,6 +126,7 @@ Variables d'environnement :
 | `BACKUP_DB_NAME` | `bloomcore` |
 | `PGPASSWORD` | `<PG_PASSWORD>` |
 | `BACKUP_RETENTION_DAYS` | `14` |
+| `BACKUP_UPLOADS_DIR` | `/data/uploads` *(défaut — à changer seulement si le volume backend est monté ailleurs)* |
 | `R2_ACCOUNT_ID` | *(voir Cloudflare R2, décidé plus tôt)* |
 | `R2_ACCESS_KEY_ID` | *(idem)* |
 | `R2_SECRET_ACCESS_KEY` | *(idem)* |

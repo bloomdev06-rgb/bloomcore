@@ -130,7 +130,9 @@ services:
   #   3. R2_ACCOUNT_ID : visible sur la page d'accueil R2 du dashboard Cloudflare (colonne de
   #      droite) ou dans l'URL du jeton créé.
   #   4. R2_BUCKET : le nom donné au bucket à l'étape 1.
-  # 10 Go gratuits, aucun frais de sortie — largement suffisant pour des dumps SQL compressés.
+  # 10 Go gratuits, aucun frais de sortie — largement suffisant pour des dumps SQL compressés
+  # ET pour les photos (≈ 110 Ko par membre : vignette 200px + version 800px en JPEG q0,8,
+  # dédupliquées par hash de contenu → ~440 Mo à 4 000 membres).
   backup:
     image: postgres:18-alpine
     environment:
@@ -143,6 +145,11 @@ services:
       R2_RETENTION_DAYS: ${R2_RETENTION_DAYS:-90}
     volumes:
       - bloomcore-backups:/backups
+      # Photos des membres, en LECTURE SEULE. `pg_dump` ne sauvegarde que Postgres, or en mode
+      # disque les photos sont des fichiers sur ce volume : sans ce montage, une perte de
+      # bloomcore-data laissait la base restaurable mais TOUTES les photos perdues. `:ro` —
+      # un job de sauvegarde ne doit jamais pouvoir écrire dans les données de production.
+      - bloomcore-data:/data:ro
       - ./scripts/backup-postgres.sh:/backup.sh:ro
     entrypoint: ["sh", "/backup.sh"]
     depends_on:
