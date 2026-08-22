@@ -512,7 +512,8 @@ export interface RegisterInput {
   birthDate: string;
   maritalStatus: 'Célibataire' | 'Marié(e)' | 'Divorcé(e)' | 'Veuf(ve)';
   profession: string;
-  branch: 'church' | 'light' | 'global';
+  // Pas de 'global' : valeur transverse de périmètre, jamais une branche d'appartenance.
+  branch: 'church' | 'light';
   departmentId: string;
 }
 

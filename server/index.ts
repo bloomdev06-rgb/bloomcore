@@ -290,7 +290,10 @@ const RegisterSchema = z.object({
   birthDate: z.string().min(1),
   maritalStatus: z.enum(['Célibataire', 'Marié(e)', 'Divorcé(e)', 'Veuf(ve)']),
   profession: z.string().min(1),
-  branch: z.enum(['church', 'light', 'global']),
+  // 'global' volontairement exclu (le type Branch l'autorise, pas l'inscription) : c'est une
+  // valeur transverse de périmètre, pas une branche d'appartenance. Rejeté ici AUSSI, pas
+  // seulement masqué dans le formulaire — sinon un POST direct la ferait passer.
+  branch: z.enum(['church', 'light']),
   departmentId: z.string().min(1),
 }).strict();
 

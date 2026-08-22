@@ -303,11 +303,14 @@ export default function AuthView({ members, onLogin }: AuthViewProps) {
             <div className="grid grid-cols-2 gap-2">
               <div>
                 <label className="text-xs font-bold text-bc-text-secondary">Branche</label>
+                {/* Pas de 'global' ici : ce n'est pas une branche d'appartenance mais une valeur
+                    transverse (« les deux branches ») servant au périmètre/filtrage. Une fiche
+                    membre en 'global' serait incohérente — partout ailleurs l'affichage d'une
+                    branche de membre ne teste que church/light. */}
                 <select value={registerForm.branch} onChange={e => setRegisterForm({ ...registerForm, branch: e.target.value as RegisterInput['branch'] })}
                   className="mt-1 w-full border border-bc-border rounded-xl px-3 py-2 text-sm outline-none bg-white">
-                  <option value="church">Church</option>
-                  <option value="light">Light</option>
-                  <option value="global">Global</option>
+                  <option value="church">Bloom Church</option>
+                  <option value="light">Bloom Light</option>
                 </select>
               </div>
               <div>
