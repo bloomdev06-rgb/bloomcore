@@ -514,7 +514,9 @@ export const apiRequestReset = (identifier: string) => postJson('/auth/request-r
 
 // --- Auto-inscription publique ("Créer mon compte") ---
 // Liste des départements pour le sélecteur du formulaire — endpoint public (pas de session).
-export async function apiPublicDepartments(): Promise<{ id: string; name: string; branch?: string; specialFunction?: string }[] | null> {
+// id + nom uniquement : le serveur ne renvoie volontairement rien d'autre à un visiteur non
+// authentifié (ni branche ni fonction spéciale — structure interne de l'organisation).
+export async function apiPublicDepartments(): Promise<{ id: string; name: string }[] | null> {
   try {
     const res = await fetch(`${API_BASE}/public/departments`);
     if (!res.ok) return null;

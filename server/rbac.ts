@@ -451,9 +451,16 @@ export async function filterReadable(name: string, ctx: RbacContext, items: any[
           const dept = deptsAll.find((d) => d.id === r.departmentId);
           return !!dept && minsAll.some((mi) => mi.id === dept.ministryId && mi.tuteurId === member.id);
         }
-        // ponytail: rapport sans filière identifiable (ni bus ni département) → visibilité branche
-        // conservée, faute de hiérarchie à remonter. Resserrer si un type non catégorisé émerge.
-        return true;
+        // Rapport sans filière identifiable (ni bus ni département) : REFUS par défaut.
+        // C'était un `return true` (visibilité de branche, faute de hiérarchie à remonter).
+        // Le défaut permissif était le vrai risque : un futur type de rapport introduit sans
+        // `departmentId` devenait lisible par tout membre de la branche SILENCIEUSEMENT.
+        // Aucun type actuel n'emprunte ce chemin — tous portent un departmentId, sauf
+        // rapport_pastoral qui est confidentiel et traité dans l'autre branche — donc ce
+        // basculement n'ôte rien à personne aujourd'hui, et transforme un oubli futur en
+        // absence visible plutôt qu'en fuite. Auteur, corps pastoral et full-scope sont
+        // déjà sortis plus haut : eux continuent de voir.
+        return false;
       };
       let out = items.filter((r) => {
         if (!r.confidential) return canSeeNonConfidential(r);
@@ -507,6 +514,16 @@ export async function filterReadable(name: string, ctx: RbacContext, items: any[
     }
 
     case 'admins':
+      // Qui détient les clés de l'application n'a pas à être connu de tout l'encadrement
+      // intermédiaire (Coach, Leader, Adjoint, Capitaine…) alors que l'écran Comptes est
+      // réservé aux Admin. Sa SEULE utilité côté client hors de cet écran est de résoudre
+      // le rôle de l'OPÉRATEUR (src/data/roles.ts resolveMemberRole, appelé une seule fois,
+      // sur lui-même) : on lui renvoie donc sa propre entrée, et rien d'autre. Les rôles
+      // full-scope — qui incluent nécessairement les Admin — gardent la liste complète.
+      return hasAny(roles, FULL_SCOPE_ROLES)
+        ? items
+        : items.filter((a: any) => a.id === `adm_${member.id}` || a.id === member.id);
+
     case 'delegations':
     case 'certifications':
     case 'integration_reports':
@@ -562,4 +579,38 @@ export async function filterReadable(name: string, ctx: RbacContext, items: any[
       // fonctionnement de l'UI, entités transverses sans PII confidentielle par branche.
       return items;
   }
+}
+
+// Porte de lecture des valeurs KV (permissions, settings) — elles ne passent PAS par
+// filterReadable, qui ne traite que les collections tableau (voir /bootstrap et GET /:name).
+//
+// `permissions` ne peut pas être simplement masquée : le client s'en sert pour construire sa
+// navigation (canView) et résoudre ses propres capacités. La couper renverrait une application
+// vide à tout membre non-Admin. On ne retire donc pas les CAPACITÉS (les lignes), mais les
+// RÔLES (les colonnes) : chacun reçoit la configuration des rôles qu'il détient réellement,
+// et plus celle des autres. `canView(matrice, onglet, sonRôle)` continue de fonctionner à
+// l'identique, tandis que « ce qu'un Pasteur a le droit de faire » cesse d'être public pour
+// tout compte authentifié. Les rôles habilités à VOIR l'écran Permissions reçoivent tout.
+//
+// `settings` est renvoyé tel quel : branches, fuseau, langue, périodes et déclencheurs de
+// notification sont indispensables au rendu et ne contiennent aucun secret (les identifiants
+// SMTP/Twilio vivent dans l'environnement du serveur, jamais dans cette valeur).
+const PERMISSION_MATRIX_VIEWERS = ['Super Admin', 'Admin', 'Pasteur Principal'];
+
+export function filterKv(name: string, ctx: RbacContext, value: unknown): unknown {
+  if (name !== 'permissions' || !value || typeof value !== 'object') return value;
+  if (hasAny(ctx.roles, PERMISSION_MATRIX_VIEWERS)) return value;
+  // `testRole` force un rôle d'affichage côté client (profils de test) : sans sa colonne, un
+  // tel compte perdrait toute sa navigation. Inclus pour ne pas casser les profils de test.
+  const visible = new Set([...ctx.roles, ...(ctx.member.testRole ? [ctx.member.testRole] : [])]);
+  const out: Record<string, Record<string, boolean>> = {};
+  for (const [capability, byRole] of Object.entries(value as PermissionMatrix)) {
+    if (!byRole || typeof byRole !== 'object') continue;
+    const kept: Record<string, boolean> = {};
+    for (const [role, allowed] of Object.entries(byRole)) {
+      if (visible.has(role)) kept[role] = allowed;
+    }
+    out[capability] = kept;
+  }
+  return out;
 }

@@ -17,7 +17,7 @@ import { hashPassword, verifyPassword, signToken, verifyToken, createOneTimeToke
 import { ensureSeeded } from './seed.ts';
 import { runBootMigration } from './bootMigrate.ts';
 import { applyWrite, readCollection, deltaToWhole, GuardError } from './guards.ts';
-import { buildContext, assertCanWrite, filterReadable, preservedIds, RbacContext } from './rbac.ts';
+import { buildContext, assertCanWrite, filterReadable, filterKv, preservedIds, RbacContext } from './rbac.ts';
 import { dispatch } from './notify.ts';
 import { addClient, poke, initPokeSubscriber } from './stream.ts';
 import { startScheduler } from './scheduler.ts';
@@ -283,12 +283,20 @@ app.post('/api/v1/auth/request-reset', async (req, res) => {
   res.json({ ok: true, ...(!isProd && devToken ? { devToken } : {}) });
 });
 
-// Liste publique minimale des départements (id/nom/branche/rattachement Bloom Bus), pour le
-// sélecteur du formulaire "Créer mon compte" — SANS auth (l'inscription est publique) mais
-// sans rien exposer d'autre que ce qu'il faut pour choisir où s'inscrire.
-app.get('/api/v1/public/departments', async (_req, res) => {
+// Liste publique des départements pour le sélecteur du formulaire « Créer mon compte » —
+// SANS auth, l'inscription étant publique.
+//
+// Strictement id + nom : c'est tout ce que le menu déroulant affiche. La version initiale
+// renvoyait aussi `branch` et `specialFunction`, exposant à un visiteur non authentifié la
+// structure interne de l'organisation (quels départements sont spéciaux, comment les branches
+// sont découpées) sans qu'aucun écran ne s'en serve. Borné comme les autres routes publiques :
+// 30 appels/heure/IP suffisent à ouvrir le formulaire, pas à cartographier en boucle.
+app.get('/api/v1/public/departments', async (req, res) => {
+  if (await tooManyRequests('publicdepts', String(req.ip ?? 'unknown'), 30, 3600)) {
+    return res.status(429).json({ error: 'trop de requêtes, réessayez plus tard' });
+  }
   const departments = await readCollection('departments');
-  res.json(departments.map((d: any) => ({ id: d.id, name: d.name, branch: d.branch, specialFunction: d.specialFunction })));
+  res.json(departments.map((d: any) => ({ id: d.id, name: d.name })));
 });
 
 // Auto-inscription publique ("Créer mon compte") — quiconque peut s'inscrire, mais le
@@ -493,7 +501,9 @@ app.get('/api/v1/bootstrap', requireAuth, async (req, res) => {
   const ctx = (req as any).rbac as RbacContext;
   const payload: Record<string, unknown> = {};
   for (const name of ARRAY_COLLECTIONS) payload[name] = await filterReadable(name, ctx, await readCollection(name));
-  for (const key of KV_KEYS) payload[key] = await getKv(key);
+  // KV : filtré comme le reste (la matrice de permissions est réduite aux rôles de
+  // l'opérateur pour qui n'a pas à voir l'écran Permissions — voir rbac.filterKv).
+  for (const key of KV_KEYS) payload[key] = filterKv(key, ctx, await getKv(key));
   res.json(payload);
 });
 
@@ -829,7 +839,7 @@ app.get('/api/v1/:name', requireAuth, async (req, res) => {
     const includeDeleted = req.query.includeDeleted === '1' && isAdmin((req as any).rbac);
     return res.json(await filterReadable(name, (req as any).rbac, await readCollection(name, includeDeleted)));
   }
-  if (KV_KEYS.has(name)) return res.json(await getKv(name));
+  if (KV_KEYS.has(name)) return res.json(filterKv(name, (req as any).rbac, await getKv(name)));
   res.status(404).json({ error: 'unknown collection' });
 });
 
@@ -1002,20 +1012,77 @@ fs.mkdirSync(UPLOAD_DIR, { recursive: true });
 // les photos ne transitent plus par ce volume, voir GET /api/v1/uploads/sign plus bas).
 const storage = getStorage(UPLOAD_DIR);
 // Photos derrière authentification : PII (parfois mineurs). Les <img> ne portent pas
-// de header Authorization → le token est aussi accepté en query (?token=). Pas de scope
-// par membre : les fichiers sont dédupliqués par hash de contenu (un même fichier peut
-// appartenir à plusieurs membres), scoper est donc infaisable — toute session valide lit.
+// de header Authorization → le token est aussi accepté en query (?token=).
 // `immutable` retiré : le cache reste révocable (le token expire en 12h).
+//
+// SCOPE (ajouté à l'audit) : l'authentification seule ne suffisait pas — toute session valide
+// pouvait lire N'IMPORTE QUELLE photo en connaissant son nom de fichier, y compris celle d'un
+// membre hors de son périmètre. Le nom étant le hash du contenu il n'est pas devinable, mais
+// c'était la seule protection. On exige désormais que la clé demandée soit l'avatar d'au moins
+// un membre VISIBLE par l'opérateur. La déduplication par hash (deux membres, même photo) est
+// gérée naturellement : il suffit qu'UN membre visible la porte.
+//
 // ponytail: cette route reste le SEUL chemin de lecture en mode disque (repli dev/mono-
 // service). En mode S3/MinIO, GET /api/v1/uploads/sign?key=<hash> (T5.3, plus bas) est le
 // chemin prévu — cette route /uploads redevient alors inutilisée mais reste inoffensive
 // (UPLOAD_DIR peut simplement être vide).
+
+// Une liste de membres déclenche des dizaines de requêtes /uploads en rafale : sans ce cache
+// court, chacune relancerait le filtrage RBAC complet (lecture members + départements +
+// ministères + bus). Caches en mémoire du process — avec plusieurs répliques d'API, chacune
+// a le sien, ce qui ne change rien à la décision (elle est recalculée, pas partagée).
+const UPLOAD_SCOPE_TTL_MS = 30_000;
+const uploadScopeCache = new Map<string, { at: number; keys: Set<string> }>();
+// Une photo tout juste téléversée n'appartient encore à AUCUNE fiche (le formulaire n'est pas
+// enregistré) : sans cette tolérance, l'aperçu renvoyait 404 à celui-là même qui vient de
+// l'envoyer. Fenêtre volontairement large — la clé n'est connue que de lui.
+const RECENT_UPLOAD_MS = 60 * 60 * 1000;
+const recentUploads = new Map<string, { by: string; at: number }>();
+
+function avatarKeysOf(m: any): string[] {
+  const url = String(m?.avatarUrl ?? '');
+  if (!url.startsWith('/uploads/')) return [];
+  const key = url.slice('/uploads/'.length).split('?')[0];
+  // Vignette <hash>-t.jpg et large <hash>.jpg sont liées par nommage : voir l'une autorise
+  // l'autre (c'est la même photo, ouverte en lightbox).
+  return key.endsWith('-t.jpg') ? [key, `${key.slice(0, -'-t.jpg'.length)}.jpg`] : [key];
+}
+
+async function visibleAvatarKeys(memberId: string): Promise<Set<string>> {
+  const hit = uploadScopeCache.get(memberId);
+  if (hit && Date.now() - hit.at < UPLOAD_SCOPE_TTL_MS) return hit.keys;
+  const ctx = await buildContext(memberId);
+  const keys = new Set<string>();
+  if (ctx) {
+    for (const m of await filterReadable('members', ctx, await readCollection('members'))) {
+      for (const k of avatarKeysOf(m)) keys.add(k);
+    }
+  }
+  uploadScopeCache.set(memberId, { at: Date.now(), keys });
+  return keys;
+}
+
 app.use('/uploads', async (req, res, next) => {
   const header = req.headers.authorization;
   const token = (req as any).cookies?.[SESSION_COOKIE]
     ?? (header?.startsWith('Bearer ') ? header.slice(7) : null)
     ?? (typeof req.query.token === 'string' ? req.query.token : null);
-  if (!token || !(await verifyToken(token))) return res.status(401).json({ error: 'unauthorized' });
+  const memberId = token ? await verifyToken(token) : null;
+  if (!memberId) return res.status(401).json({ error: 'unauthorized' });
+  let key: string;
+  try {
+    key = decodeURIComponent(req.path.replace(/^\/+/, ''));
+  } catch {
+    return res.status(400).json({ error: 'clé invalide' });
+  }
+  if (key) {
+    const mine = recentUploads.get(key);
+    const justUploaded = !!mine && mine.by === memberId && Date.now() - mine.at < RECENT_UPLOAD_MS;
+    // 404 et non 403 : ne pas confirmer l'existence d'un fichier hors périmètre.
+    if (!justUploaded && !(await visibleAvatarKeys(memberId)).has(key)) {
+      return res.status(404).json({ error: 'not found' });
+    }
+  }
   next();
 }, express.static(UPLOAD_DIR, { maxAge: '1y' }));
 
@@ -1069,14 +1136,27 @@ async function storeImagePair(thumbUrl: string, largeUrl: string): Promise<strin
 
 app.post('/api/v1/uploads', requireAuth, async (req, res) => {
   const { data, thumb, large } = req.body ?? {};
+  // Mémorise qui vient d'envoyer quoi : le contrôle de périmètre de /uploads exige que la clé
+  // soit l'avatar d'un membre visible, or une photo fraîchement téléversée n'est encore
+  // l'avatar de personne tant que le formulaire n'est pas enregistré. Les DEUX tailles sont
+  // notées (l'aperçu affiche la vignette, le lightbox la large).
+  const remember = (url: string) => {
+    const key = url.slice('/uploads/'.length);
+    const at = Date.now();
+    const by = (req as any).memberId as string;
+    recentUploads.set(key, { by, at });
+    if (key.endsWith('-t.jpg')) recentUploads.set(`${key.slice(0, -'-t.jpg'.length)}.jpg`, { by, at });
+  };
   if (typeof thumb === 'string' && typeof large === 'string') {
     const url = await storeImagePair(thumb, large);
     if (!url) return res.status(400).json({ error: 'image invalide ou trop lourde (max 2 Mo/taille)' });
+    remember(url);
     return res.json({ url });
   }
   if (typeof data !== 'string') return res.status(400).json({ error: 'dataURL image attendue' });
   const url = await storeImage(data);
   if (!url) return res.status(400).json({ error: 'image invalide ou trop lourde (max 2 Mo, png/jpeg/webp)' });
+  remember(url);
   res.json({ url });
 });
 
