@@ -317,6 +317,7 @@ export default function ProgrammesView({
           operator={operator}
           permissionMatrix={permissionMatrix}
           forms={forms}
+          members={members}
         />
       )}
     </div>

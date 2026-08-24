@@ -21,12 +21,14 @@ export function webpushRows(notifId: string, subs: { endpoint: string; p256dh: s
   }));
 }
 
-// #18 — coupure temporaire des emails fonctionnels (tout sauf activation/réinitialisation,
-// reconnaissables au préfixe d'id notif_auth_ posé par issueAuthLink() dans server/index.ts).
-// Défaut coupé ; FUNCTIONAL_EMAILS_ENABLED=true réactive sans toucher les appelants — dispatch()
-// reste l'unique point de fan-out email, donc l'unique endroit à garder.
+// #18 — emails fonctionnels en liste blanche par préfixe d'id (pas "tout sauf auth") :
+// une notification créée via écriture générique de la collection `notifications` (CRUD
+// admin, id arbitraire) ne doit jamais partir par email, même avec le flag activé.
+const FUNCTIONAL_EMAIL_PREFIXES = ['notif_selfreg_', 'notif_relance_', 'notif_pending3j_'];
 export function emailAllowed(notifId: string): boolean {
-  return notifId.startsWith('notif_auth_') || process.env.FUNCTIONAL_EMAILS_ENABLED === 'true';
+  if (notifId.startsWith('notif_auth_')) return true;
+  return process.env.FUNCTIONAL_EMAILS_ENABLED === 'true'
+    && FUNCTIONAL_EMAIL_PREFIXES.some((p) => notifId.startsWith(p));
 }
 
 // ponytail: adapters simulés — les clés env décident. Twilio/Nodemailer/web-push plus tard.

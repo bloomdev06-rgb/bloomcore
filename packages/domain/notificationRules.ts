@@ -24,7 +24,7 @@ function tuteurIdFor(m: Member, departments: Department[], ministries: Ministry[
 }
 
 // Le(s) Responsable(s) des départements du membre.
-function responsableIdsFor(m: Member, members: Member[]): string[] {
+export function responsableIdsFor(m: Member, members: Member[]): string[] {
   const ids: string[] = [];
   const deptIds = Object.keys(m.departments ?? {});
   for (const x of members) {

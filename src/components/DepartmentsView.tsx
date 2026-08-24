@@ -1180,6 +1180,7 @@ export default function DepartmentsView({ activeBranch, simulatedRole, members =
           operator={operator}
           permissionMatrix={permissionMatrix}
           forms={forms}
+          members={members}
         />
       )}
 

@@ -42,6 +42,11 @@ assert.equal(emailAllowed('notif_auth_reset_m1_123'), true, 'reset toujours envo
 assert.equal(emailAllowed('notif_auth_activate_m1_123'), true, 'activation toujours envoyée');
 process.env.FUNCTIONAL_EMAILS_ENABLED = 'true';
 assert.equal(emailAllowed('notif_pending3j_m1'), true, 'réactivable via le flag');
+assert.equal(emailAllowed('notif_selfreg_mem_2_mem_3'), true, 'auto-inscription réactivable via le flag');
+assert.equal(emailAllowed('notif_relance_mentor_mem_2_mem_3_2026-08-24'), true, 'relance réactivable via le flag');
+// #18b — le flag ne réactive QUE les préfixes connus ; une notif générique (CRUD admin,
+// id arbitraire) ne part jamais par email, même avec FUNCTIONAL_EMAILS_ENABLED=true.
+assert.equal(emailAllowed('notif_abcdef123'), false, 'notif générique jamais email, même flag actif');
 if (savedFlag === undefined) delete process.env.FUNCTIONAL_EMAILS_ENABLED; else process.env.FUNCTIONAL_EMAILS_ENABLED = savedFlag;
 
 console.log('notify.check OK');

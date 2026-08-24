@@ -221,6 +221,30 @@ export function busInScope(
   return !!operator.bloomBusId && operator.bloomBusId === bus.id;
 }
 
+// Inverse de directReportsOf : le·s superviseur·s territoriaux directs d'UN membre donné
+// (pas de l'opérateur courant). Même chaîne Capitaine → Zone → Commune → Responsable.
+export function busSupervisorsOf(
+  target: Member,
+  members: Member[],
+  busLines: BloomBusEntity[],
+  departments: Department[],
+): Member[] {
+  const bbRole = bloomBusRoleOf(target, departments);
+  const bus = busLines.find((b) => b.id === target.bloomBusId);
+  if ((!bbRole || bbRole === 'Membre' || bbRole === 'Capitaine de Bus') && bus) {
+    return members.filter((m) => bloomBusRoleOf(m, departments) === 'Responsable de Zone'
+      && busLines.find((b) => b.id === m.bloomBusId)?.zone === bus.zone);
+  }
+  if (bbRole === 'Responsable de Zone' && bus) {
+    return members.filter((m) => bloomBusRoleOf(m, departments) === 'Responsable de Commune'
+      && (busLines.find((b) => b.id === m.bloomBusId)?.commune ?? m.gps?.commune) === bus.commune);
+  }
+  if (bbRole === 'Responsable de Commune') {
+    return members.filter((m) => bloomBusRoleOf(m, departments) === 'Responsable');
+  }
+  return [];
+}
+
 // Hiérarchie de remplissage de rapport (spec "semaines/saisie hiérarchique") — qui peut
 // remplir le rapport de qui, à chaque palier Bloom Bus. Même primitive bloomBusRoleOf que
 // busInScope, mais relation de subordination directe (pas de cloisonnement en lecture).

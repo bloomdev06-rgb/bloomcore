@@ -821,6 +821,7 @@ export default function MembersView({
           operator={operator}
           permissionMatrix={permissionMatrix}
           forms={forms}
+          members={members}
         />
       )}
 

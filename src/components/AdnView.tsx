@@ -646,6 +646,7 @@ export default function AdnView({
           operator={operator}
           permissionMatrix={permissionMatrix}
           forms={forms}
+          members={members}
         />
       )}
 

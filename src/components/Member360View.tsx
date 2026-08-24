@@ -2,6 +2,8 @@ import React, { useState, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { Member, Branch, Report, AuditLog, PermissionMatrix, Delegation, FormDef, CapabilityOverride, SpecialAuthorization } from '../types';
 import { useDepartments, useBusLines, useProjects, load, resolveCapability, labelFor } from '../data';
+import { responsableIdsFor } from '../data/notificationRules';
+import { busSupervisorsOf } from '../data/scope';
 import { DEFAULT_OPERATOR_NAME } from '../data/operator';
 import { isRed } from '../data/kpi';
 import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend } from 'recharts';
@@ -46,9 +48,10 @@ interface Member360ViewProps {
   operator?: Member;
   permissionMatrix: PermissionMatrix;
   forms?: FormDef[];
+  members?: Member[];
 }
 
-export default function Member360View({ member, onClose, onEdit, onUpdate, reports = [], onAddReport, simulatedRole, audits = [], operator, permissionMatrix, forms = [] }: Member360ViewProps) {
+export default function Member360View({ member, onClose, onEdit, onUpdate, reports = [], onAddReport, simulatedRole, audits = [], operator, permissionMatrix, forms = [], members = [] }: Member360ViewProps) {
   const canManage = ['Pasteur Principal', 'Pasteur', 'Ministre', 'Responsable', 'Coach', 'Admin', 'Super Admin'].includes(simulatedRole);
 
   // §6.2 — progression du niveau communautaire (nouveau→stagiaire→boss→leader→coach).
@@ -116,6 +119,12 @@ export default function Member360View({ member, onClose, onEdit, onUpdate, repor
   const INITIAL_DEPARTMENTS = useDepartments();
   const BUS_LINES = useBusLines();
   const busLine = BUS_LINES.find(b => b.id === member.bloomBusId);
+  // Onglet Mentorat & Encadrement — données réelles (auparavant un stub statique).
+  const deptResponsable = members.find(m => responsableIdsFor(member, members).includes(m.id));
+  const territorialSupervisor = member.bloomBusId
+    ? members.find(m => busSupervisorsOf(member, members, BUS_LINES, INITIAL_DEPARTMENTS).some(s => s.id === m.id))
+    : undefined;
+  const cursusMentor = members.find(m => m.id === member.mentorId);
   // P4.9(c) — parcours à étapes : le département "spécial" du membre qui porte ce workflow, s'il y en a un.
   const parcoursDeptId = Object.keys(member.departments).find(
     id => INITIAL_DEPARTMENTS.find(d => d.id === id)?.specialFunction === 'parcours_etapes'
@@ -590,38 +599,52 @@ export default function Member360View({ member, onClose, onEdit, onUpdate, repor
                   <div className="bg-white p-6 rounded-2xl border border-bc-border shadow-sm">
                     <h4 className="font-ui font-bold text-bc-text mb-4">Superviseurs & Mentors</h4>
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                      
-                      <div className="p-4 border border-bc-border rounded-2xl bg-bc-canvas/50">
-                        <p className="text-[10px] font-bold text-bc-text-secondary uppercase tracking-wider mb-3">Service (Département)</p>
-                        <div className="flex items-center gap-3">
-                          <div className="w-10 h-10 rounded-full bg-white flex items-center justify-center font-bold text-bc-text-secondary border border-bc-border">CO</div>
-                          <div>
-                            <p className="text-sm font-bold text-bc-text cursor-pointer hover:underline">Coach Othniel</p>
-                            <p className="text-[10px] text-bc-text-secondary">Suivi direct</p>
-                          </div>
-                        </div>
-                      </div>
 
                       <div className="p-4 border border-bc-border rounded-2xl bg-bc-canvas/50">
-                        <p className="text-[10px] font-bold text-bc-text-secondary uppercase tracking-wider mb-3">Territoriale (Bloom Bus)</p>
-                        <div className="flex items-center gap-3">
-                          <div className="w-10 h-10 rounded-full bg-white flex items-center justify-center font-bold text-bc-text-secondary border border-bc-border">RC</div>
-                          <div>
-                            <p className="text-sm font-bold text-bc-text cursor-pointer hover:underline">Resp. Charles</p>
-                            <p className="text-[10px] text-bc-text-secondary">Zone Cocody Centre</p>
+                        <p className="text-[10px] font-bold text-bc-text-secondary uppercase tracking-wider mb-3">Service (Département)</p>
+                        {deptResponsable ? (
+                          <div className="flex items-center gap-3">
+                            <Avatar initials={`${deptResponsable.firstName[0]}${deptResponsable.lastName[0]}`} size="md" />
+                            <div>
+                              <p className="text-sm font-bold text-bc-text cursor-pointer hover:underline">{deptResponsable.firstName} {deptResponsable.lastName}</p>
+                              <p className="text-[10px] text-bc-text-secondary">Suivi direct</p>
+                            </div>
                           </div>
-                        </div>
+                        ) : (
+                          <p className="text-xs text-bc-text-secondary italic">Aucun responsable assigné.</p>
+                        )}
                       </div>
+
+                      {member.bloomBusId && (
+                        <div className="p-4 border border-bc-border rounded-2xl bg-bc-canvas/50">
+                          <p className="text-[10px] font-bold text-bc-text-secondary uppercase tracking-wider mb-3">Territoriale (Bloom Bus)</p>
+                          {territorialSupervisor ? (
+                            <div className="flex items-center gap-3">
+                              <Avatar initials={`${territorialSupervisor.firstName[0]}${territorialSupervisor.lastName[0]}`} size="md" />
+                              <div>
+                                <p className="text-sm font-bold text-bc-text cursor-pointer hover:underline">{territorialSupervisor.firstName} {territorialSupervisor.lastName}</p>
+                                <p className="text-[10px] text-bc-text-secondary">{busLine?.zone ?? busLine?.commune ?? ''}</p>
+                              </div>
+                            </div>
+                          ) : (
+                            <p className="text-xs text-bc-text-secondary italic">Aucun superviseur territorial assigné.</p>
+                          )}
+                        </div>
+                      )}
 
                       <div className="p-4 border border-bc-warning/20 rounded-2xl bg-bc-warning/10 col-span-1 sm:col-span-2">
                         <p className="text-[10px] font-bold text-bc-warning uppercase tracking-wider mb-3">Mentor de Cursus</p>
-                        <div className="flex items-center gap-3">
-                          <div className="w-10 h-10 rounded-full bg-white flex items-center justify-center font-bold text-bc-warning border border-bc-warning/30">PM</div>
-                          <div>
-                            <p className="text-sm font-bold text-bc-text cursor-pointer hover:underline">Ps. Marc</p>
-                            <p className="text-[10px] text-bc-text-secondary">Ligne de mentorat</p>
+                        {cursusMentor ? (
+                          <div className="flex items-center gap-3">
+                            <Avatar initials={`${cursusMentor.firstName[0]}${cursusMentor.lastName[0]}`} size="md" />
+                            <div>
+                              <p className="text-sm font-bold text-bc-text cursor-pointer hover:underline">{cursusMentor.firstName} {cursusMentor.lastName}</p>
+                              <p className="text-[10px] text-bc-text-secondary">Ligne de mentorat</p>
+                            </div>
                           </div>
-                        </div>
+                        ) : (
+                          <p className="text-xs text-bc-text-secondary italic">Aucun mentor assigné.</p>
+                        )}
                       </div>
 
                     </div>
