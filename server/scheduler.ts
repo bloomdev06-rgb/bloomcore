@@ -11,7 +11,7 @@ import { dispatch, drainOutbox } from './notify.ts';
 import { poke } from './stream.ts';
 
 const HOUR_MS = 60 * 60 * 1000;
-const OUTBOX_DRAIN_MS = 60 * 1000; // draine l'outbox toutes les minutes
+const OUTBOX_DRAIN_MS = 15 * 1000; // draine l'outbox toutes les 15s
 
 export async function runSweep(now: Date = new Date()): Promise<number> {
   const members = await readCollection('members') as Member[];
