@@ -33,6 +33,11 @@ COPY packages ./packages
 # directement, pas de bundle) — donc src/ doit être présent même dans cette image API-only,
 # même si le frontend lui-même n'est plus buildé/servi par ce conteneur.
 COPY src ./src
+# Scripts d'exploitation lancés À LA MAIN dans le conteneur — aujourd'hui
+# scripts/reset-production.ts (remise à zéro pour la mise en production). Sans cette copie la
+# commande documentée échoue : le fichier n'existe pas dans l'image. tsx et dotenv sont des
+# `dependencies` (pas devDependencies), donc bien présents malgré `npm ci --omit=dev`.
+COPY scripts ./scripts
 EXPOSE 4000
 HEALTHCHECK --interval=30s --timeout=3s --start-period=15s --retries=3 \
   CMD wget -qO- "http://localhost:${API_PORT:-4000}/api/v1/health" || exit 1
