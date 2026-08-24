@@ -17,7 +17,7 @@ import { hashPassword, verifyPassword, signToken, verifyToken, createOneTimeToke
 import { ensureSeeded } from './seed.ts';
 import { runBootMigration } from './bootMigrate.ts';
 import { applyWrite, readCollection, deltaToWhole, GuardError } from './guards.ts';
-import { buildContext, assertCanWrite, filterReadable, filterKv, preservedIds, RbacContext } from './rbac.ts';
+import { buildContext, assertCanWrite, assertCanDelete, filterReadable, filterKv, preservedIds, RbacContext } from './rbac.ts';
 import { dispatch } from './notify.ts';
 import { addClient, poke, initPokeSubscriber } from './stream.ts';
 import { startScheduler } from './scheduler.ts';
@@ -608,6 +608,7 @@ app.delete('/api/v1/members/:id', requireAuth, async (req, res) => {
     const existing = await readCollection('members', true);
     const stored = existing.find((m: any) => String(m.id) === String(req.params.id) && !m.deletedAt);
     if (!stored) return res.status(404).json({ error: `members: ${req.params.id} introuvable` });
+    await assertCanDelete((req as any).rbac, stored as any);
     // Omission intentionnelle de l'id -> tombstone par applyWrite (même mécanisme que le
     // PUT whole-array quand un opérateur renvoie sa liste sans cet id).
     const body = await deltaToWhole('members', [], [req.params.id]);

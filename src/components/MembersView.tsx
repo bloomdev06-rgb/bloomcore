@@ -22,9 +22,10 @@ import {
 } from "lucide-react";
 import { motion } from "motion/react";
 import { Member, Branch, CommunityLevel, PastoralCursus, Report, AuditLog, PermissionMatrix, FormDef } from "../types";
-import { useDepartments, useBusLines, useMinistries } from "../data";
+import { useDepartments, useBusLines, useMinistries, useAdmins } from "../data";
+import { resolveMemberRoles } from "../data/roles";
 import { isRed } from "../data/kpi";
-import { inMemberScope, FULL_SCOPE_ROLES } from "../data/scope";
+import { inMemberScope, canManageAccountOf } from "../data/scope";
 import { importMembersFromCsv } from "../data/csvImport";
 import { toast } from "./ui/Toast";
 import ReportStatusBoxes from "./ReportStatusBoxes";
@@ -104,6 +105,7 @@ export default function MembersView({
   const INITIAL_DEPARTMENTS = useDepartments();
   const INITIAL_BUS_LINES = useBusLines();
   const ministries = useMinistries();
+  const admins = useAdmins();
   const [searchTerm, setSearchTerm] = useState("");
   const [filterLevel, setFilterLevel] = useState<CommunityLevel | "all">("all");
   const [filterPastoralCursus, setFilterPastoralCursus] = useState<PastoralCursus | "all">("all");
@@ -122,7 +124,17 @@ export default function MembersView({
   const [deletingMember, setDeletingMember] = useState<Member | null>(null);
 
   const isChurch = activeBranch === "church";
-  const canDelete = FULL_SCOPE_ROLES.includes(simulatedRole);
+  // Un titulaire de compte admin (Super Admin/Admin/…) ne doit jamais être masqué par le
+  // filtre d'onboarding ci-dessous — il n'est pas censé passer par le parcours d'intégration
+  // normal. Sans cette exemption, un compte admin créé/seedé hors app (ex. reset production)
+  // reste invisible tant que son `level`/`integrationState` n'a pas été mis à jour manuellement.
+  const isAdminAccount = (m: Member) => admins.some((a) => !(a as any).deletedAt && (a.id === `adm_${m.id}` || a.id === m.id));
+  const canDeleteMember = (m: Member) => {
+    if (!operator) return false;
+    const operatorRoles = [...resolveMemberRoles(operator, admins, ministries)];
+    const targetRoles = [...resolveMemberRoles(m, admins, ministries)];
+    return canManageAccountOf(operator, operatorRoles, m, targetRoles, simulatedRole, INITIAL_BUS_LINES, INITIAL_DEPARTMENTS, ministries);
+  };
 
   // Potential duplicates by phone (the spec's "dédoublonnage" signal).
   const seenPhones = new Set<string>();
@@ -140,8 +152,9 @@ export default function MembersView({
   const deferredSearch = useDeferredValue(searchTerm);
   const filteredMembers = useMemo(() => members
     .filter((m) => {
-      // Exclude 'Nouveau' state from members view if they haven't graduated to a member level yet
-      if (m.level === "nouveau" && m.integrationState !== "integre")
+      // Exclude 'Nouveau' state from members view if they haven't graduated to a member level yet.
+      // Un compte admin ne passe pas par ce parcours d'intégration — jamais masqué par ce filtre.
+      if (m.level === "nouveau" && m.integrationState !== "integre" && !isAdminAccount(m))
         return false;
 
       const matchesSearch =
@@ -157,9 +170,9 @@ export default function MembersView({
       const matchesPastoralCursus = filterPastoralCursus === "all" || m.pastoralCursus === filterPastoralCursus;
 
       const matchesDept =
-        filterDept === "all" || Object.keys(m.departments).includes(filterDept);
+        filterDept === "all" || Object.keys(m.departments ?? {}).includes(filterDept);
       const matchesFunction =
-        filterFunction === "all" || Object.values(m.departments).includes(filterFunction as any);
+        filterFunction === "all" || Object.values(m.departments ?? {}).includes(filterFunction as any);
       const matchesBaptism =
         filterBaptism === "all" || m.baptismStatus === filterBaptism;
       const matchesSchoolLevel =
@@ -542,7 +555,7 @@ export default function MembersView({
                         <Edit size={12} />
                       </button>
                     )}
-                    {canDelete && (
+                    {canDeleteMember(member) && (
                       <button
                         id={`delete-member-btn-${member.id}`}
                         onClick={(e) => {
@@ -758,7 +771,7 @@ export default function MembersView({
                             <Edit size={14} />
                           </button>
                         )}
-                        {canDelete && (
+                        {canDeleteMember(member) && (
                           <button
                             onClick={(e) => {
                               e.stopPropagation();

@@ -1,6 +1,6 @@
 // Run: npx tsx src/data/scope.check.ts
 import assert from 'node:assert';
-import { inMemberScope, busInScope, directReportsOf, canFillReportFor } from './scope.ts';
+import { inMemberScope, busInScope, directReportsOf, canFillReportFor, canManageAccountOf, rankOf, bestRank } from './scope.ts';
 import { Member, BloomBusEntity, Department, Ministry } from './types.ts';
 
 let nextId = 0;
@@ -164,5 +164,44 @@ assert.equal(canFillReportFor(pasteur, communeLead, 'Pasteur', hierMembers, hier
 
 // Auto-remplissage toujours autorisé, à tout palier, même sans être un supérieur de qui que ce soit.
 assert.equal(canFillReportFor(membre1, membre1, 'Membre', hierMembers, hierBusLines, hierDepts), true);
+
+// canManageAccountOf — hiérarchie de suppression/promotion de compte (rang strict + portée).
+const dept1 = { id: 'dept_1', name: 'Louange', type: 'normal' as const, ministryId: 'min_1', description: '' };
+const rankMinistries: Ministry[] = [{ id: 'min_1', name: 'Louange', description: '', tuteurId: 'op_ministre' }];
+
+// Full-scope (Super Admin/Admin/Pasteur Principal/Pasteur) : gère tout le monde, hors portée.
+assert.equal(canManageAccountOf(mk({ id: 'sa' }), ['Super Admin'], mk({ id: 't' }), ['Membre'], 'Super Admin', busLines, [dept1], rankMinistries), true);
+
+// Ministre vs Ministre (même rang) : refusé, même si le titre-cible n'est pas 'Ministre' à
+// proprement parler ici — le test porte sur bestRank, pas la portée.
+assert.equal(canManageAccountOf(
+  mk({ id: 'op_ministre' }), ['Ministre'],
+  mk({ id: 'autre_ministre', departments: { dept_1: 'membre' } }), ['Ministre'],
+  'Ministre', busLines, [dept1], rankMinistries,
+), false);
+
+// Ministre vs son Responsable (dept sous son ministère) : autorisé.
+assert.equal(canManageAccountOf(
+  mk({ id: 'op_ministre' }), ['Ministre'],
+  mk({ id: 'resp', departments: { dept_1: 'responsable' } }), ['Responsable'],
+  'Ministre', busLines, [dept1], rankMinistries,
+), true);
+
+// Responsable vs pair Responsable (même département, même rang) : refusé.
+assert.equal(canManageAccountOf(
+  mk({ id: 'r1', departments: { dept_1: 'responsable' } }), ['Responsable'],
+  mk({ id: 'r2', departments: { dept_1: 'responsable' } }), ['Responsable'],
+  'Responsable', busLines, [dept1],
+), false);
+
+// Responsable vs son membre (même département, rang inférieur) : autorisé.
+assert.equal(canManageAccountOf(
+  mk({ id: 'r1', departments: { dept_1: 'responsable' } }), ['Responsable'],
+  mk({ id: 'm1', departments: { dept_1: 'membre' } }), ['Membre'],
+  'Responsable', busLines, [dept1],
+), true);
+
+// Jamais sur soi-même.
+assert.equal(canManageAccountOf(mk({ id: 'self' }), ['Super Admin'], mk({ id: 'self' }), ['Super Admin'], 'Super Admin', busLines, []), false);
 
 console.log('scope.check OK');

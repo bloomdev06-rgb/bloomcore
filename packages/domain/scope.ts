@@ -80,6 +80,49 @@ export const ROLE_HOME_DEPT: Record<string, string> = {
   ADN: 'dept_adn', Intégration: 'dept_integration', GDC: 'dept_gdc', Portier: 'dept_ushers',
 };
 
+// Global rank order for account-management ceiling (who can delete/promote whom).
+// The Bloom Bus branch (Responsable du Département Bloom Bus → Responsable de
+// Commune → Responsable de Zone → Responsable de section → Capitaine de Bus) is its
+// own sub-hierarchy nested at the same point Responsable/Adjoint sit in the general
+// org — not a separate ranking, just these positions in sequence.
+export const RANK_ORDER = [
+  'Super Admin', 'Admin', 'Pasteur Principal', 'Pasteur', 'Ministre',
+  'Responsable', 'Adjoint',
+  'Responsable du Département Bloom Bus', 'Responsable de Commune',
+  'Responsable de Zone', 'Responsable de section', 'Capitaine de Bus',
+  'Membre', 'Nouveau',
+];
+
+export function rankOf(role: string): number {
+  const i = RANK_ORDER.indexOf(role);
+  return i === -1 ? RANK_ORDER.length : i; // rôle inconnu = rang le plus bas, fail-closed
+}
+
+export function bestRank(roles: string[]): number {
+  return Math.min(...roles.map(rankOf), RANK_ORDER.length);
+}
+
+// Qui peut supprimer/rétrograder/promouvoir le compte de qui. Volontairement distinct
+// de inMemberScope (qui régit l'édition ordinaire) : la portée structurelle (département/
+// ministère/branche) reste une condition nécessaire, mais on exige EN PLUS un rang
+// strictement supérieur. Super Admin/Admin/Pasteur Principal/Pasteur (FULL_SCOPE_ROLES)
+// gèrent tout le monde, sans restriction de portée.
+export function canManageAccountOf(
+  operator: Member,
+  operatorRoles: string[],
+  target: Member,
+  targetRoles: string[],
+  scopeRole: string,
+  busLines: BloomBusEntity[],
+  departments: Department[],
+  ministries: Ministry[] = [],
+): boolean {
+  if (target.id === operator.id) return false;
+  if (FULL_SCOPE_ROLES.includes(scopeRole)) return true;
+  if (!inMemberScope(operator, target, scopeRole, busLines, departments, ministries)) return false;
+  return bestRank(operatorRoles) < bestRank(targetRoles);
+}
+
 export function inMemberScope(
   operator: Member,
   target: Member,

@@ -1,7 +1,7 @@
 // Vérifications RBAC — exécuter : npx tsx server/rbac.check.ts
 import assert from 'node:assert';
 process.env.BLOOMCORE_DB = ':memory:';
-const { resolveRoles, buildContext, assertCanWrite, filterReadable, preservedIds } = await import('./rbac.ts');
+const { resolveRoles, buildContext, assertCanWrite, assertCanDelete, filterReadable, preservedIds } = await import('./rbac.ts');
 const { applyWrite, readCollection } = await import('./guards.ts');
 const { setKv } = await import('./db.ts');
 const { GuardError } = await import('./guards.ts');
@@ -330,6 +330,80 @@ assert.deepEqual(
   // Rapport Bloom Bus → hiérarchie Bloom Bus, PAS la hiérarchie département du membre.
   assert.ok(!(await sees('m4', busReport)), 'Responsable de dépt ne voit PAS le rapport Bloom Bus de son membre (cloisonnement filière)');
   assert.ok(await sees('mCap', busReport), 'Capitaine du bus du membre voit son rapport Bloom Bus');
+}
+
+// --- P2.0 — ministries : réservé au staff pastoral. Un Responsable/Ministre ne peut plus
+//     s'auto-nommer (ou nommer un tiers) tuteur d'un ministère via l'API directe (trou de
+//     sécurité identifié : aucun chemin UI ne le faisait déjà, seul canEdit=Pasteur/Admin/SA).
+await assert.rejects(
+  () => assertCanWrite('ministries', ctxResp, [{ id: 'min1', name: 'M', description: '', tuteurId: 'm4' }]),
+  (e: any) => e instanceof GuardError && e.status === 403,
+  'ministries: Responsable ne peut pas se nommer Ministre (P2.0)',
+);
+await assert.rejects(
+  () => assertCanWrite('ministries', ctxMinistre, [{ id: 'min1', name: 'M', description: '', tuteurId: 'm5' }]),
+  (e: any) => e instanceof GuardError && e.status === 403,
+  'ministries: un Ministre ne peut pas nommer un autre tuteur non plus (P2.0)',
+);
+await assertCanWrite('ministries', ctxSA, [{ id: 'min1', name: 'M', description: '', tuteurId: 'm5' }]); // staff pastoral → OK
+
+// --- P2.3/P2.4 — hiérarchie de suppression/promotion de compte (canManageAccountOf) ---
+{
+  setKv('permissions', { view_members: { Responsable: true, Ministre: true } });
+  const peerResp = baseMember({ id: 'm9', departments: { d1: 'responsable' } });
+  const dept2 = { id: 'd2', name: 'D2', ministryId: 'min2', type: 'normal' };
+  const min2 = { id: 'min2', name: 'M2', description: '', tuteurId: 'm10' };
+  const peerMinistre = baseMember({ id: 'm10' }); // tuteur de min2 → 'Ministre' via resolveRoles
+  await applyWrite('members', [superAdmin, pasteur, ministre, resp, simple,
+    baseMember({ id: 'm6', departments: { d1: 'membre' } }), peerResp, peerMinistre]);
+  await applyWrite('departments', [{ id: 'd1', name: 'D1', ministryId: 'min1', type: 'normal' }, dept2]);
+  await applyWrite('ministries', [...ministries, min2] as any);
+  const ctxResp2 = (await buildContext('m4'))!;
+  const ctxSimple2 = (await buildContext('m5'))!;
+  const ctxMinistre2 = (await buildContext('m3'))!;
+  const stored = await readCollection('members', true);
+  const byId = (id: string) => stored.find((m: any) => m.id === id);
+
+  // Simple membre ne supprime jamais personne.
+  await assert.rejects(
+    () => assertCanDelete(ctxSimple2, byId('m6')),
+    (e: any) => e instanceof GuardError && e.status === 403,
+    'delete: simple membre ne peut supprimer personne (P2.3)',
+  );
+  // Responsable supprime un membre de son département.
+  await assertCanDelete(ctxResp2, byId('m6'));
+  // Responsable ne supprime pas un pair Responsable (même rang, même département).
+  await assert.rejects(
+    () => assertCanDelete(ctxResp2, byId('m9')),
+    (e: any) => e instanceof GuardError && e.status === 403,
+    'delete: Responsable ne supprime pas un pair Responsable (P2.3)',
+  );
+  // Ministre supprime le Responsable de son ministère (d1 → min1 → tuteur m3).
+  await assertCanDelete(ctxMinistre2, byId('m4'));
+  // Ministre ne supprime pas le tuteur d'un AUTRE ministère (hors périmètre structurel —
+  // la comparaison de rang seule est testée directement dans scope.check.ts).
+  await assert.rejects(
+    () => assertCanDelete(ctxMinistre2, byId('m10')),
+    (e: any) => e instanceof GuardError && e.status === 403,
+    'delete: Ministre ne supprime pas le tuteur d\'un autre ministère (P2.3)',
+  );
+  // On ne se supprime jamais soi-même.
+  await assert.rejects(
+    () => assertCanDelete(ctxMinistre2, byId('m3')),
+    (e: any) => e instanceof GuardError && e.status === 403,
+    'delete: on ne se supprime jamais soi-même (P2.3)',
+  );
+
+  // P2.4 — pendant hiérarchique de C1 : promotion/rétrogradation d'un AUTRE membre limitée
+  // au rang strictement inférieur. Un Responsable ne peut pas promouvoir un pair Responsable
+  // (ici en changeant son département), même si la cible reste dans son périmètre structurel.
+  await assert.rejects(
+    () => assertCanWrite('members', ctxResp2, [byId('m4'), { ...byId('m9'), departments: { d1: 'membre' } }]),
+    (e: any) => e instanceof GuardError && e.status === 403,
+    'members: Responsable ne peut pas rétrograder un pair Responsable (P2.4)',
+  );
+  // Ministre peut modifier le département d'un Responsable sous lui (rang strictement inférieur).
+  await assertCanWrite('members', ctxMinistre2, [{ ...byId('m4'), departments: { d1: 'adjoint' } }]);
 }
 
 console.log('rbac.check OK');

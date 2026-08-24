@@ -4,7 +4,7 @@
 // pas diverger sur la sémantique des capacités et du scope.
 import { Member, Ministry, PermissionMatrix, Delegation, AdminAccount, Department, BloomBusEntity, SpecialAuthorization, CapabilityOverride } from '../packages/domain/types.ts';
 import { resolveCapability } from '../packages/domain/permissions.ts';
-import { inMemberScope, canFillReportFor, busInScope, fullBloomBusAccess, bloomBusRoleOf, MULTI_BRANCH_ROLES, COACH_AND_ABOVE } from '../packages/domain/scope.ts';
+import { inMemberScope, canFillReportFor, busInScope, fullBloomBusAccess, bloomBusRoleOf, MULTI_BRANCH_ROLES, COACH_AND_ABOVE, canManageAccountOf, bestRank } from '../packages/domain/scope.ts';
 import { isBusReportLocked } from '../packages/domain/reportLock.ts';
 import { getKv } from './datastore.ts';
 import { GuardError, readCollection, canonical } from './guards.ts';
@@ -228,6 +228,27 @@ export async function assertCanWrite(name: string, ctx: RbacContext, incoming: a
           }
         }
       }
+      // Pendant hiérarchique de C1 : promotion/rétrogradation d'un AUTRE membre (target.id ≠
+      // self, donc non bloqué par C1 ci-dessus). Un opérateur non full-scope ne peut modifier
+      // ces mêmes champs privilégiés que sur une cible de rang STRICTEMENT inférieur au sien
+      // (Ministre gère ses Responsables et leurs membres, pas un autre Ministre ; Responsable
+      // gère ses membres, pas un pair Responsable).
+      {
+        const adminsForRank = await readCollection('admins') as AdminAccount[];
+        for (const item of await touchedItems(name, incoming)) {
+          if (String(item.id) === String(member.id)) continue;
+          const stored = storedById.get(String(item.id));
+          if (!stored) continue; // création : pas de rang antérieur à comparer
+          const changed = ['departments', 'level', 'pastoralCursus'].some(
+            (f) => canonical((item as any)[f]) !== canonical((stored as any)[f]),
+          );
+          if (!changed) continue;
+          const targetRolesBefore = resolveRoles(stored as Member, adminsForRank, ministries);
+          if (bestRank(roles) >= bestRank(targetRolesBefore)) {
+            throw new GuardError(403, `members: ${item.id} — rang égal ou supérieur au vôtre, modification refusée`);
+          }
+        }
+      }
       // §13.2 — repinçage symétrique du masquage lecture : un opérateur qui ne VOIT pas les champs
       // de santé confidentiels (financier/présence, selon sa capacité) ne peut pas les ÉCRIRE. On
       // restaure la valeur stockée sur chaque membre existant modifié → un PUT (whole-array ou
@@ -262,10 +283,18 @@ export async function assertCanWrite(name: string, ctx: RbacContext, incoming: a
       return;
     }
 
+    // 'ministries' à part (pas dans le case partagé ci-dessous) : c'est ici qu'on fixe
+    // tuteurId, qui accorde le rôle Ministre (resolveRoles). STAFF_ROLES inclut Responsable
+    // ET Ministre — sans ce gate dédié, un Responsable pourrait nommer/révoquer n'importe
+    // qui Ministre sans aucun contrôle de portée (trou de sécurité, aucun chemin UI ne le
+    // fait déjà : MinisteresView réserve l'édition à Pasteur/Admin/Super Admin — canEdit).
+    case 'ministries':
+      if (!hasAny(roles, FULL_SCOPE_ROLES)) throw new GuardError(403, 'ministries: réservé au staff pastoral (Pasteur/Admin/Super Admin)');
+      return;
+
     case 'events':
     case 'activities':
     case 'departments':
-    case 'ministries':
       if (!hasAny(roles, STAFF_ROLES)) throw new GuardError(403, `${name}: réservé aux Responsables et plus`);
       if (name === 'events' && !hasAny(roles, FULL_SCOPE_ROLES)) {
         for (const ev of [...(await touchedItems(name, incoming)), ...(await removedItems(name, incoming, ctx))]) {
@@ -373,6 +402,25 @@ export async function assertCanWrite(name: string, ctx: RbacContext, incoming: a
     default:
       // Collection inconnue : refus par défaut plutôt qu'autorisation implicite.
       throw new GuardError(403, `${name}: écriture non autorisée`);
+  }
+}
+
+// Porte de SUPPRESSION de compte — hiérarchie de rang (canManageAccountOf, scope.ts) :
+// un Ministre supprime ses Responsables et leurs membres, un Responsable supprime les
+// membres de son département, un Membre ne supprime jamais personne. Distinct de
+// assertCanWrite('members', …) : la portée structurelle (inMemberScope) reste une
+// condition nécessaire, mais on exige EN PLUS un rang strictement supérieur à la cible.
+export async function assertCanDelete(ctx: RbacContext, target: Member): Promise<void> {
+  const { member, roles } = ctx;
+  const admins = await readCollection('admins') as AdminAccount[];
+  const ministries = await readCollection('ministries') as Ministry[];
+  const departments = await readCollection('departments') as Department[];
+  const busLines = await readCollection('bus_lines') as BloomBusEntity[];
+  const targetRoles = resolveRoles(target, admins, ministries);
+  const scopeEntry = SCOPE_ROLE_ORDER.find(([r]) => roles.includes(r));
+  const scopeRole = scopeEntry ? scopeEntry[1] : 'Membre';
+  if (!canManageAccountOf(member, roles, target, targetRoles, scopeRole, busLines, departments, ministries)) {
+    throw new GuardError(403, `members: suppression de ${target.id} refusée (hors périmètre ou rang insuffisant)`);
   }
 }
 
