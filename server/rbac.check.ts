@@ -347,6 +347,16 @@ await assert.rejects(
 );
 await assertCanWrite('ministries', ctxSA, [{ id: 'min1', name: 'M', description: '', tuteurId: 'm5' }]); // staff pastoral → OK
 
+// --- bus_lines : CRUD territorial réservé à l'Admin (ECRANS-PAR-ONGLET.md §5.3). Un
+//     Responsable (ABOVE_MEMBER_ROLES) ne doit plus pouvoir créer/déplacer/supprimer un bus
+//     via l'API directe — l'UI le lui interdisait déjà (canAdminTerritory), le serveur non.
+await assert.rejects(
+  () => assertCanWrite('bus_lines', ctxResp, [{ id: 'bus1', name: 'B1', commune: 'Cocody', zone: 'Est', centerLat: 0, centerLng: 0 }]),
+  (e: any) => e instanceof GuardError && e.status === 403,
+  'bus_lines: Responsable ne peut pas gérer le CRUD territorial',
+);
+await assertCanWrite('bus_lines', ctxSA, [{ id: 'bus1', name: 'B1', commune: 'Cocody', zone: 'Est', centerLat: 0, centerLng: 0 }]); // Admin/SA → OK
+
 // --- P2.3/P2.4 — hiérarchie de suppression/promotion de compte (canManageAccountOf) ---
 {
   setKv('permissions', { view_members: { Responsable: true, Ministre: true } });

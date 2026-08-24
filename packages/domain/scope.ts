@@ -81,10 +81,11 @@ export const ROLE_HOME_DEPT: Record<string, string> = {
 };
 
 // Global rank order for account-management ceiling (who can delete/promote whom).
-// The Bloom Bus branch (Responsable du Département Bloom Bus → Responsable de
-// Commune → Responsable de Zone → Responsable de section → Capitaine de Bus) is its
-// own sub-hierarchy nested at the same point Responsable/Adjoint sit in the general
-// org — not a separate ranking, just these positions in sequence.
+// Territorial Bloom Bus tiers (Responsable du Département Bloom Bus → Responsable de
+// Commune → Responsable de Zone → Capitaine de Bus) and 'Responsable de section' (a
+// generic department-function role — ANY department can have sections, not just Bloom
+// Bus, cf. DepartmentsView.tsx) all sit nested at the same point Responsable/Adjoint
+// occupy in the general org — not a separate ranking, just these positions in sequence.
 export const RANK_ORDER = [
   'Super Admin', 'Admin', 'Pasteur Principal', 'Pasteur', 'Ministre',
   'Responsable', 'Adjoint',

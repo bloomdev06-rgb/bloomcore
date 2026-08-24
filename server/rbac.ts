@@ -371,9 +371,19 @@ export async function assertCanWrite(name: string, ctx: RbacContext, incoming: a
 
     case 'integration_reports':
     case 'projects':
-    case 'bus_lines':
-      // Données opérationnelles (projets, lignes Bloom Bus) — écriture réservée à l'encadrement.
+      // Données opérationnelles (projets) — écriture réservée à l'encadrement.
       if (!hasAny(roles, ABOVE_MEMBER_ROLES)) throw new GuardError(403, `${name}: rôle d'encadrement requis`);
+      return;
+
+    // 'bus_lines' à part : CRUD territorial (créer/déplacer/supprimer un bus/zone/commune),
+    // pas une simple saisie — ECRANS-PAR-ONGLET.md §5.3 le réserve explicitement à l'Admin
+    // (miroir de canAdminTerritory, BloomBusView.tsx). ABOVE_MEMBER_ROLES (qui inclut Capitaine
+    // de Bus, Responsable de Zone/Commune) était un trou : sans AUCUNE restriction de portée,
+    // n'importe quel capitaine pouvait supprimer/déplacer via l'API n'importe quel bus de
+    // l'église entière, pas seulement le sien (l'UI le lui interdisait déjà — canAdminTerritory
+    // masque le bouton, mais un appel API direct passait).
+    case 'bus_lines':
+      if (!hasAny(roles, ['Admin', 'Super Admin'])) throw new GuardError(403, 'bus_lines: CRUD territorial réservé à l\'Admin');
       return;
 
     case 'audits': {
