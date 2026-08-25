@@ -33,6 +33,7 @@ import { motion } from "motion/react";
 import { staggerParent, staggerItem } from "./ui/motion";
 import { Avatar } from "./ui/Avatar";
 import { Modal } from "./ui/Modal";
+import { Button } from "./ui/Button";
 import { ConfirmDialog } from "./ui/ConfirmDialog";
 import { TerritoryMap, TerritoryMapMode, dotIcon } from "./ui/TerritoryMap";
 import { MapContainer, TileLayer, Marker, useMapEvents } from "react-leaflet";
@@ -136,6 +137,15 @@ export default function BloomBusView({
     // silencieusement les KPI de leur nouveau bus par défaut).
     members.filter((m) => m.bloomBusId === bus.id).forEach((m) => onUpdateMember({ ...m, bloomBusId: undefined }));
     if (selectedLevel.type === "bus" && selectedLevel.id === bus.id) setSelectedLevel({ type: "root" });
+  };
+  // Une "zone" n'est pas une entité stockée (packages/domain/types.ts) : juste un champ
+  // partagé par plusieurs bus. "Supprimer une zone" = réaffecter tous ses bus vers une autre
+  // zone cible (décision produit — pas de blocage, pas de suppression en cascade des bus).
+  const [deletingZone, setDeletingZone] = useState<{ commune: string; zone: string; buses: BloomBusEntity[] } | null>(null);
+  const [reassignTarget, setReassignTarget] = useState<string>("");
+  const reassignZone = (fromCommune: string, fromZone: string, toCommune: string, toZone: string) => {
+    setBusLines((prev) => prev.map((b) => (b.commune === fromCommune && b.zone === fromZone ? { ...b, commune: toCommune, zone: toZone } : b)));
+    if (selectedLevel.type === "zone" && selectedLevel.id === fromZone) setSelectedLevel({ type: "root" });
   };
 
   // P4.4bis — hiérarchie/cloisonnement : le TITRE organisationnel (Ministre, Responsable
@@ -648,11 +658,22 @@ export default function BloomBusView({
                             {zoneCount}
                           </span>
                         </span>
-                        {expandedZones.includes(zone) ? (
-                          <ChevronDown size={14} />
-                        ) : (
-                          <ChevronRight size={14} />
-                        )}
+                        <span className="flex items-center gap-1 shrink-0">
+                          {canAdminTerritory && (
+                            <button
+                              onClick={(e) => { e.stopPropagation(); setReassignTarget(""); setDeletingZone({ commune, zone, buses }); }}
+                              className={`p-1 rounded-lg transition-colors active-scale ${selectedLevel.type === "zone" && selectedLevel.id === zone ? "text-white/80 hover:text-white" : "text-bc-text-secondary hover:text-bc-danger"}`}
+                              title="Supprimer cette zone"
+                            >
+                              <Trash2 size={12} />
+                            </button>
+                          )}
+                          {expandedZones.includes(zone) ? (
+                            <ChevronDown size={14} />
+                          ) : (
+                            <ChevronRight size={14} />
+                          )}
+                        </span>
                       </div>
 
                       {expandedZones.includes(zone) && (
@@ -1513,6 +1534,53 @@ export default function BloomBusView({
         message={deletingBus ? `Le bus "${deletingBus.name}" sera définitivement supprimé. Les membres qui y sont rattachés seront détachés. Cette action est irréversible.` : ""}
         confirmLabel="Supprimer"
       />
+
+      {/* Suppression de zone = réaffectation en masse (une zone n'est pas une entité stockée,
+          cf. reassignZone ci-dessus) — nécessite un choix de cible, pas un simple confirm. */}
+      <Modal
+        open={!!deletingZone}
+        onClose={() => setDeletingZone(null)}
+        title="Supprimer cette zone"
+      >
+        {deletingZone && (
+          <div className="space-y-4">
+            <p className="text-sm text-bc-text-secondary">
+              La zone <strong className="text-bc-text">{deletingZone.zone}</strong> ({deletingZone.commune}) contient{" "}
+              <strong className="text-bc-text">{deletingZone.buses.length}</strong> bus. Choisissez la zone vers laquelle les réaffecter avant suppression.
+            </p>
+            <select
+              value={reassignTarget}
+              onChange={(e) => setReassignTarget(e.target.value)}
+              className="w-full border border-bc-border rounded-full px-4 py-2.5 text-sm font-bold focus:outline-none focus:ring-1 focus:ring-bc-green cursor-pointer"
+            >
+              <option value="">Choisir une zone cible…</option>
+              {Object.entries(busByCommune).map(([commune, zones]) => (
+                <optgroup key={commune} label={commune}>
+                  {Object.keys(zones)
+                    .filter((zone) => !(commune === deletingZone.commune && zone === deletingZone.zone))
+                    .map((zone) => (
+                      <option key={`${commune}::${zone}`} value={`${commune}::${zone}`}>{zone}</option>
+                    ))}
+                </optgroup>
+              ))}
+            </select>
+            <div className="flex justify-end gap-2">
+              <Button variant="secondary" onClick={() => setDeletingZone(null)}>Annuler</Button>
+              <Button
+                variant="danger"
+                disabled={!reassignTarget}
+                onClick={() => {
+                  const [toCommune, toZone] = reassignTarget.split("::");
+                  reassignZone(deletingZone.commune, deletingZone.zone, toCommune, toZone);
+                  setDeletingZone(null);
+                }}
+              >
+                Réaffecter et supprimer la zone
+              </Button>
+            </div>
+          </div>
+        )}
+      </Modal>
     </div>
   );
 }

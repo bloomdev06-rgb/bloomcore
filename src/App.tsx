@@ -789,6 +789,7 @@ export default function App() {
         members={members}
         operator={operator}
         onCreateDepartment={() => setShowCreateDept(true)}
+        onLogout={handleLogout}
       />
 
       {/* Main content viewport */}

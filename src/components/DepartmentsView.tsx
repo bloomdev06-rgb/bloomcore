@@ -1,6 +1,6 @@
-import React, { useState } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { Branch, Member, Report, Department, DepartmentType, SpecialFunction, Activity as ActivityEntity, AuditLog, Delegation, DeptFunction, Event, PermissionMatrix, FormDef, BloomBusEntity } from '../types';
-import { LayoutList, ChevronRight, Users, Calendar, Activity, Plus, X, Sparkles, FileText, CheckCircle, UserCheck, Heart, TrendingUp, Clock, AlertCircle, FolderKanban } from 'lucide-react';
+import { LayoutList, ChevronRight, Users, Calendar, Activity, Plus, X, Sparkles, FileText, CheckCircle, UserCheck, Heart, TrendingUp, Clock, AlertCircle, FolderKanban, ArrowLeft, ArrowRight } from 'lucide-react';
 import { useMinistries, useProjects, load, save, activitiesSeed, labelFor } from '../data';
 import {
   activeMemberIds, dominantHealthLevel, isRed, moissonBySource, ojTotal,
@@ -105,6 +105,27 @@ export default function DepartmentsView({ activeBranch, simulatedRole, members =
   const selectedDept = selectedDeptProp ?? defaultDept;
   const setSelectedDept = setSelectedDeptProp ?? (() => {});
   const [activeTab, setActiveTab] = useState<string | null>(null);
+
+  // Bande d'onglets défilable sur mobile — flèches + auto-scroll de l'onglet actif, même
+  // pattern que Member360View.tsx (mais avec désactivation en bout de course, absente là-bas).
+  const tabsRef = useRef<HTMLDivElement>(null);
+  const [canScrollLeft, setCanScrollLeft] = useState(false);
+  const [canScrollRight, setCanScrollRight] = useState(false);
+  const updateTabScrollState = () => {
+    const el = tabsRef.current;
+    if (!el) return;
+    setCanScrollLeft(el.scrollLeft > 1);
+    setCanScrollRight(el.scrollLeft + el.clientWidth < el.scrollWidth - 1);
+  };
+  useEffect(() => {
+    updateTabScrollState();
+    window.addEventListener('resize', updateTabScrollState);
+    return () => window.removeEventListener('resize', updateTabScrollState);
+  }, []);
+  useEffect(() => {
+    tabsRef.current?.querySelector(`[data-tab-id="${activeTab ?? 'synthese'}"]`)
+      ?.scrollIntoView({ behavior: 'smooth', inline: 'center', block: 'nearest' });
+  }, [activeTab]);
 
   // Synthèse — même sélecteur de période que l'Accueil, pour les KPI qui en dépendent (Baptisés/Moisson/OJ).
   const [period, setPeriod] = useState<Period>('week');
@@ -429,22 +450,48 @@ export default function DepartmentsView({ activeBranch, simulatedRole, members =
               </div>
 
               {/* Tab bar — synthèse (accueil) + onglets internes du responsable */}
-              <div className="flex gap-1 mt-4 overflow-x-auto">
+              <div className="flex items-center gap-1 mt-4">
                 <button
-                  onClick={() => setActiveTab(null)}
-                  className={`px-4 py-2 rounded-full text-xs font-bold whitespace-nowrap transition-colors active-scale ${activeTab === null ? 'bg-bc-green text-white' : 'text-bc-text-secondary hover:bg-bc-canvas'}`}
+                  onClick={() => tabsRef.current?.scrollBy({ left: -150, behavior: 'smooth' })}
+                  disabled={!canScrollLeft}
+                  aria-label="Onglets précédents"
+                  aria-disabled={!canScrollLeft}
+                  className="min-w-11 min-h-11 flex items-center justify-center shrink-0 rounded-full text-bc-text-secondary hover:text-bc-text hover:bg-bc-canvas active-scale disabled:opacity-30 disabled:pointer-events-none"
                 >
-                  Synthèse
+                  <ArrowLeft size={16} />
                 </button>
-                {internalTabs.map(tab => (
+                <div
+                  ref={tabsRef}
+                  onScroll={updateTabScrollState}
+                  className="flex gap-1 overflow-x-auto no-scrollbar scroll-smooth"
+                >
                   <button
-                    key={tab.id}
-                    onClick={() => setActiveTab(tab.id)}
-                    className={`px-4 py-2 rounded-full text-xs font-bold whitespace-nowrap transition-colors active-scale ${activeTab === tab.id ? 'bg-bc-green text-white' : 'text-bc-text-secondary hover:bg-bc-canvas'}`}
+                    data-tab-id="synthese"
+                    onClick={() => setActiveTab(null)}
+                    className={`px-4 py-2 rounded-full text-xs font-bold whitespace-nowrap transition-colors active-scale ${activeTab === null ? 'bg-bc-green text-white' : 'text-bc-text-secondary hover:bg-bc-canvas'}`}
                   >
-                    {tab.label}
+                    Synthèse
                   </button>
-                ))}
+                  {internalTabs.map(tab => (
+                    <button
+                      key={tab.id}
+                      data-tab-id={tab.id}
+                      onClick={() => setActiveTab(tab.id)}
+                      className={`px-4 py-2 rounded-full text-xs font-bold whitespace-nowrap transition-colors active-scale ${activeTab === tab.id ? 'bg-bc-green text-white' : 'text-bc-text-secondary hover:bg-bc-canvas'}`}
+                    >
+                      {tab.label}
+                    </button>
+                  ))}
+                </div>
+                <button
+                  onClick={() => tabsRef.current?.scrollBy({ left: 150, behavior: 'smooth' })}
+                  disabled={!canScrollRight}
+                  aria-label="Onglets suivants"
+                  aria-disabled={!canScrollRight}
+                  className="min-w-11 min-h-11 flex items-center justify-center shrink-0 rounded-full text-bc-text-secondary hover:text-bc-text hover:bg-bc-canvas active-scale disabled:opacity-30 disabled:pointer-events-none"
+                >
+                  <ArrowRight size={16} />
+                </button>
               </div>
             </div>
 

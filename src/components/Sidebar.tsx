@@ -5,7 +5,7 @@ import {
   LayoutDashboard, Users, Grid, LayoutList, Bus, Calendar,
   Activity, Heart, GraduationCap, Shield, UserCog, Settings,
   FormInput, History, X, UserPlus, ChevronDown, FileText, Droplet,
-  UserCheck, ClipboardList, Plus, DoorOpen
+  UserCheck, ClipboardList, Plus, DoorOpen, LogOut
 } from 'lucide-react';
 import { useMediaQuery } from '../hooks/useMediaQuery';
 import { useDepartments, useMinistries, canView as canViewTab } from '../data';
@@ -26,6 +26,7 @@ interface SidebarProps {
   operator?: Member;
   // Ouvre le modal « Créer un département » (monté dans App) — bouton visible pasteurs/admins.
   onCreateDepartment?: () => void;
+  onLogout: () => void;
 }
 
 export default function Sidebar({
@@ -40,7 +41,8 @@ export default function Sidebar({
   permissionMatrix,
   members,
   operator,
-  onCreateDepartment
+  onCreateDepartment,
+  onLogout
 }: SidebarProps) {
   const isChurch = activeBranch === 'church';
   const isDesktop = useMediaQuery('(min-width: 1024px)');
@@ -309,6 +311,21 @@ export default function Sidebar({
           </>
         )}
       </nav>
+
+      {/* Déconnexion — action distincte de la navigation, séparée visuellement en pied de barre. */}
+      <div className="px-3 py-3 border-t border-bc-border shrink-0">
+        <button
+          onClick={onLogout}
+          className="w-full flex items-center min-h-[48px] space-x-3.5 px-3 py-2.5 rounded-full text-left transition-colors text-bc-danger hover:bg-bc-danger/10"
+        >
+          <span className="shrink-0 flex items-center justify-center w-8 h-8 rounded-xl bg-bc-danger/10">
+            <LogOut size={18} className="text-bc-danger" />
+          </span>
+          {(!collapsed || !isDesktop) && (
+            <span className="font-ui text-sm font-bold tracking-wide">Déconnexion</span>
+          )}
+        </button>
+      </div>
     </div>
   );
 

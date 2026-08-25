@@ -9,6 +9,8 @@ import { Avatar } from './ui/Avatar';
 import { Badge } from './ui/Badge';
 import { motion, AnimatePresence } from 'motion/react';
 
+const BRANCH_LABELS: Record<Branch, string> = { church: 'Bloom Church', light: 'Bloom Light', global: 'Global' };
+
 interface HeaderProps {
   activeTab: string;
   setActiveTab: (tab: string) => void;
@@ -125,17 +127,32 @@ export default function Header({
         {!canSwitchBranch && (
           <div className="bg-bc-canvas rounded-full px-3 py-1.5 flex items-center space-x-1.5">
             <span className={`w-2 h-2 rounded-full ${activeBranch === 'light' ? 'bg-bc-fushia' : 'bg-bc-cerulean'}`} />
-            <span className="text-xs font-ui font-bold tracking-wide text-bc-text hidden sm:inline">
+            <span className="text-xs font-ui font-bold tracking-wide text-bc-text">
               {activeBranch === 'light' ? 'Bloom Light' : 'Bloom Church'}
             </span>
           </div>
         )}
 
-        {/* Branch Switcher (Multi-branch commuter) */}
+        {/* Sélecteur de branche mobile — <select> natif (clavier/lecteur d'écran gratuits),
+            noms complets toujours lisibles. Le switcher pilule reste la version ≥sm. */}
+        {canSwitchBranch && (
+          <select
+            aria-label="Changer de branche"
+            value={activeBranch}
+            onChange={(e) => handleBranchSwitch(e.target.value as Branch)}
+            className="sm:hidden min-h-11 bg-bc-canvas border border-bc-border rounded-full px-3 text-xs font-ui font-bold tracking-wide text-bc-text focus:outline-none focus:ring-1 focus:ring-bc-green cursor-pointer"
+          >
+            <option value="church">{BRANCH_LABELS.church}</option>
+            <option value="light">{BRANCH_LABELS.light}</option>
+            {canGlobalView && <option value="global">{BRANCH_LABELS.global}</option>}
+          </select>
+        )}
+
+        {/* Branch Switcher (Multi-branch commuter) — pilule, ≥sm uniquement */}
         {canSwitchBranch && (
         <div
           data-branch={activeBranch}
-          className={`bg-bc-canvas rounded-full p-1 flex items-center space-x-1 relative color-sweep ${isSweepActive ? 'color-sweep-active' : ''} ${
+          className={`hidden sm:flex bg-bc-canvas rounded-full p-1 items-center space-x-1 relative color-sweep ${isSweepActive ? 'color-sweep-active' : ''} ${
             activeBranch === 'church' ? 'active-glow-church' : activeBranch === 'light' ? 'active-glow-light' : ''
           }`}
         >
