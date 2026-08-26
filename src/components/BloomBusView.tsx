@@ -13,10 +13,12 @@ import {
   Trash2,
   CalendarDays,
   ClipboardList,
+  Upload,
 } from "lucide-react";
 import { LineChart, Line, XAxis, YAxis, Tooltip, Legend } from "recharts";
 import { Member, Branch, BloomBusEntity, Report, Event, FormDef, Department } from "../types";
 import { useBusLines, useDepartments, save } from "../data";
+import { importBusesFromCsv } from "../data/busImport";
 import { CULTE_SLOT_KEYS, culteSlotLabel } from "../data/events";
 import { isBusReportLocked } from "../data/reportLock";
 import { toast } from "./ui/Toast";
@@ -129,6 +131,27 @@ export default function BloomBusView({
   // seulement le refresh multi-onglet en direct qu'aucune collection "component-owned" n'a.
   const [busLines, setBusLines] = useState<BloomBusEntity[]>(seedBus);
   useEffect(() => { save('bc_bus_lines', busLines); }, [busLines]);
+
+  // Import CSV : parse → crée les bus, assigne le responsable existant sur chaque membre
+  // (departments.dept_bloom_bus + bloomBusId) — même effet que AddBusModal + AttachExistingMemberModal combinés.
+  const importBusInputRef = useRef<HTMLInputElement>(null);
+  const handleImportBusCsv = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file) return;
+    try {
+      const text = await file.text();
+      const { buses, memberPatches, errors } = importBusesFromCsv(text, members);
+      if (buses.length === 0 && errors.length === 0) { toast.error("Aucune ligne de données trouvée dans le CSV."); return; }
+      setBusLines((prev) => [...prev, ...buses]);
+      memberPatches.forEach((m) => onUpdateMember(m));
+      if (errors.length === 0) toast.success(`${buses.length} bus importé(s).`);
+      else toast.success(`${buses.length} importé(s), ${errors.length} ignoré(s) (ex. l.${errors[0].line} : ${errors[0].reason}).`);
+    } catch {
+      toast.error("Impossible de lire le fichier CSV.");
+    }
+  };
+
   const [deletingBus, setDeletingBus] = useState<BloomBusEntity | null>(null);
   const deleteBusLine = (bus: BloomBusEntity) => {
     setBusLines((prev) => prev.filter((b) => b.id !== bus.id));
@@ -597,9 +620,15 @@ export default function BloomBusView({
         <div className="flex items-center justify-between mb-4 px-2">
           <h3 className="font-ui font-bold text-bc-text">Territoires Bloom</h3>
           {canAdminTerritory && (
-            <button onClick={() => setShowAddBus(true)} title="Ajouter un bus" className="p-1.5 rounded-full bg-bc-green text-white hover:opacity-90 active-scale">
-              <Plus size={14} />
-            </button>
+            <div className="flex items-center gap-1.5">
+              <input ref={importBusInputRef} type="file" accept=".csv" onChange={handleImportBusCsv} className="hidden" />
+              <button onClick={() => importBusInputRef.current?.click()} title="Importer CSV" className="p-1.5 rounded-full border border-bc-border text-bc-text hover:bg-bc-canvas active-scale">
+                <Upload size={14} />
+              </button>
+              <button onClick={() => setShowAddBus(true)} title="Ajouter un bus" className="p-1.5 rounded-full bg-bc-green text-white hover:opacity-90 active-scale">
+                <Plus size={14} />
+              </button>
+            </div>
           )}
         </div>
         {FULL_SCOPE_ROLES.includes(simulatedRole) && (

@@ -1,8 +1,10 @@
 // Import CSV de membres — miroir de l'export (MembersView.downloadCsv). Parser maison
 // (pas de papaparse : YAGNI) gérant guillemets, délimiteur `,` ou `;`, CRLF et BOM.
-// Validation dure : prénom + nom + téléphone requis, pas de doublon téléphone (existant
-// OU dans le lot). Enums (branche/niveau/cursus/baptême) : tolérants, repli sur défaut.
-import { Member, Branch, CommunityLevel, PastoralCursus } from '../types';
+// Validation dure : prénom + nom + téléphone + email + département requis (email = seul
+// canal du lien d'activation côté serveur ; département = condition de visibilité RBAC
+// pour le responsable), pas de doublon téléphone (existant OU dans le lot). Enums
+// (branche/niveau/cursus/baptême/fonction département) : tolérants, repli sur défaut.
+import { Member, Branch, CommunityLevel, PastoralCursus, DeptFunction } from '../types';
 
 // ponytail: parser d'un seul passage — gère "" échappé et le délimiteur détecté sur l'en-tête.
 export function parseCsv(text: string): string[][] {
@@ -33,6 +35,7 @@ export function parseCsv(text: string): string[][] {
 
 const LEVELS: CommunityLevel[] = ['nouveau', 'stagiaire', 'boss', 'leader', 'coach'];
 const CURSUS: PastoralCursus[] = ['aucun', 'appele', 'serviteur', 'gagneur_ame', 'assistant_pasteur', 'pasteur_assistant', 'pasteur_titulaire'];
+const DEPT_FUNCTIONS: DeptFunction[] = ['responsable', 'adjoint', 'tresorier', 'responsable_section', 'membre', 'capitaine', 'responsable_zone', 'responsable_commune'];
 
 const stripDiacritics = (s: string) => s.normalize('NFD').replace(/[̀-ͯ]/g, '');
 const norm = (s: string) => stripDiacritics((s ?? '').trim().toLowerCase());
@@ -51,6 +54,8 @@ function headerKey(h: string): string {
   if (['sexe', 'genre', 'gender'].includes(n)) return 'gender';
   if (['commune', 'ville'].includes(n)) return 'commune';
   if (['profession', 'metier'].includes(n)) return 'profession';
+  if (['departement', 'departement id', 'department'].includes(n)) return 'departmentId';
+  if (['fonction', 'fonction departement', 'role departement'].includes(n)) return 'deptFunction';
   return n;
 }
 
@@ -86,8 +91,22 @@ export function importMembersFromCsv(
     const firstName = get(row, 'firstName');
     const lastName = get(row, 'lastName');
     const phone = get(row, 'phone');
+    const email = get(row, 'email');
+    const departmentId = get(row, 'departmentId');
     if (!firstName || !lastName || !phone) {
       result.errors.push({ line, reason: 'Prénom, nom et téléphone obligatoires' });
+      continue;
+    }
+    if (!email) {
+      // le serveur exige un email à la création (seul canal du lien d'activation) :
+      // sans lui la ligne serait acceptée ici puis rejetée par l'API.
+      result.errors.push({ line, reason: 'Email obligatoire (sert à envoyer le lien d\'activation)' });
+      continue;
+    }
+    if (!departmentId) {
+      // sans département, le membre est invisible pour son responsable (scope RBAC par
+      // département) — pas un compte "fonctionnel" au sens métier.
+      result.errors.push({ line, reason: 'Département obligatoire' });
       continue;
     }
     if (existingPhones.has(phone) || batchPhones.has(phone)) {
@@ -95,6 +114,9 @@ export function importMembersFromCsv(
       continue;
     }
     batchPhones.add(phone);
+
+    const deptFunctionRaw = norm(get(row, 'deptFunction')) as DeptFunction;
+    const deptFunction = DEPT_FUNCTIONS.includes(deptFunctionRaw) ? deptFunctionRaw : 'membre';
 
     const levelRaw = norm(get(row, 'level')) as CommunityLevel;
     const cursusRaw = norm(get(row, 'pastoralCursus')) as PastoralCursus;
@@ -106,7 +128,7 @@ export function importMembersFromCsv(
       firstName,
       lastName,
       phone,
-      email: get(row, 'email'),
+      email,
       gender: genderRaw.startsWith('f') ? 'F' : 'H', // ponytail: défaut H si non renseigné
       birthDate: '',
       maritalStatus: 'Célibataire',
@@ -116,7 +138,7 @@ export function importMembersFromCsv(
       branch: branchRaw === 'light' ? 'light' : branchRaw === 'church' ? 'church' : defaultBranch,
       level: LEVELS.includes(levelRaw) ? levelRaw : 'stagiaire',
       pastoralCursus: CURSUS.includes(cursusRaw) ? cursusRaw : 'aucun',
-      departments: {},
+      departments: { [departmentId]: deptFunction },
       baptismStatus: norm(get(row, 'baptismStatus')) === 'baptise' ? 'baptise' : 'non_baptise',
       hasPassedToBossForm: true,
       healthKPIs: { spirituel: 3, social: 3, financier: 3, physique: 4, presenceCulte: 4, presenceService: 3 },
