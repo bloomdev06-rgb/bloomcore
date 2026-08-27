@@ -421,8 +421,15 @@ export default function App() {
     const target = members.find(m => m.id === id);
     if (!target) return;
     const isSelf = id === loggedInMemberId;
-    const updated = members.filter(m => m.id !== id);
-    setMembers(updated);
+    // setMembers fonctionnel (pas `members.filter(...)` sur la closure) : indispensable pour
+    // la suppression groupée (boucle d'appels synchrones à handleDeleteMember) — avec la
+    // closure, chaque appel relit le même `members` figé et son setMembers écrase les
+    // suppressions précédentes, ne laissant survivre que le dernier id retiré.
+    let updated: Member[] = [];
+    setMembers(prev => {
+      updated = prev.filter(m => m.id !== id);
+      return updated;
+    });
     // Phase 4 (T4.3) — push immédiat via DELETE. Pour le cas isSelf (ci-dessous), c'est
     // TOUJOURS le apiPut whole-array explicite qui est attendu avant handleLogout() (le
     // reload immédiat de logout ne laisse pas le temps au debounce de 1,5s de partir) ;
