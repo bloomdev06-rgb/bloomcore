@@ -539,6 +539,7 @@ export interface RegisterInput {
   // Pas de 'global' : valeur transverse de périmètre, jamais une branche d'appartenance.
   branch: 'church' | 'light';
   departmentId: string;
+  commune: string;
 }
 
 // null = serveur injoignable ; { status, error? } sinon (201 = demande envoyée).

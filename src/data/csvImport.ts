@@ -4,7 +4,7 @@
 // canal du lien d'activation côté serveur ; département = condition de visibilité RBAC
 // pour le responsable), pas de doublon téléphone (existant OU dans le lot). Enums
 // (branche/niveau/cursus/baptême/fonction département) : tolérants, repli sur défaut.
-import { Member, Branch, CommunityLevel, PastoralCursus, DeptFunction } from '../types';
+import { Member, Branch, CommunityLevel, PastoralCursus, DeptFunction, BloomBusEntity } from '../types';
 
 // ponytail: parser d'un seul passage — gère "" échappé et le délimiteur détecté sur l'en-tête.
 export function parseCsv(text: string): string[][] {
@@ -70,6 +70,7 @@ export interface CsvImportResult {
 export function importMembersFromCsv(
   text: string,
   existingMembers: Member[],
+  busLines: BloomBusEntity[],
   defaultBranch: Branch = 'church',
   now: Date = new Date(),
 ): CsvImportResult {
@@ -134,7 +135,14 @@ export function importMembersFromCsv(
       birthDate: get(row, 'birthDate'),
       maritalStatus: 'Célibataire',
       profession: get(row, 'profession'),
-      gps: { lat: 5.3854, lng: -3.9781, commune: get(row, 'commune') || 'Abidjan' },
+      // pas de repli Cocody/Abidjan fixe (voir MemberFormModal.handleCommuneChange) : un
+      // membre sans commune reconnue garde gps undefined plutôt qu'une fausse coordonnée
+      // partagée par tout le lot, qui fausserait l'auto-assignation au bus le plus proche.
+      gps: (() => {
+        const communeVal = get(row, 'commune');
+        const busLine = communeVal && busLines.find(b => b.commune.toLowerCase() === communeVal.toLowerCase());
+        return busLine ? { lat: busLine.centerLat, lng: busLine.centerLng, commune: communeVal } : undefined;
+      })(),
       entryDate: now.toISOString().split('T')[0],
       branch: branchRaw === 'light' ? 'light' : branchRaw === 'church' ? 'church' : defaultBranch,
       level: LEVELS.includes(levelRaw) ? levelRaw : 'stagiaire',

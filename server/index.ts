@@ -319,6 +319,7 @@ const RegisterSchema = z.object({
   // seulement masqué dans le formulaire — sinon un POST direct la ferait passer.
   branch: z.enum(['church', 'light']),
   departmentId: z.string().min(1),
+  commune: z.string().min(1),
 }).strict();
 
 app.post('/api/v1/auth/register', async (req, res) => {
@@ -345,6 +346,15 @@ app.post('/api/v1/auth/register', async (req, res) => {
   const existing = await findByIdentifier(input.phone) || await findByIdentifier(input.email);
   if (existing) return res.status(409).json({ error: 'un compte existe déjà avec ce téléphone ou cet email' });
 
+  // Pas de géolocalisation navigateur à l'inscription : repli sur le centre du Bloom Bus de
+  // la commune déclarée (même principe que MemberFormModal.handleCommuneChange côté client) —
+  // pas de coordonnée fixe par défaut si la commune ne matche aucun bus existant, plutôt qu'une
+  // fausse position partagée par tous les inscrits.
+  const busLine = (await readCollection('bus_lines')).find(
+    (b: any) => String(b.commune).toLowerCase() === input.commune.toLowerCase(),
+  );
+  const gps = busLine ? { lat: busLine.centerLat, lng: busLine.centerLng, commune: input.commune } : undefined;
+
   const member = {
     id: `mem_reg_${randomUUID()}`,
     lastName: input.lastName,
@@ -355,6 +365,7 @@ app.post('/api/v1/auth/register', async (req, res) => {
     birthDate: input.birthDate,
     maritalStatus: input.maritalStatus,
     profession: input.profession,
+    ...(gps && { gps }),
     entryDate: new Date().toISOString().slice(0, 10),
     branch: input.branch,
     level: 'nouveau' as const,

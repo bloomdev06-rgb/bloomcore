@@ -239,7 +239,7 @@ export default function MembersView({
     try {
       const text = await file.text();
       const branch = activeBranch === "church" || activeBranch === "light" ? activeBranch : "church";
-      const { members: toAdd, errors, total } = importMembersFromCsv(text, members, branch);
+      const { members: toAdd, errors, total } = importMembersFromCsv(text, members, INITIAL_BUS_LINES, branch);
       toAdd.forEach((m) => onAddMember(m));
       if (total === 0) toast.error("Aucune ligne de données trouvée dans le CSV.");
       else if (errors.length === 0) toast.success(`${toAdd.length} membre(s) importé(s).`);

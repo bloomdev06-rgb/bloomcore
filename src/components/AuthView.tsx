@@ -16,7 +16,7 @@ type Mode = 'login' | 'activate' | 'reset' | 'register';
 
 const EMPTY_REGISTER: RegisterInput = {
   lastName: '', firstName: '', phone: '', email: '', gender: 'H', birthDate: '',
-  maritalStatus: 'Célibataire', profession: '', branch: 'church', departmentId: '',
+  maritalStatus: 'Célibataire', profession: '', branch: 'church', departmentId: '', commune: '',
 };
 
 // Lien d'activation/reset (server/index.ts issueAuthLink) : ${APP_URL}/?activate=<token>
@@ -139,7 +139,7 @@ export default function AuthView({ members, onLogin }: AuthViewProps) {
     e.preventDefault();
     setError('');
     const f = registerForm;
-    if (!f.lastName || !f.firstName || !f.phone || !f.email || !f.birthDate || !f.profession || !f.departmentId) {
+    if (!f.lastName || !f.firstName || !f.phone || !f.email || !f.birthDate || !f.profession || !f.departmentId || !f.commune) {
       setError('Tous les champs sont requis.');
       return;
     }
@@ -299,6 +299,20 @@ export default function AuthView({ members, onLogin }: AuthViewProps) {
                 <input value={registerForm.profession} onChange={e => setRegisterForm({ ...registerForm, profession: e.target.value })}
                   className="mt-1 w-full border border-bc-border rounded-xl px-3 py-2 text-sm outline-none" />
               </div>
+            </div>
+            <div>
+              <label className="text-xs font-bold text-bc-text-secondary">Commune</label>
+              {/* Sert de repli GPS côté serveur (centre du Bloom Bus de la commune) quand
+                  l'appareil ne fournit pas de géolocalisation — évite qu'un membre sans
+                  position réelle se retrouve avec une coordonnée fixe partagée par tous. */}
+              <select value={registerForm.commune} onChange={e => setRegisterForm({ ...registerForm, commune: e.target.value })}
+                className="mt-1 w-full border border-bc-border rounded-xl px-3 py-2 text-sm outline-none bg-white">
+                <option value="">— Choisir —</option>
+                <option value="Cocody">Cocody</option>
+                <option value="Yopougon">Yopougon</option>
+                <option value="Abobo">Abobo</option>
+                <option value="Koumassi">Koumassi</option>
+              </select>
             </div>
             <div className="grid grid-cols-2 gap-2">
               <div>
