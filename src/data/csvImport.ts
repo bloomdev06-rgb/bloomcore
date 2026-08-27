@@ -54,6 +54,7 @@ function headerKey(h: string): string {
   if (['sexe', 'genre', 'gender'].includes(n)) return 'gender';
   if (['commune', 'ville'].includes(n)) return 'commune';
   if (['profession', 'metier'].includes(n)) return 'profession';
+  if (['date de naissance', 'naissance', 'birthdate'].includes(n)) return 'birthDate';
   if (['departement', 'departement id', 'department'].includes(n)) return 'departmentId';
   if (['fonction', 'fonction departement', 'role departement'].includes(n)) return 'deptFunction';
   return n;
@@ -130,7 +131,7 @@ export function importMembersFromCsv(
       phone,
       email,
       gender: genderRaw.startsWith('f') ? 'F' : 'H', // ponytail: défaut H si non renseigné
-      birthDate: '',
+      birthDate: get(row, 'birthDate'),
       maritalStatus: 'Célibataire',
       profession: get(row, 'profession'),
       gps: { lat: 5.3854, lng: -3.9781, commune: get(row, 'commune') || 'Abidjan' },

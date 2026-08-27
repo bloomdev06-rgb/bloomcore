@@ -550,11 +550,11 @@ export default function MemberFormModal({
               </div>
             </div>
             <div>
-              <label className="block text-xs font-bold text-bc-text mb-1">{membreLabel('f5', 'Date de Naissance')} *</label>
+              <label className="block text-xs font-bold text-bc-text mb-1">{membreLabel('f5', 'Date de Naissance')}{!isEditing && ' *'}</label>
               <input
                 id="form-birthdate"
                 type="date"
-                required
+                required={!isEditing}
                 value={birthDate}
                 onChange={(e) => setBirthDate(e.target.value)}
                 className="w-full border border-bc-border rounded-full px-3 py-2 text-xs focus:outline-none focus:border-bc-green"
