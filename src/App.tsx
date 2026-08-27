@@ -434,7 +434,12 @@ export default function App() {
     // TOUJOURS le apiPut whole-array explicite qui est attendu avant handleLogout() (le
     // reload immédiat de logout ne laisse pas le temps au debounce de 1,5s de partir) ;
     // ce DELETE est un best-effort supplémentaire, pas le chemin garanti pour ce cas précis.
-    void apiDeleteMember(id).catch(() => {});
+    // Attendu (pas fire-and-forget) : le DELETE serveur reconstruit tout le tableau par
+    // lecture-modification-écriture — des DELETE concurrents non attendus (suppression
+    // groupée) peuvent se lire l'un l'autre avant tombstone et ressusciter un membre déjà
+    // supprimé. handleDeleteMember doit donc se terminer seulement après écriture confirmée,
+    // pour que MembersView.confirmDeleteSelected puisse sérialiser sa boucle dessus.
+    await apiDeleteMember(id).catch(() => {});
     handleAddAuditLog({
       id: genId('aud_del'),
       timestamp: new Date().toISOString(),

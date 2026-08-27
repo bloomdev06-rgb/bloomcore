@@ -72,7 +72,7 @@ interface MembersViewProps {
   members: Member[];
   onUpdateMember: (member: Member) => void;
   onAddMember: (member: Member) => void;
-  onDeleteMember?: (id: string) => void;
+  onDeleteMember?: (id: string) => void | Promise<void>;
   reports?: Report[];
   onAddReport?: (r: Report) => void;
   activeBranch: Branch;
@@ -259,8 +259,15 @@ export default function MembersView({
       return next;
     });
   };
-  const confirmDeleteSelected = () => {
-    selectedIds.forEach((id) => onDeleteMember?.(id));
+  const confirmDeleteSelected = async () => {
+    // Séquentiel, pas Promise.all/forEach : le DELETE serveur reconstruit le tableau
+    // entier par lecture-modification-écriture (deltaToWhole+applyWrite,
+    // server/index.ts:617-628) — des DELETE concurrents peuvent se lire l'un l'autre
+    // avant tombstone et ressusciter un membre déjà supprimé. Un id à la fois attend
+    // la réponse avant de lancer le suivant, donc plus d'écriture concurrente.
+    for (const id of selectedIds) {
+      await onDeleteMember?.(id);
+    }
     setSelectedIds(new Set());
     setSelectMode(false);
   };
