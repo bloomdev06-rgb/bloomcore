@@ -122,6 +122,9 @@ export default function MembersView({
   // null = création ; sinon le membre en cours d'édition (P1.4 — formulaire extrait dans MemberFormModal, partagé avec DepartmentsView).
   const [formMember, setFormMember] = useState<Member | null>(null);
   const [deletingMember, setDeletingMember] = useState<Member | null>(null);
+  const [selectMode, setSelectMode] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [confirmBulkDelete, setConfirmBulkDelete] = useState(false);
 
   const isChurch = activeBranch === "church";
   // Un titulaire de compte admin (Super Admin/Admin/…) ne doit jamais être masqué par le
@@ -228,6 +231,38 @@ export default function MembersView({
   const openEditForm = (member: Member) => {
     setFormMember(member);
     setShowFormModal(true);
+  };
+
+  const toggleSelectMode = () => {
+    setSelectMode((v) => !v);
+    setSelectedIds(new Set());
+  };
+  const toggleSelected = (id: string) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+  const selectableVisible = visibleMembers.filter(canDeleteMember);
+  const allVisibleSelected = selectableVisible.length > 0 && selectableVisible.every((m) => selectedIds.has(m.id));
+  const toggleSelectAllVisible = () => {
+    setSelectedIds((prev) => {
+      if (allVisibleSelected) {
+        const next = new Set(prev);
+        selectableVisible.forEach((m) => next.delete(m.id));
+        return next;
+      }
+      const next = new Set(prev);
+      selectableVisible.forEach((m) => next.add(m.id));
+      return next;
+    });
+  };
+  const confirmDeleteSelected = () => {
+    selectedIds.forEach((id) => onDeleteMember?.(id));
+    setSelectedIds(new Set());
+    setSelectMode(false);
   };
 
   // Import CSV : parse → validation → onAddMember par ligne (conserve audit/notif/enrichissement).
@@ -392,6 +427,21 @@ export default function MembersView({
             </button>
           </div>
 
+          {["Pasteur Principal", "Pasteur", "Ministre", "Admin", "Responsable", "Super Admin"].includes(
+            simulatedRole,
+          ) && (
+            <button
+              id="member-select-mode-btn"
+              onClick={toggleSelectMode}
+              className={`px-4 py-2.5 rounded-full font-ui font-bold text-xs border flex items-center gap-1.5 min-h-[48px] active:scale-95 ${
+                selectMode ? "bg-bc-text text-white border-bc-text" : "text-bc-text border-bc-border bg-white hover:bg-bc-canvas"
+              }`}
+            >
+              <span className="hidden sm:inline">{selectMode ? "Annuler" : "Sélectionner"}</span>
+              <span className="sm:hidden">{selectMode ? "Annuler" : "Sélec."}</span>
+            </button>
+          )}
+
           <button
             id="member-export-btn"
             onClick={() =>
@@ -477,6 +527,33 @@ export default function MembersView({
         )}
       </div>
 
+      {/* Bulk selection bar */}
+      {selectMode && (
+        <div className="flex items-center justify-between gap-3 bg-white px-4 py-3 rounded-full border border-bc-border shadow-sm">
+          <label className="flex items-center gap-2 text-xs font-bold text-bc-text-secondary cursor-pointer">
+            <input
+              type="checkbox"
+              checked={allVisibleSelected}
+              onChange={toggleSelectAllVisible}
+              disabled={selectableVisible.length === 0}
+            />
+            Tout sélectionner (page affichée)
+          </label>
+          {selectedIds.size > 0 && (
+            <div className="flex items-center gap-3">
+              <span className="text-xs font-bold text-bc-text-secondary">{selectedIds.size} sélectionné(s)</span>
+              <button
+                onClick={() => setConfirmBulkDelete(true)}
+                className="px-4 py-2 rounded-full font-ui font-bold text-xs text-white bg-bc-danger hover:opacity-90 flex items-center gap-1.5 active:scale-95"
+              >
+                <Trash2 size={14} />
+                Supprimer ({selectedIds.size})
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+
       {/* Grid or List of Members */}
       {viewMode === "grid" ? (
         <motion.div
@@ -504,6 +581,15 @@ export default function MembersView({
                 <div>
                   <div className="flex justify-between items-start">
                     <div className="flex items-center space-x-3 min-w-0">
+                      {selectMode && canDeleteMember(member) && (
+                        <input
+                          type="checkbox"
+                          checked={selectedIds.has(member.id)}
+                          onClick={(e) => e.stopPropagation()}
+                          onChange={() => toggleSelected(member.id)}
+                          className="shrink-0"
+                        />
+                      )}
                       <div className="relative shrink-0">
                         {/* w-12/h-12 = 48 px, le double du `sm` (24 px) : à 24 px un visage
                             était illisible, la photo ne servait à rien. Les initiales passent
@@ -648,6 +734,7 @@ export default function MembersView({
               <table className="w-full text-left text-xs whitespace-nowrap">
                 <thead className="bg-bc-canvas text-bc-text-secondary font-bold uppercase tracking-wider text-[10px] border-b border-bc-border">
                   <tr>
+                    {selectMode && <th className="px-4 py-3 w-8"></th>}
                     <th className="px-4 py-3">Membre</th>
                     <th className="px-4 py-3">Contact</th>
                     <th className="px-4 py-3">Niveau & Cursus</th>
@@ -665,6 +752,17 @@ export default function MembersView({
                       }`}
                       onClick={() => open360View(member)}
                     >
+                      {selectMode && (
+                        <td className="px-4 py-3" onClick={(e) => e.stopPropagation()}>
+                          {canDeleteMember(member) && (
+                            <input
+                              type="checkbox"
+                              checked={selectedIds.has(member.id)}
+                              onChange={() => toggleSelected(member.id)}
+                            />
+                          )}
+                        </td>
+                      )}
                       <td className={`px-4 py-3 border-l-4 ${levelRail(member.level)}`}>
                         <div className="flex items-center space-x-3">
                           {isRed(member) && (
@@ -845,6 +943,15 @@ export default function MembersView({
         onConfirm={() => { if (deletingMember) onDeleteMember?.(deletingMember.id); }}
         title="Supprimer le profil"
         message={deletingMember ? `Le profil de ${deletingMember.firstName} ${deletingMember.lastName} sera définitivement supprimé. Cette action est irréversible.` : ""}
+        confirmLabel="Supprimer"
+      />
+
+      <ConfirmDialog
+        open={confirmBulkDelete}
+        onCancel={() => setConfirmBulkDelete(false)}
+        onConfirm={confirmDeleteSelected}
+        title="Supprimer les profils sélectionnés"
+        message={`${selectedIds.size} profil(s) seront définitivement supprimés. Cette action est irréversible.`}
         confirmLabel="Supprimer"
       />
     </div>
