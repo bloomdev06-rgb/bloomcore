@@ -6,6 +6,7 @@ import { motion } from 'motion/react';
 import { staggerParent, staggerItem } from './ui/motion';
 import { Modal } from './ui/Modal';
 import { ConfirmDialog } from './ui/ConfirmDialog';
+import { useSyncedSave } from '../data/useSyncedSave';
 
 interface ProjectsViewProps {
   activeBranch: Branch;
@@ -30,7 +31,7 @@ export default function ProjectsView({ activeBranch, simulatedRole, events = [],
     p.scope === 'transverse' ? 'Transverse' : p.scope === 'ministere' ? ministryName(p.ministryId) : p.branch === 'church' ? 'Bloom Church' : 'Bloom Light';
   // Persiste en localStorage (B4) : sans ça, créer/éditer un projet puis changer d'onglet perdait tout.
   const [projects, setProjects] = useState<Project[]>(seed);
-  useEffect(() => { save('bc_projects', projects); }, [projects]);
+  useSyncedSave('bc_projects', projects);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [filterStatus, setFilterStatus] = useState('all');
   const [filterScope, setFilterScope] = useState('all');

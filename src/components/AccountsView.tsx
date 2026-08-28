@@ -6,6 +6,7 @@ import { UserCog, ShieldAlert, History, X, AlertTriangle, Check } from 'lucide-r
 import { motion } from 'motion/react';
 import { staggerParent, staggerItem } from './ui/motion';
 import { Modal } from './ui/Modal';
+import { useSyncedSave } from '../data/useSyncedSave';
 
 interface AccountsViewProps {
   activeBranch: Branch;
@@ -37,7 +38,9 @@ export default function AccountsView({ activeBranch, simulatedRole, members, aud
   const [pickedId, setPickedId] = useState('');
   const [reason, setReason] = useState('');
 
-  useEffect(() => { save('bc_admins', admins); }, [admins]);
+  // Comptes admin : une poussée au montage avec un cache vide effacerait la collection —
+  // et donc les droits Super Admin. Voir useSyncedSave.
+  useSyncedSave('bc_admins', admins);
 
   const journal = audits.filter(a => ADMIN_ACTIONS.includes(a.actionType));
   const adminMemberIds = new Set(admins.map(a => a.id));

@@ -17,6 +17,7 @@ import { staggerParent, staggerItem } from './ui/motion';
 import { HEALTH_AXES, Spark, Ring } from './DashboardView';
 import { AreaChart, Area, XAxis, Tooltip } from 'recharts';
 import { ResponsiveChart } from './ui/ResponsiveChart';
+import { useSyncedSave } from '../data/useSyncedSave';
 
 interface MinisteresViewProps {
   activeBranch: Branch;
@@ -139,7 +140,7 @@ export default function MinisteresView({ activeBranch, simulatedRole, members, r
     ? { from: new Date(customFrom), to: new Date(`${customTo}T23:59:59`) }
     : period;
 
-  useEffect(() => { save('bc_ministries', ministriesAll); }, [ministriesAll]);
+  useSyncedSave('bc_ministries', ministriesAll);
 
   const updateMinistry = (id: string, patch: Partial<Ministry>) =>
     setMinistries(prev => prev.map(m => (m.id === id ? { ...m, ...patch } : m)));

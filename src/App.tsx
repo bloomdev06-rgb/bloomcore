@@ -72,6 +72,7 @@ import { ToastContainer, toast } from './components/ui/Toast';
 import { PageSkeleton } from './components/ui/Skeleton';
 
 import { UserCheck, Sparkles, X, Heart } from 'lucide-react';
+import { useSyncedSave } from './data/useSyncedSave';
 
 export default function App() {
   // Navigation states
@@ -127,7 +128,9 @@ export default function App() {
   }, [simulatedRole, activeTab, permissionMatrix]);
   useEffect(() => { save('bc_settings', settings); }, [settings]);
   useEffect(() => { save('bc_forms', forms); }, [forms]);
-  useEffect(() => { save('bc_departments', departments); }, [departments]);
+  // Jamais de sauvegarde au montage : elle repousserait le cache local (possiblement vide
+  // ou périmé) et pourrait EFFACER les départements côté serveur. Voir useSyncedSave.
+  useSyncedSave('bc_departments', departments);
   useEffect(() => { save('bc_loggedInMemberId', loggedInMemberId); }, [loggedInMemberId]);
   // CHARTE-GRAPHIQUE.md §10 — cascade [data-branch] sur la racine, pas seulement le switcher.
   useEffect(() => { document.documentElement.setAttribute('data-branch', activeBranch); }, [activeBranch]);
