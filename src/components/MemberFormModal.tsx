@@ -317,7 +317,12 @@ export default function MemberFormModal({
     const gpsCoords = Number.isFinite(parsedLat) && Number.isFinite(parsedLng)
       ? { lat: parsedLat, lng: parsedLng, commune }
       : undefined;
-    const busDeptId = departments.find((d) => d.specialFunction === "bloom_bus")?.id;
+    // Instance bloom_bus de la branche du membre : les départements existent en deux
+    // exemplaires (un par branche) et prendre le premier de la liste rattachait une partie des
+    // membres au département de l'AUTRE branche — invisible à l'écran, mais leur portée Bloom
+    // Bus ne se résolvait plus. Repli sur la première instance si aucune n'est scopée.
+    const busDepts = departments.filter((d) => d.specialFunction === "bloom_bus");
+    const busDeptId = (busDepts.find((d) => d.branch === memberBranch) ?? busDepts[0])?.id;
 
     const updatedDepartments: Member["departments"] =
       directBloomBusRegistration && busDeptId
@@ -906,7 +911,12 @@ export default function MemberFormModal({
                   }}
                   className="text-xs font-bold text-bc-green hover:underline active:scale-95"
                 >
-                  + Ajouter cette affectation
+                  {/* Le libellé nomme le département ET la fonction. Avant, il disait « Ajouter
+                      cette affectation » : un opérateur qui ne changeait que la Fonction, en
+                      croyant promouvoir dans le département affiché plus haut, promouvait en
+                      réalité dans celui du sélecteur — resté sur sa valeur par défaut. C'est
+                      l'origine du cas « promu responsable de Bloom Praise au lieu de Bloom Bus ». */}
+                  + Affecter à {departments.find((d) => d.id === deptName)?.name ?? deptName} comme {labelFor(deptRole)}
                 </button>
                 {Object.keys(depts).length > 0 && (
                   <div className="flex flex-wrap gap-2">

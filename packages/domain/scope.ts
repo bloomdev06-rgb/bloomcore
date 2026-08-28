@@ -26,9 +26,17 @@ export function dashboardScope(
   ministries: Ministry[],
 ): DashboardScope {
   const ownMinistry = role === 'Ministre' ? ministries.find(m => m.tuteurId === operator?.id) : undefined;
-  const homeDeptId = ROLE_HOME_DEPT[role]
-    || Object.entries(operator?.departments ?? {}).find(([, fn]) => fn === 'responsable')?.[0]
-    || Object.keys(operator?.departments ?? {})[0];
+  // Les affectations RÉELLES du membre priment. ROLE_HOME_DEPT est une table codée en dur,
+  // héritée du mode démonstration (« Simuler profil » faisait semblant d'appartenir à un
+  // département correspondant au rôle choisi) : elle était testée EN PREMIER et écrasait donc
+  // les vraies données. Un responsable du Département Bloom Bus reconnu « Coach » se voyait
+  // ainsi annoncer « votre département (Bloom Praise) » — ROLE_HOME_DEPT.Coach = dept_louange —
+  // et son tableau de bord était calculé sur ce département auquel il n'appartient pas, d'où
+  // des compteurs tous à zéro. Elle ne sert plus que de dernier recours, pour les profils de
+  // test qui n'ont aucun département.
+  const homeDeptId = Object.entries(operator?.departments ?? {}).find(([, fn]) => fn === 'responsable')?.[0]
+    || Object.keys(operator?.departments ?? {})[0]
+    || ROLE_HOME_DEPT[role];
   const deptIds: string[] | null =
     role === 'Ministre' ? (ownMinistry ? departments.filter(d => d.ministryId === ownMinistry.id).map(d => d.id) : [])
     : ['Responsable', 'Coach', 'Leader'].includes(role) ? (homeDeptId ? [homeDeptId] : [])
@@ -186,10 +194,23 @@ export function inMemberScope(
 // M5 a fait passer DeptFunction en snake_case côté stockage, mais toute la logique de scope
 // raisonne en noms de rôle capitalisés. On remappe donc la valeur stockée vers le nom de rôle.
 
+// Les départements existent en DEUX instances, une par branche (Department.branch, reliées
+// par familyId). `find` renvoyait la PREMIÈRE instance bloom_bus de la liste sans vérifier que
+// l'opérateur y a une fonction : un responsable rattaché à l'AUTRE instance était vu comme
+// n'ayant aucune fonction Bloom Bus, et retombait sur la portée d'un simple bus — exactement
+// le symptôme « responsable du département mais accès limité à son seul bus ».
+// On parcourt donc toutes les instances et on retient la fonction réellement détenue, la plus
+// forte si le membre en a plusieurs (rankOf : plus le rang est petit, plus la fonction est haute).
 export function bloomBusRoleOf(operator: Member, departments: Department[]): string | undefined {
-  const busDept = departments.find(d => d.specialFunction === 'bloom_bus');
-  const fn = busDept ? operator.departments?.[busDept.id] : undefined;
-  return fn ? roleForDeptFn(fn) : undefined;
+  let best: string | undefined;
+  for (const d of departments) {
+    if (d.specialFunction !== 'bloom_bus') continue;
+    const fn = operator.departments?.[d.id];
+    if (!fn) continue;
+    const role = roleForDeptFn(fn);
+    if (best === undefined || rankOf(role) < rankOf(best)) best = role;
+  }
+  return best;
 }
 
 export function fullBloomBusAccess(operator: Member, role: string, departments: Department[]): boolean {
