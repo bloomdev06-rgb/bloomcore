@@ -116,6 +116,12 @@ export function getAuthToken(): string | null {
 // par un login antérieur (cookie attendu). Peut être un faux positif après expiration du
 // cookie (12h) — les fetch renvoient alors 401 et l'app retombe sur l'écran de connexion,
 // exactement comme avec un token localStorage expiré avant cette transition.
+// Exporté pour src/data/index.ts : une session serveur signifie que le SERVEUR est la source
+// de vérité, et qu'un cache local vide ne doit surtout pas être comblé par le jeu de démo.
+export function hasServerSession(): boolean {
+  return isAuthed();
+}
+
 function isAuthed(): boolean {
   if (memoryToken) return true;
   try { return localStorage.getItem(SESSION_FLAG_KEY) === '1'; } catch { return false; }

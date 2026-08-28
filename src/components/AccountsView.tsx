@@ -1,8 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Branch, Member, AuditLog, AppNotification, AdminAccount } from '../types';
-import { load, save, labelFor } from '../data';
+import { save, labelFor, useAdmins } from '../data';
 import { DEFAULT_OPERATOR_NAME } from '../data/operator';
-import { INITIAL_ADMINS } from '../mockData';
 import { UserCog, ShieldAlert, History, X, AlertTriangle, Check } from 'lucide-react';
 import { motion } from 'motion/react';
 import { staggerParent, staggerItem } from './ui/motion';
@@ -28,7 +27,11 @@ const isEligible = (m: Member) =>
 
 export default function AccountsView({ activeBranch, simulatedRole, members, audits, onAddAuditLog, onAddNotification }: AccountsViewProps) {
   const isSuper = simulatedRole === 'Super Admin';
-  const [admins, setAdmins] = useState<AdminAccount[]>(() => load('bc_admins', INITIAL_ADMINS));
+  // useAdmins() plutôt qu'un load() en dur : le repli sur INITIAL_ADMINS y est neutralisé
+  // sous session serveur. Sinon un cache vide (données de site effacées) réintroduisait ici
+  // les comptes admin de démonstration, et la première modification les poussait au serveur.
+  const initialAdmins = useAdmins();
+  const [admins, setAdmins] = useState<AdminAccount[]>(() => initialAdmins);
   const [granting, setGranting] = useState(false);
   const [grantingRole, setGrantingRole] = useState<'Admin' | 'Super Admin'>('Admin');
   const [pickedId, setPickedId] = useState('');

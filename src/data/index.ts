@@ -23,7 +23,7 @@ export { deriveTimeBasedNotifications } from './notificationRules';
 export { apiBootstrap, apiLogin, clearAuthToken, apiLogout, apiPut, apiFetchCollection, openNotificationStream, syncQueueLength, isSyncing, apiCreateMember, apiPatchMember, apiDeleteMember } from './api';
 export { labelFor } from '../../packages/shared/migrate';
 export { canView, hasCapability, resolveCapability } from './permissions';
-import { apiPut } from './api';
+import { apiPut, hasServerSession } from './api';
 import { idbLoadAll, idbSet } from './idb';
 
 // Collection/kv names the backend knows about (server/index.ts's
@@ -148,11 +148,28 @@ export const seeds = {
 // par le bootstrap serveur) pour que les consommateurs read-only voient les données
 // synchronisées. ponytail: lecture à l'appel, pas de souscription — un écran ouvert
 // pendant qu'un autre édite voit la mise à jour à son prochain montage, suffisant.
-export const useMinistries = () => load('bc_ministries', INITIAL_MINISTRIES);
-export const useDepartments = () => load('bc_departments', INITIAL_DEPARTMENTS);
+// Le jeu de démonstration ne sert de repli QUE hors session serveur (démo pure, aucun
+// backend). Dès qu'une session existe, le SERVEUR est la source de vérité : un cache local
+// vide signifie « pas encore chargé », jamais « voici les données de démonstration ».
+//
+// C'est ce repli qui a réintroduit des lignes Bloom Bus de démo en production. Le scénario
+// exact : vider les données de site du navigateur efface `bc_bus_lines` → `load` retombe sur
+// INITIAL_BUS_LINES → BloomBusView initialise son état avec les 6 bus de démo → le premier
+// VRAI changement (un import CSV de 9 bus) enregistre 6 + 9 et pousse l'ensemble au serveur.
+// Les deux correctifs précédents visaient la POUSSÉE (ne pas pousser au montage, pousser la
+// suppression sans attendre le debounce) ; la donnée fautive, elle, entrait par ici.
+//
+// Conséquence assumée : hors ligne avec un cache vide, ces écrans sont vides plutôt que
+// peuplés de démo — c'est le comportement juste pour un déploiement réel.
+export function seedOrEmpty<T>(seed: T[], hasSession: boolean): T[] {
+  return hasSession ? [] : seed;
+}
+
+export const useMinistries = () => load('bc_ministries', seedOrEmpty(INITIAL_MINISTRIES, hasServerSession()));
+export const useDepartments = () => load('bc_departments', seedOrEmpty(INITIAL_DEPARTMENTS, hasServerSession()));
 // projects/bus-lines : éditables (ProjectsView / BloomBusView), persistés en localStorage
 // ET synchronisés serveur (SYNCED_NAMES) → survivent au logout/purge et au multi-appareil.
-export const useProjects = () => load('bc_projects', INITIAL_PROJECTS);
-export const useBusLines = () => load('bc_bus_lines', INITIAL_BUS_LINES);
-export const useAdmins = () => load('bc_admins', INITIAL_ADMINS);
+export const useProjects = () => load('bc_projects', seedOrEmpty(INITIAL_PROJECTS, hasServerSession()));
+export const useBusLines = () => load('bc_bus_lines', seedOrEmpty(INITIAL_BUS_LINES, hasServerSession()));
+export const useAdmins = () => load('bc_admins', seedOrEmpty(INITIAL_ADMINS, hasServerSession()));
 export const activitiesSeed = INITIAL_ACTIVITIES;
