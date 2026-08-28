@@ -17,14 +17,15 @@ import {
 } from "lucide-react";
 import { LineChart, Line, XAxis, YAxis, Tooltip, Legend } from "recharts";
 import { Member, Branch, BloomBusEntity, Report, Event, FormDef, Department } from "../types";
-import { useBusLines, useDepartments, save } from "../data";
+import { useBusLines, useDepartments, useMinistries, useAdmins, save, labelFor } from "../data";
+import { resolveMemberRoles } from "../data/roles";
 import { importBusesFromCsv } from "../data/busImport";
 import { apiDeleteItem } from "../data/api";
 import { useSyncedSave } from "../data/useSyncedSave";
 import { CULTE_SLOT_KEYS, culteSlotLabel } from "../data/events";
 import { isBusReportLocked } from "../data/reportLock";
 import { toast } from "./ui/Toast";
-import { busInScope, bloomBusRoleOf, fullBloomBusAccess, canFillReportFor, canRegisterMemberViaBloomBus, FULL_SCOPE_ROLES } from "../data/scope";
+import { busInScope, bloomBusRoleOf, fullBloomBusAccess, canFillReportFor, canRegisterMemberViaBloomBus, canAssignBusRole, FULL_SCOPE_ROLES } from "../data/scope";
 import { moissonTotal, busVisitesTotal, busPresenceCulteTotal, busActivitesTotal, periodHealthLevels, periodRange, healthEvolutionSeries, Period, PeriodInput } from "../data/kpi";
 import { reportingWindow, weekId, weekLabel, mondaysInRange } from "../data/week";
 import { memberWeekStatus, membersFillRate } from "../data/completude";
@@ -362,6 +363,22 @@ export default function BloomBusView({
   const activitesTotal = busActivitesTotal(branchReports, busIds, kpiPeriod);
   const visitesPct = busMembers.length > 0 ? Math.min(100, Math.round((visites / busMembers.length) * 100)) : null;
   const presenceCultePct = busMembers.length > 0 ? Math.min(100, Math.round((presenceCulte / busMembers.length) * 100)) : null;
+
+  // §27 — attribution des fonctions du MODULE Bloom Bus. Elle ne vit QUE dans ce module : la
+  // fiche membre les affiche en lecture seule. Les options sont ouvertes une par une par
+  // canAssignBusRole (rang strictement supérieur ET membre dans le périmètre) — la même
+  // fonction que le garde serveur, pour que l'écran ne propose rien que le serveur refuserait.
+  const ministriesForBus = useMinistries();
+  const adminsForBus = useAdmins();
+  const operatorRolesForBus = operator ? [...resolveMemberRoles(operator, adminsForBus, ministriesForBus)] : [];
+  const BUS_ROLE_CHOICES: { value: string; role: string }[] = [
+    { value: "", role: "Membre" },
+    { value: "capitaine", role: "Capitaine de Bus" },
+    { value: "responsable_zone", role: "Responsable de Zone" },
+    { value: "responsable_commune", role: "Responsable de Commune" },
+  ];
+  const canAssign = (target: Member, role: string) =>
+    !!operator && canAssignBusRole(operator, operatorRolesForBus, target, role, busLines, departments, ministriesForBus);
 
   const isHierarchicalOperator = !!operator && (hasFullBloomBusAccess || bloomBusRole === "Responsable de Zone" || bloomBusRole === "Responsable de Commune");
   // Le roster reflète le NIVEAU sélectionné (comme la carte, cf. leaderPins) et requête les
@@ -1220,6 +1237,28 @@ export default function BloomBusView({
                           </div>
                           {editable && <Heart size={14} className="text-bc-green shrink-0" />}
                         </button>
+                        {/* §27 — fonction du MODULE. « Retirer » compte comme une attribution :
+                            l'option vide est ouverte au même contrôle que les autres, sinon on
+                            destituerait plus haut que soi. */}
+                        {operator && (() => {
+                          const courant = m.busRole ?? "";
+                          const ouvertes = BUS_ROLE_CHOICES.filter((c) => c.value === courant || canAssign(m, c.role));
+                          if (ouvertes.length <= 1) return null;
+                          return (
+                            <select
+                              aria-label={`Fonction Bloom Bus de ${m.firstName} ${m.lastName}`}
+                              value={courant}
+                              onChange={(e) => onUpdateMember({ ...m, busRole: (e.target.value || undefined) as Member["busRole"] })}
+                              className="shrink-0 border border-bc-border rounded-full px-2 py-1 text-[10px] font-bold bg-white text-bc-text"
+                            >
+                              {ouvertes.map((c) => (
+                                <option key={c.value} value={c.value} disabled={c.value !== courant && !canAssign(m, c.role)}>
+                                  {c.value ? labelFor(c.value) : "Aucune fonction"}
+                                </option>
+                              ))}
+                            </select>
+                          );
+                        })()}
                         <ReportStatusBoxes
                           memberId={m.id}
                           reports={branchReports}

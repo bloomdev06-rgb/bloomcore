@@ -26,6 +26,10 @@ export function resolveMemberRoles(member: Member, admins: AdminAccount[] = [], 
   if (PASTORAL_CURSUS.includes(member.pastoralCursus)) roles.add('Pasteur');
   if (ministries.some((m) => !(m as any).deletedAt && m.tuteurId === member.id)) roles.add('Ministre');
   for (const fn of Object.values(member.departments ?? {})) roles.add(roleForDeptFn(fn));
+  // Fonction du MODULE Bloom Bus : elle ne vit plus dans `departments` depuis la
+  // séparation §27, mais elle donne toujours le rôle correspondant (Capitaine de Bus,
+  // Responsable de Zone/Commune) — sans quoi le membre perdrait son périmètre territorial.
+  if (member.busRole) roles.add(roleForDeptFn(member.busRole));
   if (member.level === 'coach' || member.level === 'leader') roles.add(roleForLevel(member.level));
   if (member.level === 'nouveau') roles.add('Nouveau');
   roles.add('Membre');

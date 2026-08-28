@@ -20,7 +20,9 @@ for (const fn of DEPT_ROLE_OPTIONS) {
 
 // Les rôles de la hiérarchie Bloom Bus ne sont pas des options du menu : ils retombent sur
 // « membre » plutôt que de rester en mémoire à l'insu de l'utilisateur.
-for (const fn of ['responsable_zone', 'responsable_commune', 'responsable_section', 'tresorier']) {
+// (« capitaine » a rejoint cette liste avec la séparation du département et du module §27 :
+// c'est une fonction du MODULE, elle ne s'attribue plus depuis la fiche.)
+for (const fn of ['capitaine', 'responsable_zone', 'responsable_commune']) {
   assert.equal(asDeptRoleOption(fn), 'membre', `${fn} ne doit pas être préchargé`);
   assert.ok(!(DEPT_ROLE_OPTIONS as readonly string[]).includes(fn));
 }
@@ -36,6 +38,7 @@ for (const r of DEPT_ROLE_OPTIONS) {
   assert.notEqual(labelFor(r), r, `${r} doit avoir un libellé lisible`);
 }
 assert.equal(labelFor('responsable'), 'Responsable');
-assert.equal(labelFor('capitaine'), 'Capitaine de Bus');
+assert.equal(labelFor('tresorier'), 'Trésorier');
+assert.equal(labelFor('capitaine'), 'Capitaine de Bus'); // le libellé reste, l'option non
 
 console.log('deptRoleOption.check OK');

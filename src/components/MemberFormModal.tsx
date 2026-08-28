@@ -12,13 +12,16 @@ import { roleForDeptFn, roleForLevel } from "../../packages/shared/migrate";
 import { nearestBusLines } from "../data/geo";
 import { normalizePhone } from "../data/phone";
 
-// Fonctions proposées par le menu « Fonction occupée » de la fiche membre. Les rôles de la
-// hiérarchie Bloom Bus (responsable_zone, responsable_commune…) n'y figurent PAS : ils se
-// gèrent dans le module Bloom Bus, pas ici.
-export const DEPT_ROLE_OPTIONS = ["membre", "adjoint", "responsable", "capitaine"] as const;
+// Fonctions proposées par le menu « Fonction occupée » de la fiche membre : uniquement des
+// fonctions DE DÉPARTEMENT. Les fonctions du MODULE Bloom Bus (capitaine, responsable de
+// zone, responsable de commune) n'y figurent PAS — elles relèvent d'une autre réalité, se
+// gèrent dans le module Bloom Bus et vivent dans `Member.busRole`. Le département Bloom Bus,
+// lui, s'affecte ici comme n'importe quel autre : on peut en être adjoint sans être capitaine.
+export const DEPT_ROLE_OPTIONS = ["membre", "adjoint", "tresorier", "responsable_section", "responsable"] as const;
 export type DeptRoleOption = (typeof DEPT_ROLE_OPTIONS)[number];
 
-// Une fonction stockée hors de cette liste (typiquement un rôle Bloom Bus) ne doit JAMAIS être
+// Une fonction stockée hors de cette liste (typiquement une fonction territoriale Bloom Bus
+// d'une fiche non encore migrée) ne doit JAMAIS être
 // préchargée dans le menu : la valeur resterait en mémoire alors que le menu, n'ayant pas
 // l'option correspondante, afficherait autre chose — et c'est la mémoire qui serait
 // enregistrée. Le bouton d'affectation annonçait ainsi « comme Responsable de Zone » sans que

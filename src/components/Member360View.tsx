@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom';
 import { Member, Branch, Report, AuditLog, PermissionMatrix, Delegation, FormDef, CapabilityOverride, SpecialAuthorization } from '../types';
 import { useDepartments, useBusLines, useProjects, load, resolveCapability, labelFor } from '../data';
 import { responsableIdsFor } from '../data/notificationRules';
-import { busSupervisorsOf, memberAssignmentsByBranch } from '../data/scope';
+import { busSupervisorsOf, memberAssignmentsByBranch, bloomBusRoleOf } from '../data/scope';
 import { DEFAULT_OPERATOR_NAME } from '../data/operator';
 import { isRed } from '../data/kpi';
 import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend } from 'recharts';
@@ -122,6 +122,10 @@ export default function Member360View({ member, onClose, onEdit, onUpdate, repor
   const allDepartments = useDepartments();
   const BUS_LINES = useBusLines();
   const busLine = BUS_LINES.find(b => b.id === member.bloomBusId);
+  // §27 — fonction dans le MODULE Bloom Bus. bloomBusRoleOf est la source unique : elle couvre
+  // le champ dédié (busRole), le pont « responsable du département = sommet du module » et les
+  // fiches non encore migrées. La fiche l'AFFICHE, elle ne l'écrit jamais.
+  const busRoleLabel = bloomBusRoleOf(member, allDepartments);
   // Onglet Mentorat & Encadrement — données réelles (auparavant un stub statique).
   const deptResponsable = members.find(m => responsableIdsFor(member, members).includes(m.id));
   const territorialSupervisor = member.bloomBusId
@@ -600,11 +604,25 @@ export default function Member360View({ member, onClose, onEdit, onUpdate, repor
                           </div>
                         );
                       })()}
+                      {/* §27 — MODULE Bloom Bus, en LECTURE SEULE. C'est une réalité distincte du
+                          DÉPARTEMENT du même nom, listé plus haut : on peut être adjoint du
+                          département sans être capitaine, et capitaine sans appartenir au
+                          département. La fonction territoriale s'attribue dans le module, par
+                          quelqu'un de rang supérieur et dans le périmètre — jamais depuis la
+                          fiche, où rien ne garantirait cette double condition. */}
                       <div>
-                        <p className="text-xs font-bold text-bc-text-secondary uppercase">Bloom Bus</p>
-                        <div className="mt-2">
+                        <p className="text-xs font-bold text-bc-text-secondary uppercase">Bloom Bus (module)</p>
+                        <div className="mt-2 flex flex-wrap gap-2">
                           <span className="px-3 py-1 bg-bc-canvas text-bc-text-secondary text-xs font-bold rounded-full">{busLine ? `${busLine.name} · ${busLine.zone}` : 'Non rattaché'}</span>
+                          {busRoleLabel && (
+                            <span className="px-3 py-1 bg-bc-green/10 text-bc-text text-xs font-bold rounded-full">{busRoleLabel}</span>
+                          )}
                         </div>
+                        <p className="mt-1.5 text-[10px] text-bc-text-secondary italic">
+                          {busRoleLabel
+                            ? 'Fonction gérée dans le module Bloom Bus.'
+                            : 'Aucune fonction dans le module. Elle s\'attribue depuis le module Bloom Bus.'}
+                        </p>
                       </div>
                     </div>
                   </div>
