@@ -131,7 +131,15 @@ export default function BloomBusView({
   // serveur (apiPut débouncé) comme departments/ministries — pas de persistance manquante ici,
   // seulement le refresh multi-onglet en direct qu'aucune collection "component-owned" n'a.
   const [busLines, setBusLines] = useState<BloomBusEntity[]>(seedBus);
-  useEffect(() => { save('bc_bus_lines', busLines); }, [busLines]);
+  // Ne JAMAIS pousser au montage : le cache local peut être périmé (ex: suppression faite
+  // ailleurs, hors de ce navigateur) et le repousser tel quel ressusciterait des bus déjà
+  // supprimés côté serveur (computeDelta traite tout id absent du dernier snapshot serveur
+  // comme un upsert, pas une suppression à respecter). Seule une vraie édition doit pousser.
+  const skipFirstBusSync = useRef(true);
+  useEffect(() => {
+    if (skipFirstBusSync.current) { skipFirstBusSync.current = false; return; }
+    save('bc_bus_lines', busLines);
+  }, [busLines]);
 
   // Import CSV : parse → crée les bus, assigne le responsable existant sur chaque membre
   // (departments.dept_bloom_bus + bloomBusId) — même effet que AddBusModal + AttachExistingMemberModal combinés.
