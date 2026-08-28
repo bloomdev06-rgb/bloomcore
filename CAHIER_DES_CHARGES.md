@@ -136,6 +136,23 @@ Structure **Commune → Zone → Bloom Bus**. Commune, Zone et Bus sont des **en
 
 ### 5.1 bis Attribution des fonctions (arbitré le 28/08/2026)
 
+**Deux réalités à ne pas confondre.** Le *département* Bloom Bus et le *module* Bloom Bus
+fonctionnent indépendamment :
+
+| | Fonctions | Où stockées | Où s'attribuent-elles |
+|---|---|---|---|
+| **Département** Bloom Bus | responsable, adjoint, trésorier, responsable de section, membre | `departments['<dept bloom_bus>']` | fiche membre, comme tout département |
+| **Module** Bloom Bus | Capitaine de Bus, Responsable de Zone, Responsable de Commune | `Member.busRole` | module Bloom Bus uniquement |
+
+On peut être adjoint du département sans aucune fonction territoriale, et capitaine sans
+appartenir au département. **Seul pont** : le responsable du *département* est d'office le plus
+haut responsable du *module*, sous son Ministre de tutelle, les Pasteurs et les Admin.
+
+Avant la séparation, ces deux vocabulaires partageaient le même emplacement : nommer quelqu'un
+capitaine effaçait sa fonction dans le département. La migration (`scripts/migrate-bus-roles.ts`)
+déplace les valeurs territoriales vers `busRole` ; un membre qui n'a **pas de fonction propre au
+département** sort de la liste de ses membres.
+
 Le présent document décrivait qui **évalue** qui et qui **voit** quoi, mais pas qui **nomme**.
 Règle retenue :
 
@@ -161,7 +178,9 @@ nouveau capitaine lui est attribué.
 
 Ces fonctions s'attribuent **depuis le module Bloom Bus**, jamais depuis la fiche membre, qui
 n'en affiche qu'un rappel en lecture seule. Le contrôle est appliqué **côté serveur**
-(`canAssignBusRole`, packages/domain/scope.ts) : aucun chemin d'écriture ne le contourne.
+(`canAssignBusRole`, packages/domain/scope.ts) : aucun chemin d'écriture ne le contourne. Le
+**retrait** obéit à la même règle que l'attribution — sans quoi un Capitaine destituerait un
+Responsable de Commune en le « ramenant » à un rang qu'il domine.
 
 ### 5.2 Deux rapports distincts
 

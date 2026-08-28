@@ -263,6 +263,17 @@ Fonctions du département spécial **Bloom Bus**, à trois niveaux (**Commune �
 - **Cascade de saisie** : le Capitaine rédige le spirituel des **membres de son bus** ; le Resp. Zone celui des **Capitaines** ; le Resp. Commune celui des **Resp. Zone**. Le Capitaine rédige aussi le **rapport d'activité** du bus (`rapport_bloom_bus_life`).
 
 ## 9.3 bis Attribution des fonctions
+
+**Département Bloom Bus ≠ Module Bloom Bus.** Ce sont deux réalités indépendantes. Le
+DÉPARTEMENT a ses fonctions propres (responsable, adjoint, trésorier, responsable de section),
+qui s'attribuent depuis la fiche membre comme pour tout autre département. Le MODULE a ses
+fonctions territoriales (Capitaine de Bus, Responsable de Zone, Responsable de Commune), qui
+vivent dans un champ dédié (`Member.busRole`) et s'attribuent **dans le module**. On peut donc
+être adjoint du département sans être capitaine, et capitaine sans appartenir au département.
+
+**Seul pont entre les deux** : le responsable du DÉPARTEMENT Bloom Bus est d'office le plus haut
+responsable du MODULE — sous son Ministre de tutelle, les Pasteurs et les Admin.
+
 Un responsable nomme **dans son périmètre** et **strictement sous son niveau** : le Resp. de
 Zone nomme les Capitaines de sa zone, le Resp. de Commune les Resp. de Zone et Capitaines de sa
 commune. Les Resp. de Commune relèvent du Responsable du département Bloom Bus, du Ministre de
