@@ -4,7 +4,7 @@
 // pas diverger sur la sémantique des capacités et du scope.
 import { Member, Ministry, PermissionMatrix, Delegation, AdminAccount, Department, BloomBusEntity, SpecialAuthorization, CapabilityOverride } from '../packages/domain/types.ts';
 import { resolveCapability } from '../packages/domain/permissions.ts';
-import { inMemberScope, canFillReportFor, busInScope, fullBloomBusAccess, bloomBusRoleOf, MULTI_BRANCH_ROLES, COACH_AND_ABOVE, canManageAccountOf, bestRank } from '../packages/domain/scope.ts';
+import { inMemberScope, canFillReportFor, busInScope, fullBloomBusAccess, bloomBusRoleOf, MULTI_BRANCH_ROLES, COACH_AND_ABOVE, canManageAccountOf, bestRank, canAssignBusRole } from '../packages/domain/scope.ts';
 import { isBusReportLocked } from '../packages/domain/reportLock.ts';
 import { getKv } from './datastore.ts';
 import { GuardError, readCollection, canonical } from './guards.ts';
@@ -263,6 +263,38 @@ export async function assertCanWrite(name: string, ctx: RbacContext, incoming: a
           for (const f of blockedFields) (item as any).healthKPIs[f] = stored.healthKPIs?.[f];
         }
       }
+      // §27 — les fonctions Bloom Bus (capitaine, responsable de zone/commune, responsable
+      // du département) ne s'attribuent PAS depuis la fiche membre : elles relèvent du module
+      // Bloom Bus et d'une hiérarchie territoriale propre. Le contrôle vit ici, côté serveur,
+      // pour qu'aucun chemin d'écriture — formulaire, import, appel direct — ne le contourne.
+      // Règle : rang strictement supérieur ET membre dans le périmètre (voir canAssignBusRole).
+      {
+        const busDeptIds = new Set(
+          (await readCollection('departments') as Department[])
+            .filter((d) => d.specialFunction === 'bloom_bus').map((d) => d.id),
+        );
+        if (busDeptIds.size) {
+          const storedById2 = new Map((await readCollection(name, true)).map((x: any) => [String(x.id), x]));
+          const allDepts = await readCollection('departments') as Department[];
+          const allMinistries = await readCollection('ministries') as Ministry[];
+          const allBus = await readCollection('bus_lines') as BloomBusEntity[];
+          for (const item of await touchedItems(name, incoming)) {
+            const before = storedById2.get(String((item as any).id));
+            for (const deptId of busDeptIds) {
+              const avant = before?.departments?.[deptId];
+              const apres = (item as Member).departments?.[deptId];
+              if (canonical(avant) === canonical(apres)) continue; // fonction inchangée
+              const cible = (before ?? item) as Member;
+              const roleVise = roleForDeptFn(apres ?? 'membre');
+              if (!canAssignBusRole(member, roles, cible, roleVise, allBus, allDepts, allMinistries)) {
+                throw new GuardError(403,
+                  `members: ${item.id} — l'attribution de la fonction Bloom Bus « ${roleVise} » dépasse votre périmètre ou votre niveau`);
+              }
+            }
+          }
+        }
+      }
+
       // §9.2 — jalons de baptême, même repinçage, pour la capacité déléguable
       // `modifier_jalons_bapteme_integration`. Elle n'était appliquée QUE côté client
       // (ProgrammesView, boutons « Inscrire au baptême » / avancement d'étape) : la révoquer

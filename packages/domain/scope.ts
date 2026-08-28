@@ -344,3 +344,59 @@ export function canFillReportFor(
   const bus = busLines.find((b) => b.id === target.bloomBusId);
   return !!bus && busInScope(operator, bus, role, busLines, departments);
 }
+
+// --- Attribution des fonctions Bloom Bus (§27) ---------------------------------------------
+// Décisions métier arbitrées le 28/08/2026, absentes du cahier des charges initial qui ne
+// décrivait que qui ÉVALUE qui et qui VOIT quoi, jamais qui NOMME :
+//   a. un responsable nomme dans son périmètre territorial (un Resp. de Zone nomme les
+//      capitaines de sa zone) ;
+//   c. uniquement des fonctions STRICTEMENT sous la sienne — jamais son propre niveau ;
+//   d. les Responsables de Commune sont nommés par le Responsable du département Bloom Bus,
+//      le Ministre de tutelle, les Pasteurs et les comptes Admin ;
+//   b. ces fonctions sont indépendantes de l'évolution du membre : un Capitaine peut n'être
+//      qu'un « boss » dans son parcours. Le §9.4 (« pas de gestion de l'évolution des
+//      membres ») n'est donc PAS contredit — une affectation Bloom Bus n'est pas une évolution.
+//
+// Du plus élevé au plus bas. 'Responsable' = responsable DU DÉPARTEMENT Bloom Bus, sommet du
+// module (c'est ce que renvoie bloomBusRoleOf pour la fonction `responsable`).
+export const BUS_ROLE_LADDER = [
+  'Responsable', 'Responsable de Commune', 'Responsable de Zone', 'Capitaine de Bus', 'Membre',
+] as const;
+
+export function busRankOf(role: string | undefined): number {
+  const i = BUS_ROLE_LADDER.indexOf(role as typeof BUS_ROLE_LADDER[number]);
+  return i === -1 ? BUS_ROLE_LADDER.length : i; // inconnu = plus bas, fail-closed
+}
+
+// L'opérateur peut-il attribuer `targetRole` à `target` ? Deux conditions cumulatives pour la
+// ligne territoriale : un rang STRICTEMENT supérieur, et le membre visé dans son périmètre.
+export function canAssignBusRole(
+  operator: Member,
+  operatorRoles: string[],
+  target: Member,
+  targetRole: string,
+  busLines: BloomBusEntity[],
+  departments: Department[],
+  ministries: Ministry[] = [],
+): boolean {
+  if (!BUS_ROLE_LADDER.includes(targetRole as typeof BUS_ROLE_LADDER[number])) return false;
+
+  // Décision (d) : Pasteurs et Admin passent partout, comme sur le reste de l'application.
+  if (operatorRoles.some(r => FULL_SCOPE_ROLES.includes(r))) return true;
+
+  // …et le Ministre de tutelle DU ministère qui porte le département Bloom Bus — pas
+  // n'importe quel ministre, sinon un ministre d'un autre périmètre nommerait ici.
+  const busDept = departments.find(d => d.specialFunction === 'bloom_bus');
+  if (busDept && ministries.some(m => m.id === busDept.ministryId && m.tuteurId === operator.id)) return true;
+
+  const opRole = bloomBusRoleOf(operator, departments);
+  if (!opRole) return false; // aucune fonction Bloom Bus → ne nomme personne
+  if (busRankOf(opRole) >= busRankOf(targetRole)) return false; // (c) strictement en dessous
+
+  // Le responsable du département couvre tout le module ; en dessous, le périmètre
+  // territorial s'applique au bus du membre visé.
+  if (opRole === 'Responsable') return true;
+  const targetBus = busLines.find(b => b.id === target.bloomBusId);
+  if (!targetBus) return false; // membre sans bus → hors de toute zone/commune
+  return busInScope(operator, targetBus, opRole, busLines, departments);
+}

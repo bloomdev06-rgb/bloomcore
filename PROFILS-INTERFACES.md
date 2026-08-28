@@ -262,8 +262,19 @@ Fonctions du département spécial **Bloom Bus**, à trois niveaux (**Commune �
 - **Suivi Bloom Bus** (ici) : c'est où l'on **rédige le rapport de santé spirituelle** (`rapport_bloom_bus_member`, 5 dimensions).
 - **Cascade de saisie** : le Capitaine rédige le spirituel des **membres de son bus** ; le Resp. Zone celui des **Capitaines** ; le Resp. Commune celui des **Resp. Zone**. Le Capitaine rédige aussi le **rapport d'activité** du bus (`rapport_bloom_bus_life`).
 
+## 9.3 bis Attribution des fonctions
+Un responsable nomme **dans son périmètre** et **strictement sous son niveau** : le Resp. de
+Zone nomme les Capitaines de sa zone, le Resp. de Commune les Resp. de Zone et Capitaines de sa
+commune. Les Resp. de Commune relèvent du Responsable du département Bloom Bus, du Ministre de
+tutelle, des Pasteurs et des Admin. L'attribution se fait **dans ce module**, pas depuis la
+fiche membre — un Resp. de Zone gère une affectation sans avoir accès à la fiche complète du
+membre. Détail et tableau : CAHIER_DES_CHARGES §5.1 bis.
+
 ## 9.4 Limites
-Mono-branche ; périmètre territorial ; pas d'Administration ; **pas de gestion de l'évolution des membres** (réservée aux départements).
+Mono-branche ; périmètre territorial ; pas d'Administration ; **pas de gestion de l'évolution des
+membres** (réservée aux départements). À ne pas confondre avec l'attribution des fonctions
+Bloom Bus (§9.3 bis), qui relève bien de ces responsables : une fonction territoriale n'est pas
+un palier d'évolution — un Capitaine peut n'être qu'un « Boss » dans son parcours.
 
 ---
 

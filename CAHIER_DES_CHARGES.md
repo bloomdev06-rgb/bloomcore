@@ -134,6 +134,35 @@ Structure **Commune → Zone → Bloom Bus**. Commune, Zone et Bus sont des **en
 
 **Fonctions** : Capitaine de Bus · Responsable de Zone · Responsable de Commune.
 
+### 5.1 bis Attribution des fonctions (arbitré le 28/08/2026)
+
+Le présent document décrivait qui **évalue** qui et qui **voit** quoi, mais pas qui **nomme**.
+Règle retenue :
+
+| Qui nomme | Peut attribuer | Dans quel périmètre |
+|---|---|---|
+| Responsable de Zone | Capitaine de Bus, Membre | sa zone |
+| Responsable de Commune | Resp. de Zone, Capitaine, Membre | sa commune |
+| Responsable du département Bloom Bus | tous les niveaux en dessous | tout le module |
+| Ministre de tutelle, Pasteurs, Admin | tous les niveaux | sans restriction |
+
+Deux conditions **cumulatives** pour la ligne territoriale : un niveau **strictement supérieur**
+à celui attribué — on ne nomme jamais à son propre rang — et le membre visé **dans son
+périmètre**. Un Capitaine ne nomme donc personne au-dessus de « Membre ».
+
+**Ces fonctions sont indépendantes de l'évolution du membre.** Un Capitaine ou un Responsable
+de Zone peut n'être qu'un « Boss » dans son parcours : Bloom Bus est une entité de
+fonctionnement, pas un palier d'évolution. Le §9.4 de PROFILS-INTERFACES (« pas de gestion de
+l'évolution des membres ») n'est donc pas contredit — une affectation Bloom Bus n'est pas une
+évolution.
+
+**Un bus n'appartient pas à son capitaine.** Si celui-ci est rétrogradé, le bus demeure ; un
+nouveau capitaine lui est attribué.
+
+Ces fonctions s'attribuent **depuis le module Bloom Bus**, jamais depuis la fiche membre, qui
+n'en affiche qu'un rappel en lecture seule. Le contrôle est appliqué **côté serveur**
+(`canAssignBusRole`, packages/domain/scope.ts) : aucun chemin d'écriture ne le contourne.
+
 ### 5.2 Deux rapports distincts
 
 **`rapport_bloom_bus_member`** — suivi spirituel/santé du membre (5 dimensions : spirituelle, sociale, santé physique, situation financière, présence au culte). **Alimente directement les `healthKPIs`** du radar.

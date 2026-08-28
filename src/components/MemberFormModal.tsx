@@ -12,6 +12,23 @@ import { roleForDeptFn, roleForLevel } from "../../packages/shared/migrate";
 import { nearestBusLines } from "../data/geo";
 import { normalizePhone } from "../data/phone";
 
+// Fonctions proposées par le menu « Fonction occupée » de la fiche membre. Les rôles de la
+// hiérarchie Bloom Bus (responsable_zone, responsable_commune…) n'y figurent PAS : ils se
+// gèrent dans le module Bloom Bus, pas ici.
+export const DEPT_ROLE_OPTIONS = ["membre", "adjoint", "responsable", "capitaine"] as const;
+export type DeptRoleOption = (typeof DEPT_ROLE_OPTIONS)[number];
+
+// Une fonction stockée hors de cette liste (typiquement un rôle Bloom Bus) ne doit JAMAIS être
+// préchargée dans le menu : la valeur resterait en mémoire alors que le menu, n'ayant pas
+// l'option correspondante, afficherait autre chose — et c'est la mémoire qui serait
+// enregistrée. Le bouton d'affectation annonçait ainsi « comme Responsable de Zone » sans que
+// personne ne l'ait choisi. On retombe sur « membre », neutre et présent dans la liste.
+export function asDeptRoleOption(fn: unknown): DeptRoleOption {
+  return (DEPT_ROLE_OPTIONS as readonly string[]).includes(String(fn))
+    ? (fn as DeptRoleOption)
+    : "membre";
+}
+
 // Système ivoirien : primaire → lycée + niveaux du supérieur.
 export const SCHOOL_LEVELS = [
   "CP1", "CP2", "CE1", "CE2", "CM1", "CM2",
@@ -103,9 +120,7 @@ export default function MemberFormModal({
   const [baptismDate, setBaptismDate] = useState("");
   const [baptismViaDepartment, setBaptismViaDepartment] = useState(false);
   const [deptName, setDeptName] = useState("dept_louange");
-  const [deptRole, setDeptRole] = useState<
-    "responsable" | "adjoint" | "membre" | "capitaine"
-  >("membre");
+  const [deptRole, setDeptRole] = useState<DeptRoleOption>("membre");
   const [depts, setDepts] = useState<Member["departments"]>({});
   // deptId -> branche : une affectation secondaire hors branche d'attache (Coach+ uniquement,
   // cf. COACH_AND_ABOVE). Absent = affectation dans la branche d'attache (memberBranch).
@@ -144,7 +159,7 @@ export default function MemberFormModal({
       setBaptismViaDepartment(member.baptismViaDepartment ?? false);
       const firstDept = lockDepartmentId || Object.keys(member.departments)[0] || "dept_louange";
       setDeptName(firstDept);
-      setDeptRole((member.departments[firstDept] as any) || "membre");
+      setDeptRole(asDeptRoleOption(member.departments[firstDept]));
       setDepts({ ...member.departments });
       setDeptBranches({ ...(member.deptBranches ?? {}) });
       setPendingDeptBranch(member.branch);
@@ -838,13 +853,12 @@ export default function MemberFormModal({
                   <select
                     id="form-dept-role"
                     value={deptRole}
-                    onChange={(e) => setDeptRole(e.target.value as any)}
+                    onChange={(e) => setDeptRole(asDeptRoleOption(e.target.value))}
                     className="w-full border border-bc-border rounded-full px-2 py-1.5 text-xs bg-white"
                   >
-                    <option value="membre">Membre</option>
-                    <option value="adjoint">Adjoint</option>
-                    <option value="responsable">Responsable</option>
-                    <option value="capitaine">Capitaine de Bus</option>
+                    {DEPT_ROLE_OPTIONS.map((r) => (
+                      <option key={r} value={r}>{labelFor(r)}</option>
+                    ))}
                   </select>
                 </div>
               </div>
@@ -869,13 +883,12 @@ export default function MemberFormModal({
                     <select
                       id="form-dept-role"
                       value={deptRole}
-                      onChange={(e) => setDeptRole(e.target.value as any)}
+                      onChange={(e) => setDeptRole(asDeptRoleOption(e.target.value))}
                       className="w-full border border-bc-border rounded-full px-2 py-1.5 text-xs bg-white"
                     >
-                      <option value="membre">Membre</option>
-                      <option value="adjoint">Adjoint</option>
-                      <option value="responsable">Responsable</option>
-                      <option value="capitaine">Capitaine de Bus</option>
+                      {DEPT_ROLE_OPTIONS.map((r) => (
+                        <option key={r} value={r}>{labelFor(r)}</option>
+                      ))}
                     </select>
                   </div>
                 </div>
