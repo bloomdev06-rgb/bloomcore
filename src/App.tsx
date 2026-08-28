@@ -105,12 +105,18 @@ export default function App() {
   const [loggedInMemberId, setLoggedInMemberId] = useState<string | null>(() => load('bc_loggedInMemberId', null));
 
   // Persist on change — single swap point lives in ./data.
-  useEffect(() => { save('bc_members', members); }, [members]);
-  useEffect(() => { save('bc_events', events); }, [events]);
-  useEffect(() => { save('bc_reports', reports); }, [reports]);
-  useEffect(() => { save('bc_audits', audits); }, [audits]);
-  useEffect(() => { save('bc_notifications', notifications); }, [notifications]);
-  useEffect(() => { save('bc_permissions', permissionMatrix); }, [permissionMatrix]);
+  // AUCUNE de ces collections ne doit être sauvegardée au premier rendu. Cet effet poussait
+  // au serveur l'état INITIAL du composant — c'est-à-dire le cache local, qui peut dater
+  // d'AVANT des modifications faites depuis un autre appareil ou un autre onglet. C'est ce qui
+  // a écrasé des promotions de membres par une version antérieure : le cache, plus ancien que
+  // le serveur, l'emportait quand même (computeDelta traite tout item différent comme un
+  // upsert, sans comparer les dates). Voir src/data/useSyncedSave.ts.
+  useSyncedSave('bc_members', members);
+  useSyncedSave('bc_events', events);
+  useSyncedSave('bc_reports', reports);
+  useSyncedSave('bc_audits', audits);
+  useSyncedSave('bc_notifications', notifications);
+  useSyncedSave('bc_permissions', permissionMatrix);
   // Garde globale : re-valide activeTab à chaque changement de rôle ou de matrice, plutôt que
   // de dépendre uniquement de l'effet de bord local du bouton de rôle dans Sidebar.tsx.
   // 'profile' est volontairement hors matrice (chacun voit toujours son propre profil).
@@ -126,8 +132,8 @@ export default function App() {
       setActiveTab('dashboard');
     }
   }, [simulatedRole, activeTab, permissionMatrix]);
-  useEffect(() => { save('bc_settings', settings); }, [settings]);
-  useEffect(() => { save('bc_forms', forms); }, [forms]);
+  useSyncedSave('bc_settings', settings);
+  useSyncedSave('bc_forms', forms);
   // Jamais de sauvegarde au montage : elle repousserait le cache local (possiblement vide
   // ou périmé) et pourrait EFFACER les départements côté serveur. Voir useSyncedSave.
   useSyncedSave('bc_departments', departments);
