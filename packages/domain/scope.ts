@@ -400,3 +400,40 @@ export function canAssignBusRole(
   if (!targetBus) return false; // membre sans bus → hors de toute zone/commune
   return busInScope(operator, targetBus, opRole, busLines, departments);
 }
+
+// --- Affectations d'un membre, regroupées par branche (§26) ---------------------------------
+// Un Coach et au-dessus peut servir dans plusieurs départements, y compris dans les DEUX
+// branches, avec une fonction différente à chaque fois. La fiche membre affichait ces
+// affectations à plat, sans la fonction occupée — impossible d'y lire « responsable ici,
+// simple membre là ». Cette fonction produit la vue attendue : deux groupes, chacun listant
+// département + fonction.
+//
+// La branche d'une affectation est `effectiveBranchFor` : l'override deptBranches quand il
+// existe (département secondaire dans l'autre branche), sinon la branche d'attache du membre.
+// Un département portant le même rôle fonctionnel dans les deux branches existe en DEUX
+// enregistrements distincts (church/light, reliés par familyId) : les deux apparaissent donc
+// naturellement, chacun dans son groupe.
+export interface MemberAssignment {
+  deptId: string;
+  name: string;      // nom du département, ou son id s'il a disparu
+  fn: string;        // fonction STOCKÉE (membre, responsable…) — libellé via labelFor
+  missing: boolean;  // le département n'existe plus : à signaler plutôt qu'à masquer
+}
+
+export function memberAssignmentsByBranch(
+  member: Member,
+  departments: Department[],
+): { church: MemberAssignment[]; light: MemberAssignment[]; global: MemberAssignment[] } {
+  const byId = new Map(departments.map((d) => [d.id, d]));
+  const out = { church: [] as MemberAssignment[], light: [] as MemberAssignment[], global: [] as MemberAssignment[] };
+  for (const [deptId, fn] of Object.entries(member.departments ?? {})) {
+    const dept = byId.get(deptId);
+    const branch = effectiveBranchFor(member, deptId);
+    const bucket = branch === 'light' ? out.light : branch === 'global' ? out.global : out.church;
+    bucket.push({ deptId, name: dept?.name ?? deptId, fn: String(fn), missing: !dept });
+  }
+  // Tri stable par nom : l'ordre des clés d'un objet suit l'ordre d'insertion, ce qui ferait
+  // sauter les lignes d'une consultation à l'autre.
+  for (const list of [out.church, out.light, out.global]) list.sort((a, b) => a.name.localeCompare(b.name, 'fr'));
+  return out;
+}

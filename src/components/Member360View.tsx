@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom';
 import { Member, Branch, Report, AuditLog, PermissionMatrix, Delegation, FormDef, CapabilityOverride, SpecialAuthorization } from '../types';
 import { useDepartments, useBusLines, useProjects, load, resolveCapability, labelFor } from '../data';
 import { responsableIdsFor } from '../data/notificationRules';
-import { busSupervisorsOf } from '../data/scope';
+import { busSupervisorsOf, memberAssignmentsByBranch } from '../data/scope';
 import { DEFAULT_OPERATOR_NAME } from '../data/operator';
 import { isRed } from '../data/kpi';
 import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend } from 'recharts';
@@ -116,20 +116,23 @@ export default function Member360View({ member, onClose, onEdit, onUpdate, repor
     setCoachReportNotes('');
     setShowCoachReportModal(false);
   };
-  const INITIAL_DEPARTMENTS = useDepartments();
+  // Départements RÉELS (hook live). La variable s'appelait INITIAL_DEPARTMENTS, ce qui laissait
+  // croire au jeu de démonstration codé en dur alors qu'elle contient les données courantes —
+  // nom corrigé, l'ambiguïté avait déjà induit un diagnostic erroné.
+  const allDepartments = useDepartments();
   const BUS_LINES = useBusLines();
   const busLine = BUS_LINES.find(b => b.id === member.bloomBusId);
   // Onglet Mentorat & Encadrement — données réelles (auparavant un stub statique).
   const deptResponsable = members.find(m => responsableIdsFor(member, members).includes(m.id));
   const territorialSupervisor = member.bloomBusId
-    ? members.find(m => busSupervisorsOf(member, members, BUS_LINES, INITIAL_DEPARTMENTS).some(s => s.id === m.id))
+    ? members.find(m => busSupervisorsOf(member, members, BUS_LINES, allDepartments).some(s => s.id === m.id))
     : undefined;
   const cursusMentor = members.find(m => m.id === member.mentorId);
   // P4.9(c) — parcours à étapes : le département "spécial" du membre qui porte ce workflow, s'il y en a un.
   const parcoursDeptId = Object.keys(member.departments).find(
-    id => INITIAL_DEPARTMENTS.find(d => d.id === id)?.specialFunction === 'parcours_etapes'
+    id => allDepartments.find(d => d.id === id)?.specialFunction === 'parcours_etapes'
   );
-  const parcoursDept = parcoursDeptId ? INITIAL_DEPARTMENTS.find(d => d.id === parcoursDeptId) : undefined;
+  const parcoursDept = parcoursDeptId ? allDepartments.find(d => d.id === parcoursDeptId) : undefined;
   const [activeTab, setActiveTab] = useState('perso');
   const tabsRef = useRef<HTMLDivElement>(null);
 
@@ -518,11 +521,11 @@ export default function Member360View({ member, onClose, onEdit, onUpdate, repor
                     <h4 className="font-ui font-bold text-bc-text mb-4">Historique des Fonctions</h4>
                     <div className="space-y-3">
                       {Object.entries(member.departments).map(([deptId, role]) => {
-                        const dept = INITIAL_DEPARTMENTS.find(d => d.id === deptId);
+                        const dept = allDepartments.find(d => d.id === deptId);
                         return (
                           <div key={deptId} className="flex justify-between items-center">
                             <span className="text-sm text-bc-text-secondary">{dept ? dept.name : deptId}</span>
-                            <span className="text-xs font-bold text-bc-text bg-bc-canvas px-2 py-1 rounded">{role}</span>
+                            <span className="text-xs font-bold text-bc-text bg-bc-canvas px-2 py-1 rounded">{labelFor(role)}</span>
                           </div>
                         );
                       })}
@@ -545,23 +548,58 @@ export default function Member360View({ member, onClose, onEdit, onUpdate, repor
                           </span>
                         </div>
                       </div>
-                      <div>
-                        <p className="text-xs font-bold text-bc-text-secondary uppercase">Départements</p>
-                        <div className="mt-2 flex flex-wrap gap-2">
-                          {Object.keys(member.departments).map(deptId => {
-                            const dept = INITIAL_DEPARTMENTS.find(d => d.id === deptId);
-                            const secondaryBranch = member.deptBranches?.[deptId];
-                            return (
-                              <span key={deptId} className="px-3 py-1 bg-bc-canvas text-bc-text-secondary text-xs font-bold rounded-full">
-                                {dept ? dept.name : deptId}
-                                {secondaryBranch && (
-                                  <span className="ml-1 text-bc-purple">· {secondaryBranch === 'church' ? 'Church' : 'Light'}</span>
-                                )}
-                              </span>
-                            );
-                          })}
-                        </div>
-                      </div>
+                      {/* §26 — affectations REGROUPÉES PAR BRANCHE, chacune avec la fonction
+                          occupée. Avant : une liste à plat des seuls noms de départements, où
+                          « responsable ici, simple membre là » était illisible, et où la branche
+                          n'apparaissait qu'en suffixe discret sur les affectations secondaires.
+                          Le regroupement est calculé par memberAssignmentsByBranch (fonction
+                          pure, testée sur les cinq cas d'affectation multiple). */}
+                      {(() => {
+                        const groupes = memberAssignmentsByBranch(member, allDepartments);
+                        const blocs: [string, typeof groupes.church][] = [
+                          ['Bloom Church', groupes.church],
+                          ['Bloom Light', groupes.light],
+                          ['Transverse', groupes.global],
+                        ];
+                        const total = groupes.church.length + groupes.light.length + groupes.global.length;
+                        if (!total) {
+                          return (
+                            <div>
+                              <p className="text-xs font-bold text-bc-text-secondary uppercase">Départements</p>
+                              <p className="mt-2 text-xs text-bc-text-secondary italic">Aucune affectation.</p>
+                            </div>
+                          );
+                        }
+                        return (
+                          <div className="space-y-3">
+                            <p className="text-xs font-bold text-bc-text-secondary uppercase">Départements</p>
+                            {blocs.filter(([, l]) => l.length > 0).map(([titre, liste]) => (
+                              <div key={titre}>
+                                <p className="text-[10px] font-bold text-bc-text-secondary/70 uppercase tracking-wide">{titre}</p>
+                                <div className="mt-1.5 flex flex-wrap gap-2">
+                                  {liste.map(a => (
+                                    <span
+                                      key={a.deptId}
+                                      className={`px-3 py-1 text-xs font-bold rounded-full ${
+                                        a.missing
+                                          ? 'bg-bc-danger/10 text-bc-danger'
+                                          : 'bg-bc-canvas text-bc-text-secondary'
+                                      }`}
+                                      // Un département supprimé n'est pas masqué : c'est ainsi que
+                                      // des affectations devenaient invisibles sans être perdues.
+                                      title={a.missing ? 'Ce département n\'existe plus' : undefined}
+                                    >
+                                      {a.name}
+                                      <span className="ml-1 text-bc-text">· {labelFor(a.fn)}</span>
+                                      {a.missing && <span className="ml-1">· supprimé</span>}
+                                    </span>
+                                  ))}
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        );
+                      })()}
                       <div>
                         <p className="text-xs font-bold text-bc-text-secondary uppercase">Bloom Bus</p>
                         <div className="mt-2">
