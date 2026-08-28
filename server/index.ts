@@ -15,6 +15,7 @@ import cookieParser from 'cookie-parser';
 import { getCollection, setCollection, appendToCollection, getKv, setKv, getCredential, syncOpSeen, markSyncOp, insertWebhookEvent, markWebhookProcessed, insertPushSub, deletePushSub } from './datastore.ts';
 import { hashPassword, verifyPassword, signToken, verifyToken, createOneTimeToken, consumeOneTimeToken, upsertCredentials, requireSecret, usingInsecureSecret, resolveBindHost, TOKEN_TTL_MS } from './auth.ts';
 import { ensureSeeded } from './seed.ts';
+import { runBusRoleMigration } from './migrateBusRoles.ts';
 import { runBootMigration } from './bootMigrate.ts';
 import { applyWrite, readCollection, deltaToWhole, GuardError } from './guards.ts';
 import { buildContext, assertCanWrite, assertCanDelete, filterReadable, filterKv, preservedIds, RbacContext } from './rbac.ts';
@@ -39,6 +40,10 @@ import {
 // ensureSeeded ne fasse que combler ce qui manque (idempotent, no-op en SQLite).
 await runBootMigration();
 await ensureSeeded();
+// §27 — déplace les fonctions territoriales Bloom Bus vers leur champ dédié. Idempotente :
+// no-op à tous les démarrages suivants. Sans elle, un membre ne peut pas cumuler une fonction
+// du département et une fonction du module — les deux occuperaient le même emplacement.
+await runBusRoleMigration();
 
 const app = express();
 // Derrière Traefik/Dokploy, sans ceci req.ip = l'IP du reverse-proxy pour TOUT le monde :

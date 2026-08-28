@@ -32,6 +32,14 @@ export function asDeptRoleOption(fn: unknown): DeptRoleOption {
     : "membre";
 }
 
+// Vocabulaire du MODULE Bloom Bus — n'a rien à faire dans l'emplacement du département. Une
+// fiche d'avant la séparation §27 peut encore en porter (les deux orthographes) tant que la
+// migration n'a pas tourné.
+const TERRITORIAL_FNS = [
+  "capitaine", "responsable_zone", "responsable_commune",
+  "Capitaine de Bus", "Responsable de Zone", "Responsable de Commune",
+];
+
 // Système ivoirien : primaire → lycée + niveaux du supérieur.
 export const SCHOOL_LEVELS = [
   "CP1", "CP2", "CE1", "CE2", "CM1", "CM2",
@@ -163,7 +171,14 @@ export default function MemberFormModal({
       const firstDept = lockDepartmentId || Object.keys(member.departments)[0] || "dept_louange";
       setDeptName(firstDept);
       setDeptRole(asDeptRoleOption(member.departments[firstDept]));
-      setDepts({ ...member.departments });
+      // Filet §27 — une fiche non encore migrée peut porter une fonction TERRITORIALE dans
+      // l'emplacement du département (avant que la migration au démarrage du serveur ne l'ait
+      // déplacée). La charger telle quelle ferait rejeter l'enregistrement par le serveur, qui
+      // n'accepte plus ce vocabulaire ici. On l'écarte donc de l'écran : la fonction reste
+      // lisible et modifiable dans le module Bloom Bus, seul endroit qui la gère.
+      setDepts(Object.fromEntries(
+        Object.entries(member.departments).filter(([, fn]) => !TERRITORIAL_FNS.includes(String(fn))),
+      ));
       setDeptBranches({ ...(member.deptBranches ?? {}) });
       setPendingDeptBranch(member.branch);
       setBusZone(busLines.find((b) => b.id === member.bloomBusId)?.zone || "");
