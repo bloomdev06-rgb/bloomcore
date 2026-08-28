@@ -19,6 +19,7 @@ import { LineChart, Line, XAxis, YAxis, Tooltip, Legend } from "recharts";
 import { Member, Branch, BloomBusEntity, Report, Event, FormDef, Department } from "../types";
 import { useBusLines, useDepartments, save } from "../data";
 import { importBusesFromCsv } from "../data/busImport";
+import { apiDeleteItem } from "../data/api";
 import { CULTE_SLOT_KEYS, culteSlotLabel } from "../data/events";
 import { isBusReportLocked } from "../data/reportLock";
 import { toast } from "./ui/Toast";
@@ -155,6 +156,9 @@ export default function BloomBusView({
   const [deletingBus, setDeletingBus] = useState<BloomBusEntity | null>(null);
   const deleteBusLine = (bus: BloomBusEntity) => {
     setBusLines((prev) => prev.filter((b) => b.id !== bus.id));
+    // Push immédiat en plus du débounce sur `busLines` (:~131) : sans ça la suppression
+    // ne survit pas si l'utilisateur navigue/recharge avant les 1.5s de débounce.
+    void apiDeleteItem('bus_lines', bus.id).catch(() => {});
     // Casse le rattachement des membres orphelins (kpi.ts/completude.ts s'appuient sur
     // ce champ pour toute agrégation par bus — un id qui pointe dans le vide fausserait
     // silencieusement les KPI de leur nouveau bus par défaut).

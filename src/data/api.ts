@@ -457,6 +457,20 @@ export async function apiDeleteMember(id: string): Promise<boolean> {
   }
 }
 
+export async function apiDeleteItem(collection: string, id: string): Promise<boolean> {
+  if (!isAuthed()) return false;
+  try {
+    const res = await fetch(`${API_BASE}/${collection}/${encodeURIComponent(id)}`, {
+      credentials: 'include',
+      method: 'DELETE',
+      headers: authHeaders(),
+    });
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
+
 // Flat (non-discriminated-union) shape on purpose: this project's tsconfig
 // doesn't set `strict`, and without strictNullChecks TS fails to narrow a
 // `{ok:true;...} | {ok:false; reason...}` union at call sites — `member`/
