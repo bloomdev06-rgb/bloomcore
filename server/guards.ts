@@ -98,6 +98,14 @@ export async function applyWrite(
   // parce qu'il les supprime, mais parce qu'un client scopé ne les a jamais reçus. On les
   // PRÉSERVE (pas de tombstone-by-omission). Vide (défaut) = comportement whole-array LWW.
   preserve: Set<string> = new Set(),
+  // Écriture de SYNCHRONISATION venant d'un client (PUT /:name, POST /sync/batch), par
+  // opposition aux écritures serveur ciblées (POST/PATCH /members, clôture d'événement…).
+  // Un client de synchronisation qui n'envoie pas d'`asOf` ne peut prouver AUCUNE lecture
+  // récente : on ne le laisse alors qu'AJOUTER, jamais modifier ni supprimer l'existant.
+  // Sans ce garde-fou, un onglet resté ouvert — ou un navigateur au cache vidé — écrasait
+  // silencieusement des données plus récentes en pur dernier-écrivain-gagne. C'est ce qui a
+  // effacé des promotions de membres en production.
+  clientSync = false,
 ): Promise<{ added: any[]; changed: any[]; conflicts: string[] }> {
   validateItems(name, incoming); // frontière de confiance (#12) — avant toute écriture
   // M5 — normalise toute écriture vers les valeurs snake_case §3. Linchpin offline-first :
@@ -129,7 +137,8 @@ export async function applyWrite(
     // delta (le whole-array reconstruit inclut les items inchangés) et globalement plus juste :
     // un whole-array PUT ne doit pas faire remonter en "conflit" un item qu'il n'a pas touché.
     if (old && !old.deletedAt && canonical(old) === canonical(it)) continue;
-    if (old && asOf && old.updatedAt && old.updatedAt > asOf) {
+    const unproven = clientSync && !asOf; // aucune lecture prouvée → aucune modification permise
+    if (old && (unproven || (asOf && old.updatedAt && old.updatedAt > asOf))) {
       conflicts.push(String(it.id)); // le serveur a une version plus récente que ce que ce client a vue
       continue;
     }
@@ -141,7 +150,7 @@ export async function applyWrite(
   // ou si l'item est hors de la portée de lecture de l'opérateur (préservé, cf. `preserve`).
   for (const s of stored) {
     if (incomingById.has(String(s.id)) || s.deletedAt || preserve.has(String(s.id))) continue;
-    if (asOf && s.updatedAt && s.updatedAt > asOf) {
+    if ((clientSync && !asOf) || (asOf && s.updatedAt && s.updatedAt > asOf)) {
       conflicts.push(String(s.id));
       continue;
     }

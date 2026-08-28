@@ -195,6 +195,13 @@ export async function apiBootstrap(): Promise<Record<string, unknown> | null> {
     // L'état serveur devient la base des deltas à venir (avant le flush : les écritures
     // en file seront rejouées en whole-array et re-sèmeront ces collections au succès).
     for (const [k, v] of Object.entries(data)) seedSyncSnapshot(k, v);
+    // …ET l'instant de cette lecture devient l'`asOf` de chaque collection. Sans cela, seule
+    // une ÉCRITURE réussie en posait un : un navigateur qui venait de charger l'application
+    // écrivait sans `asOf`, et le serveur acceptait alors tout sans vérifier s'il écrasait
+    // plus récent. C'est ce qui a permis à un onglet périmé d'effacer des promotions.
+    if (typeof (data as any)._syncedAt === 'string') {
+      for (const k of Object.keys(data)) if (!k.startsWith('_')) setSyncedAt(k, (data as any)._syncedAt);
+    }
     void flushSyncQueue(); // serveur joignable → rejouer les écritures en file
     return data;
   } catch {

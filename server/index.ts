@@ -515,6 +515,11 @@ app.get('/api/v1/bootstrap', requireAuth, async (req, res) => {
   // KV : filtré comme le reste (la matrice de permissions est réduite aux rôles de
   // l'opérateur pour qui n'a pas à voir l'écran Permissions — voir rbac.filterKv).
   for (const key of KV_KEYS) payload[key] = filterKv(key, ctx, await getKv(key));
+  // Instant de LECTURE, renvoyé pour que le client le mémorise comme `asOf` de chaque
+  // collection. Sans lui, un navigateur fraîchement chargé (ou au cache vidé) écrivait sans
+  // aucun `asOf` — donc sans la protection anti-écrasement d'applyWrite. C'est ce trou qui a
+  // laissé un onglet périmé effacer des données plus récentes.
+  payload._syncedAt = new Date().toISOString();
   res.json(payload);
 });
 
@@ -877,7 +882,9 @@ app.put('/api/v1/:name', requireAuth, async (req, res) => {
       const asOf = typeof req.query.asOf === 'string' ? req.query.asOf : undefined;
       // Préserve les items hors de la portée de lecture de l'opérateur : un client scopé
       // n'a qu'un sous-ensemble, son PUT ne doit pas tombstoner ce qu'il ne voit pas.
-      const { added, conflicts } = await applyWrite(name, body, asOf, await preservedIds(name, (req as any).rbac));
+      // clientSync=true : sans `asOf`, ce client ne peut prouver aucune lecture récente et
+      // n'a donc le droit que d'AJOUTER — jamais de modifier ni de supprimer l'existant.
+      const { added, conflicts } = await applyWrite(name, body, asOf, await preservedIds(name, (req as any).rbac), true);
       // Fan-out multicanal des notifications nouvellement créées (in-app déjà
       // réel côté client ; email/SMS/WhatsApp via adapters, simulés sans clés).
       if (name === 'notifications' && added.length) {
@@ -927,7 +934,9 @@ app.post('/api/v1/sync/batch', requireAuth, async (req, res) => {
       if (ARRAY_COLLECTIONS.has(name)) {
         if (!Array.isArray(value)) throw new GuardError(400, 'expected an array');
         await assertCanWrite(name, (req as any).rbac, value);
-        const { added: opAdded, conflicts: opConflicts } = await applyWrite(name, value, typeof asOf === 'string' ? asOf : undefined, await preservedIds(name, (req as any).rbac));
+        // clientSync=true, même règle que le PUT : une opération de la file de rattrapage
+        // sans `asOf` n'ajoute que du nouveau, elle n'écrase rien.
+        const { added: opAdded, conflicts: opConflicts } = await applyWrite(name, value, typeof asOf === 'string' ? asOf : undefined, await preservedIds(name, (req as any).rbac), true);
         conflicts.push(...opConflicts);
         if (name === 'notifications' && opAdded.length) poke();
       } else if (KV_KEYS.has(name)) {
