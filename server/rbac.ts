@@ -46,6 +46,10 @@ export function resolveRoles(member: Member, admins: AdminAccount[], ministries:
   if (PASTORAL_ROLES.includes(member.pastoralCursus)) roles.add('Pasteur');
   if (ministries.some((m) => !(m as any).deletedAt && m.tuteurId === member.id)) roles.add('Ministre');
   for (const fn of Object.values(member.departments ?? {})) roles.add(roleForDeptFn(fn));
+  // Fonction du MODULE Bloom Bus : elle ne vit plus dans `departments` depuis la
+  // séparation §27, mais elle donne toujours le rôle correspondant (Capitaine de Bus,
+  // Responsable de Zone/Commune) — sans quoi le membre perdrait son périmètre territorial.
+  if (member.busRole) roles.add(roleForDeptFn(member.busRole));
   if (member.level === 'coach' || member.level === 'leader') roles.add(roleForLevel(member.level));
   roles.add('Membre');
   return [...roles];
@@ -193,6 +197,32 @@ export async function assertCanWrite(name: string, ctx: RbacContext, incoming: a
           }
         }
       }
+      // §27 — vocabulaire : les fonctions territoriales (capitaine, responsable de zone/commune)
+      // appartiennent au MODULE Bloom Bus et vivent dans `busRole`. Les réintroduire dans
+      // l'emplacement département recréerait la confusion que la séparation supprime et
+      // rouvrirait un second chemin d'attribution, hors du contrôle de rang plus bas. Placé
+      // AVANT le court-circuit full-scope : c'est une erreur de modèle, pas de permission —
+      // même un Admin ne doit pas pouvoir l'écrire.
+      {
+        const TERRITORIAL = ['capitaine', 'responsable_zone', 'responsable_commune'];
+        const busDeptIds = new Set((await readCollection('departments') as Department[])
+          .filter((d) => d.specialFunction === 'bloom_bus').map((d) => d.id));
+        const storedForVocab = new Map((await readCollection(name, true)).map((x: any) => [String(x.id), x]));
+        for (const item of await touchedItems(name, incoming)) {
+          const before = storedForVocab.get(String((item as any).id));
+          for (const deptId of busDeptIds) {
+            const apres = (item as Member).departments?.[deptId];
+            // Seulement sur CHANGEMENT : une fiche non encore migrée doit rester enregistrable
+            // tant qu'on ne touche pas à cette valeur, sinon toute écriture la concernant
+            // échouerait entre le déploiement et la migration.
+            if (canonical(before?.departments?.[deptId]) === canonical(apres)) continue;
+            if (apres && TERRITORIAL.includes(String(apres))) {
+              throw new GuardError(400,
+                `members: ${item.id} — « ${apres} » est une fonction du MODULE Bloom Bus : elle s'attribue dans le module (champ busRole), pas dans le département`);
+            }
+          }
+        }
+      }
       if (hasAny(roles, FULL_SCOPE_ROLES)) return;
       // Symétrique de la lecture (filterReadable, fail-closed) : sans rôle de périmètre
       // déterminé, un opérateur n'écrit QUE sur sa propre fiche. Sinon inMemberScope ferait
@@ -263,32 +293,53 @@ export async function assertCanWrite(name: string, ctx: RbacContext, incoming: a
           for (const f of blockedFields) (item as any).healthKPIs[f] = stored.healthKPIs?.[f];
         }
       }
-      // §27 — les fonctions Bloom Bus (capitaine, responsable de zone/commune, responsable
-      // du département) ne s'attribuent PAS depuis la fiche membre : elles relèvent du module
-      // Bloom Bus et d'une hiérarchie territoriale propre. Le contrôle vit ici, côté serveur,
-      // pour qu'aucun chemin d'écriture — formulaire, import, appel direct — ne le contourne.
-      // Règle : rang strictement supérieur ET membre dans le périmètre (voir canAssignBusRole).
+      // §27 — DÉPARTEMENT Bloom Bus et MODULE Bloom Bus sont deux choses distinctes :
+      //   - `departments[<dept bloom_bus>]` porte une fonction DE DÉPARTEMENT (responsable,
+      //     adjoint, trésorier, …). Seul `responsable` engage le module, par le pont « le
+      //     responsable du département est le plus haut responsable du module » : ce
+      //     changement-là passe donc par la hiérarchie territoriale. Les autres fonctions du
+      //     département suivent les règles ordinaires d'affectation.
+      //   - `busRole` porte la fonction TERRITORIALE (capitaine, responsable de zone/commune).
+      //     Elle ne s'attribue que depuis le module Bloom Bus, par quelqu'un de rang
+      //     strictement supérieur ET dans le périmètre (voir canAssignBusRole).
+      // Le contrôle vit ici, côté serveur, pour qu'aucun chemin d'écriture — formulaire,
+      // import, appel direct — ne le contourne.
       {
-        const busDeptIds = new Set(
-          (await readCollection('departments') as Department[])
-            .filter((d) => d.specialFunction === 'bloom_bus').map((d) => d.id),
-        );
-        if (busDeptIds.size) {
-          const storedById2 = new Map((await readCollection(name, true)).map((x: any) => [String(x.id), x]));
-          const allDepts = await readCollection('departments') as Department[];
-          const allMinistries = await readCollection('ministries') as Ministry[];
-          const allBus = await readCollection('bus_lines') as BloomBusEntity[];
-          for (const item of await touchedItems(name, incoming)) {
-            const before = storedById2.get(String((item as any).id));
-            for (const deptId of busDeptIds) {
-              const avant = before?.departments?.[deptId];
-              const apres = (item as Member).departments?.[deptId];
-              if (canonical(avant) === canonical(apres)) continue; // fonction inchangée
-              const cible = (before ?? item) as Member;
-              const roleVise = roleForDeptFn(apres ?? 'membre');
+        const allDepts = await readCollection('departments') as Department[];
+        const busDeptIds = new Set(allDepts.filter((d) => d.specialFunction === 'bloom_bus').map((d) => d.id));
+        const storedById2 = new Map((await readCollection(name, true)).map((x: any) => [String(x.id), x]));
+        const allMinistries = await readCollection('ministries') as Ministry[];
+        const allBus = await readCollection('bus_lines') as BloomBusEntity[];
+        for (const item of await touchedItems(name, incoming)) {
+          const before = storedById2.get(String((item as any).id));
+          const cible = (before ?? item) as Member;
+
+          for (const deptId of busDeptIds) {
+            const avant = before?.departments?.[deptId];
+            const apres = (item as Member).departments?.[deptId];
+            if (canonical(avant) === canonical(apres)) continue; // fonction inchangée
+            // (le vocabulaire territorial a déjà été refusé plus haut, avant le full-scope)
+            // Seul le sommet du département engage le module.
+            if (String(avant) !== 'responsable' && String(apres) !== 'responsable') continue;
+            const roleVise = roleForDeptFn((apres ?? 'membre') as any);
+            if (!canAssignBusRole(member, roles, cible, roleVise, allBus, allDepts, allMinistries)) {
+              throw new GuardError(403,
+                `members: ${item.id} — l'attribution de la fonction Bloom Bus « ${roleVise} » dépasse votre périmètre ou votre niveau`);
+            }
+          }
+
+          const busAvant = (before as Member | undefined)?.busRole;
+          const busApres = (item as Member).busRole;
+          if (canonical(busAvant) !== canonical(busApres)) {
+            // Retrait comme attribution : les deux modifient la hiérarchie territoriale.
+            // Le rang à franchir est le PLUS HAUT des deux, sinon un capitaine pourrait
+            // destituer un responsable de commune en le « ramenant » à un rang qu'il domine.
+            for (const fn of [busApres, busAvant]) {
+              if (!fn) continue;
+              const roleVise = roleForDeptFn(fn as any);
               if (!canAssignBusRole(member, roles, cible, roleVise, allBus, allDepts, allMinistries)) {
                 throw new GuardError(403,
-                  `members: ${item.id} — l'attribution de la fonction Bloom Bus « ${roleVise} » dépasse votre périmètre ou votre niveau`);
+                  `members: ${item.id} — la fonction Bloom Bus « ${roleVise} » dépasse votre périmètre ou votre niveau`);
               }
             }
           }

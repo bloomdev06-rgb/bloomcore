@@ -202,15 +202,41 @@ export function inMemberScope(
 // On parcourt donc toutes les instances et on retient la fonction réellement détenue, la plus
 // forte si le membre en a plusieurs (rankOf : plus le rang est petit, plus la fonction est haute).
 export function bloomBusRoleOf(operator: Member, departments: Department[]): string | undefined {
-  let best: string | undefined;
-  for (const d of departments) {
-    if (d.specialFunction !== 'bloom_bus') continue;
-    const fn = operator.departments?.[d.id];
-    if (!fn) continue;
-    const role = roleForDeptFn(fn);
-    if (best === undefined || rankOf(role) < rankOf(best)) best = role;
+  const busDepts = departments.filter(d => d.specialFunction === 'bloom_bus');
+
+  // 1. LE PONT. Le responsable DU DÉPARTEMENT Bloom Bus est d'office au sommet du MODULE —
+  //    la seule passerelle entre les deux réalités. Il n'a pas besoin de busRole.
+  //    (Au-dessus de lui : son ministre de tutelle, les pasteurs et les admin, traités
+  //    ailleurs par les rôles globaux.)
+  for (const d of busDepts) {
+    if (operator.departments?.[d.id] === 'responsable') return 'Responsable';
   }
-  return best;
+
+  // 2. La fonction TERRITORIALE, dans son champ dédié. Indépendante de toute fonction tenue
+  //    dans le département : on peut être capitaine sans appartenir au département, ou
+  //    adjoint du département sans aucune fonction territoriale.
+  if (operator.busRole) return roleForDeptFn(operator.busRole);
+
+  // 3. Compatibilité — données d'AVANT la séparation, où la fonction territoriale était rangée
+  //    dans l'emplacement du département. Lue tant qu'elles n'ont pas été migrées
+  //    (scripts/migrate-bus-roles.ts), pour qu'aucun responsable ne perde son accès entre le
+  //    déploiement et la migration. Les fonctions ordinaires (adjoint, trésorier…) ne sont PAS
+  //    des rôles du module : elles ne donnent aucun accès territorial.
+  //    Les deux orthographes sont acceptées : la valeur migrée (`capitaine`) et le nom de rôle
+  //    d'avant la migration M5 (`Capitaine de Bus`), que d'anciennes fiches portent encore.
+  const LEGACY: Record<string, string> = {
+    capitaine: 'Capitaine de Bus',
+    responsable_zone: 'Responsable de Zone',
+    responsable_commune: 'Responsable de Commune',
+    'Capitaine de Bus': 'Capitaine de Bus',
+    'Responsable de Zone': 'Responsable de Zone',
+    'Responsable de Commune': 'Responsable de Commune',
+  };
+  for (const d of busDepts) {
+    const legacy = LEGACY[String(operator.departments?.[d.id])];
+    if (legacy) return legacy;
+  }
+  return undefined;
 }
 
 export function fullBloomBusAccess(operator: Member, role: string, departments: Department[]): boolean {

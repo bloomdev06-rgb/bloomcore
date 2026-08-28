@@ -8,9 +8,20 @@ export type CommunityLevel = 'nouveau' | 'stagiaire' | 'boss' | 'leader' | 'coac
 
 // Fonction d'un membre au sein d'un département (hiérarchie interne). Sur-ensemble réel
 // conservé (§3 illustratif : tresorier/responsable_section réels, coach/leader vivent sur level).
+// Fonctions ORDINAIRES d'un département — y compris le Département Bloom Bus, qui est un
+// département comme un autre. Les trois valeurs territoriales qui suivent y figurent encore
+// pour lire les données d'avant la séparation (voir BusRole) ; aucun écran ne les propose plus.
 export type DeptFunction =
   | 'responsable' | 'adjoint' | 'tresorier' | 'responsable_section' | 'membre'
   | 'capitaine' | 'responsable_zone' | 'responsable_commune';
+
+// Fonctions du MODULE Bloom Bus (maillage territorial Commune → Zone → Bus). À ne pas
+// confondre avec les fonctions du DÉPARTEMENT Bloom Bus : ce sont deux réalités distinctes,
+// et un membre peut détenir l'une, l'autre, les deux, ou aucune. Elles partageaient le même
+// emplacement de stockage — `departments['dept_bloom_bus']` — ce qui rendait impossible d'être
+// à la fois adjoint du département et capitaine de bus : la seconde valeur écrasait la
+// première. D'où ce champ dédié.
+export type BusRole = 'capitaine' | 'responsable_zone' | 'responsable_commune';
 
 export type IntegrationState = 'en_attente' | 'suivi' | 'integre';
 export type IntegrationFollowStatus = 'Non suivi' | 'En attente' | 'En cours' | 'À recontacter' | 'Intégré' | 'Non intégré';
@@ -117,6 +128,13 @@ export interface Member {
 
   // Special territorial coordinates
   bloomBusId?: string; // Attached bus ID
+
+  // Fonction dans le MODULE Bloom Bus, indépendante de la fonction tenue dans le DÉPARTEMENT
+  // Bloom Bus (departments['dept_bloom_bus']). Attribuée depuis le module, jamais depuis la
+  // fiche membre. Absent = simple membre du maillage, ou non concerné.
+  // Exception : le responsable DU DÉPARTEMENT Bloom Bus est d'office au sommet du module,
+  // sans avoir besoin de ce champ (voir bloomBusRoleOf).
+  busRole?: BusRole;
 
   // Enregistrement direct par un responsable hiérarchique Bloom Bus (hors procédure ADN
   // "nouveau"), OU auto-inscription publique (Créer mon compte) — rattachement département
