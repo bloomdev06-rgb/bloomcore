@@ -171,11 +171,15 @@ export default function App() {
       if (data.forms) setForms(data.forms as FormDef[]);
       if (data.departments) setDepartments(data.departments as Department[]);
       // Collections "component-owned" (état local par vue, pas dans App) : on
-      // rafraîchit leur source localStorage — les vues montées ensuite lisent
-      // les données serveur via load(). ponytail: une vue déjà ouverte garde son
-      // état jusqu'au prochain montage, acceptable en offline-first.
+      // rafraîchit leur source via save() (PAS localStorage.setItem — ces 8 noms sont tous
+      // dans SYNCED_NAMES, donc load()/useXxx() lisent le miroir mémoire/IndexedDB, jamais
+      // localStorage brut ; écrire là-dedans était silencieusement mort et laissait toute
+      // session dont l'IDB n'avait pas encore la donnée resservir indéfiniment le seed, y
+      // compris des entités déjà supprimées côté serveur). Les vues montées ensuite lisent
+      // les données serveur via load(). ponytail: une vue déjà ouverte garde son état
+      // jusqu'au prochain montage, acceptable en offline-first.
       for (const name of ['delegations', 'ministries', 'certifications', 'admins', 'activities', 'integration_reports', 'projects', 'bus_lines']) {
-        if (data[name]) localStorage.setItem(`bc_${name}`, JSON.stringify(data[name]));
+        if (data[name]) save(`bc_${name}`, data[name]);
       }
     }).finally(() => {
       // Sync serveur activée seulement après avoir lu l'état serveur (B2) : évite que les
