@@ -172,12 +172,17 @@ export default function MemberFormModal({
       setDeptName(firstDept);
       setDeptRole(asDeptRoleOption(member.departments[firstDept]));
       // Filet §27 — une fiche non encore migrée peut porter une fonction TERRITORIALE dans
-      // l'emplacement du département (avant que la migration au démarrage du serveur ne l'ait
-      // déplacée). La charger telle quelle ferait rejeter l'enregistrement par le serveur, qui
-      // n'accepte plus ce vocabulaire ici. On l'écarte donc de l'écran : la fonction reste
-      // lisible et modifiable dans le module Bloom Bus, seul endroit qui la gère.
+      // l'emplacement du DÉPARTEMENT BLOOM BUS (avant que la migration au démarrage du serveur
+      // ne l'ait déplacée). La charger telle quelle ferait rejeter l'enregistrement par le
+      // serveur, qui n'accepte plus ce vocabulaire ici. On l'écarte donc de l'écran : la
+      // fonction reste lisible et modifiable dans le module Bloom Bus, seul endroit qui la
+      // gère. Restreint aux départements bloom_bus : une fonction nommée pareil dans un AUTRE
+      // département (coïncidence de vocabulaire) est une vraie affectation, pas un résidu.
+      const busDeptIds = new Set(departments.filter((d) => d.specialFunction === "bloom_bus").map((d) => d.id));
       setDepts(Object.fromEntries(
-        Object.entries(member.departments).filter(([, fn]) => !TERRITORIAL_FNS.includes(String(fn))),
+        Object.entries(member.departments).filter(
+          ([deptId, fn]) => !(busDeptIds.has(deptId) && TERRITORIAL_FNS.includes(String(fn))),
+        ),
       ));
       setDeptBranches({ ...(member.deptBranches ?? {}) });
       setPendingDeptBranch(member.branch);

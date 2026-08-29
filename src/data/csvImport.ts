@@ -4,7 +4,7 @@
 // canal du lien d'activation côté serveur ; département = condition de visibilité RBAC
 // pour le responsable), pas de doublon téléphone (existant OU dans le lot). Enums
 // (branche/niveau/cursus/baptême/fonction département) : tolérants, repli sur défaut.
-import { Member, Branch, CommunityLevel, PastoralCursus, DeptFunction, BloomBusEntity } from '../types';
+import { Member, Branch, CommunityLevel, PastoralCursus, DeptFunction, BloomBusEntity, BusRole } from '../types';
 
 // ponytail: parser d'un seul passage — gère "" échappé et le délimiteur détecté sur l'en-tête.
 export function parseCsv(text: string): string[][] {
@@ -36,6 +36,10 @@ export function parseCsv(text: string): string[][] {
 const LEVELS: CommunityLevel[] = ['nouveau', 'stagiaire', 'boss', 'leader', 'coach'];
 const CURSUS: PastoralCursus[] = ['aucun', 'appele', 'serviteur', 'gagneur_ame', 'assistant_pasteur', 'pasteur_assistant', 'pasteur_titulaire'];
 const DEPT_FUNCTIONS: DeptFunction[] = ['responsable', 'adjoint', 'tresorier', 'responsable_section', 'membre', 'capitaine', 'responsable_zone', 'responsable_commune'];
+// §27 — capitaine/responsable_zone/responsable_commune sont des fonctions du MODULE Bloom Bus
+// (busRole), pas du département : le serveur rejette désormais ce vocabulaire dans `departments`.
+const TERRITORIAL: BusRole[] = ['capitaine', 'responsable_zone', 'responsable_commune'];
+const BUS_DEPT_ID = 'dept_bloom_bus';
 
 const stripDiacritics = (s: string) => s.normalize('NFD').replace(/[̀-ͯ]/g, '');
 const norm = (s: string) => stripDiacritics((s ?? '').trim().toLowerCase());
@@ -147,7 +151,9 @@ export function importMembersFromCsv(
       branch: branchRaw === 'light' ? 'light' : branchRaw === 'church' ? 'church' : defaultBranch,
       level: LEVELS.includes(levelRaw) ? levelRaw : 'stagiaire',
       pastoralCursus: CURSUS.includes(cursusRaw) ? cursusRaw : 'aucun',
-      departments: { [departmentId]: deptFunction },
+      ...(departmentId === BUS_DEPT_ID && TERRITORIAL.includes(deptFunction as BusRole)
+        ? { departments: {}, busRole: deptFunction as BusRole }
+        : { departments: { [departmentId]: deptFunction } }),
       baptismStatus: norm(get(row, 'baptismStatus')) === 'baptise' ? 'baptise' : 'non_baptise',
       hasPassedToBossForm: true,
       healthKPIs: { spirituel: 3, social: 3, financier: 3, physique: 4, presenceCulte: 4, presenceService: 3 },

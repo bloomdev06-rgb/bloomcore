@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { Branch, Project, ProjectTask, Event, Member } from '../types';
 import { Activity, Target, Users, Calendar, ArrowLeft, Plus, X, Check, Trash2 } from 'lucide-react';
 import { useProjects, useMinistries, save } from '../data';
+import { apiDeleteItem } from '../data/api';
 import { motion } from 'motion/react';
 import { staggerParent, staggerItem } from './ui/motion';
 import { Modal } from './ui/Modal';
@@ -41,6 +42,7 @@ export default function ProjectsView({ activeBranch, simulatedRole, events = [],
   const deleteProject = (id: string) => {
     setProjects((prev) => prev.filter((p) => p.id !== id));
     if (selectedId === id) setSelectedId(null);
+    void apiDeleteItem('projects', id).catch(() => {});
   };
 
   const canCreate = ['Pasteur', 'Admin', 'Responsable', 'Super Admin', 'Ministre'].includes(simulatedRole);

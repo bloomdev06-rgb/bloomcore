@@ -1,7 +1,8 @@
 import React, { useState } from 'react';
 import { Shield, Check, X, Sliders, Info, UserCheck, Plus, GitBranch } from 'lucide-react';
 import { PermissionMatrix, Branch, Delegation, Member, CapabilityOverride, SpecialAuthorization, AuditLog, CapabilityOverrideSubject } from '../types';
-import { load, save, labelFor } from '../data';
+import { load, labelFor } from '../data';
+import { useSyncedSave } from '../data/useSyncedSave';
 import { DEFAULT_OPERATOR_NAME } from '../data/operator';
 import { motion, AnimatePresence } from 'motion/react';
 
@@ -20,7 +21,9 @@ interface GovernanceViewProps {
 // M5 §3 — valeurs stockées (snake_case) ; affichées via labelFor.
 const OVERRIDE_SUBJECT_VALUES: Record<CapabilityOverrideSubject, string[]> = {
   level: ['nouveau', 'stagiaire', 'boss', 'leader', 'coach'],
-  function: ['responsable', 'adjoint', 'tresorier', 'responsable_section', 'membre', 'capitaine', 'responsable_zone', 'responsable_commune'],
+  // §27 — capitaine/responsable_zone/responsable_commune retirés : ce sont des fonctions du
+  // MODULE (member.busRole), plus jamais présentes dans `departments` (que ce cas matche).
+  function: ['responsable', 'adjoint', 'tresorier', 'responsable_section', 'membre'],
   cursus: ['aucun', 'appele', 'serviteur', 'gagneur_ame', 'assistant_pasteur', 'pasteur_assistant', 'pasteur_titulaire'],
 };
 const SUBJECT_TYPE_LABEL: Record<CapabilityOverrideSubject, string> = { level: 'Niveau', function: 'Fonction', cursus: 'Cursus' };
@@ -99,7 +102,7 @@ export default function GovernanceView({
 
   // §2.6/§5 — autorisations spéciales (exceptions nominatives), collection réelle synchronisée.
   const [specialAuths, setSpecialAuths] = useState<SpecialAuthorization[]>(() => load('bc_special_authorizations', [] as SpecialAuthorization[]));
-  React.useEffect(() => { save('bc_special_authorizations', specialAuths); }, [specialAuths]);
+  useSyncedSave('bc_special_authorizations', specialAuths);
   const [saMemberId, setSaMemberId] = useState('');
   const [saCap, setSaCap] = useState(capabilitiesList[0].key);
   const activeSpecials = specialAuths.filter(s => !s.deletedAt);
@@ -122,7 +125,7 @@ export default function GovernanceView({
 
   // §2.6/§11.2 — surcharges de capacités (matrice dynamique par classe × branche).
   const [overrides, setOverrides] = useState<CapabilityOverride[]>(() => load('bc_capability_overrides', [] as CapabilityOverride[]));
-  React.useEffect(() => { save('bc_capability_overrides', overrides); }, [overrides]);
+  useSyncedSave('bc_capability_overrides', overrides);
   const [ovSubjectType, setOvSubjectType] = useState<CapabilityOverrideSubject>('level');
   const [ovSubjectValue, setOvSubjectValue] = useState(OVERRIDE_SUBJECT_VALUES.level[0]);
   const [ovCap, setOvCap] = useState(capabilitiesList[0].key);
@@ -156,7 +159,7 @@ export default function GovernanceView({
       { id: 'del_1', from: 'Resp. Louange (Jean K.)', to: 'Adjoint (Paul A.)', scope: 'Département Louange', right: 'modifier_jalons_bapteme_integration' },
     ])
   );
-  React.useEffect(() => { save('bc_delegations', delegations); }, [delegations]);
+  useSyncedSave('bc_delegations', delegations);
   const [delFrom, setDelFrom] = useState('');
   const [delTo, setDelTo] = useState('');
   const [delScope, setDelScope] = useState('');

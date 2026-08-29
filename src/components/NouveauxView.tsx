@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useDeferredValue } from 'react';
 import { motion } from 'motion/react';
 import { Member, Branch, IntegrationFollowStatus } from '../types';
-import { useDepartments, load, save } from '../data';
+import { useDepartments, load } from '../data';
+import { useSyncedSave } from '../data/useSyncedSave';
 import { DEFAULT_OPERATOR_NAME } from '../data/operator';
 import { Search, Filter, ClipboardCheck, Phone, ChevronRight, Check, Send, ShieldAlert } from 'lucide-react';
 import { Avatar } from './ui/Avatar';
@@ -46,7 +47,7 @@ export default function NouveauxView({ members, onUpdateMember, activeBranch, si
   const canAccess = CAN_ACCESS_INTEGRATION.includes(simulatedRole);
 
   const [reports, setReports] = useState<IntegrationReport[]>(() => load('bc_integration_reports', [] as IntegrationReport[]));
-  useEffect(() => { save('bc_integration_reports', reports); }, [reports]);
+  useSyncedSave('bc_integration_reports', reports);
   const reportsFor = (id: string) => reports.filter(r => r.memberId === id);
 
   // Filters

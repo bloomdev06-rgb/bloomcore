@@ -371,9 +371,6 @@ export default function MembersView({
             <option value="tresorier">Trésorier</option>
             <option value="responsable_section">Responsable de section</option>
             <option value="membre">Membre</option>
-            <option value="capitaine">Capitaine de Bus</option>
-            <option value="responsable_zone">Responsable de Zone</option>
-            <option value="responsable_commune">Responsable de Commune</option>
           </select>
 
           {/* Baptism filter */}

@@ -1,7 +1,8 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { Branch, Member, Report, Department, DepartmentType, SpecialFunction, Activity as ActivityEntity, AuditLog, Delegation, DeptFunction, Event, PermissionMatrix, FormDef, BloomBusEntity } from '../types';
 import { LayoutList, ChevronRight, Users, Calendar, Activity, Plus, X, Sparkles, FileText, CheckCircle, UserCheck, Heart, TrendingUp, Clock, AlertCircle, FolderKanban, ArrowLeft, ArrowRight } from 'lucide-react';
-import { useMinistries, useProjects, load, save, activitiesSeed, labelFor } from '../data';
+import { useMinistries, useProjects, load, activitiesSeed, labelFor } from '../data';
+import { useSyncedSave } from '../data/useSyncedSave';
 import {
   activeMemberIds, dominantHealthLevel, isRed, moissonBySource, ojTotal,
   pendingFollowUps, periodRange, projectProgress, Period, PeriodInput, weeklyActiveCounts, weeklyBaptismCounts,
@@ -136,8 +137,8 @@ export default function DepartmentsView({ activeBranch, simulatedRole, members =
     : period;
 
   // §7.2 — activités récurrentes du département (localStorage-backed)
-  const [activities, setActivities] = useState<ActivityEntity[]>(() => load('bc_activities', activitiesSeed));
-  React.useEffect(() => { save('bc_activities', activities); }, [activities]);
+  const [activities, setActivities] = useState<ActivityEntity[]>(() => load('bc_activities', activitiesSeed()));
+  useSyncedSave('bc_activities', activities);
   const [newActTitle, setNewActTitle] = useState('');
   const [newActRec, setNewActRec] = useState<ActivityEntity['recurrence']>('Hebdomadaire');
   const [newActDay, setNewActDay] = useState('Samedi');
@@ -390,7 +391,7 @@ export default function DepartmentsView({ activeBranch, simulatedRole, members =
       { id: 'del_1', from: 'Resp. Louange (Jean K.)', to: 'Adjoint (Paul A.)', scope: 'Département Louange', right: 'modifier_jalons_bapteme_integration' },
     ])
   );
-  React.useEffect(() => { save('bc_delegations', delegations); }, [delegations]);
+  useSyncedSave('bc_delegations', delegations);
   const [delTo, setDelTo] = useState('');
   const [delRight, setDelRight] = useState(DELEGABLE_CAPS[0].key);
   const deptScopeLabel = selectedDeptData ? `Département ${selectedDeptData.name}` : '';

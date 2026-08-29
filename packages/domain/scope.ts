@@ -411,9 +411,10 @@ export function canAssignBusRole(
   if (operatorRoles.some(r => FULL_SCOPE_ROLES.includes(r))) return true;
 
   // …et le Ministre de tutelle DU ministère qui porte le département Bloom Bus — pas
-  // n'importe quel ministre, sinon un ministre d'un autre périmètre nommerait ici.
-  const busDept = departments.find(d => d.specialFunction === 'bloom_bus');
-  if (busDept && ministries.some(m => m.id === busDept.ministryId && m.tuteurId === operator.id)) return true;
+  // n'importe quel ministre, sinon un ministre d'un autre périmètre nommerait ici. Boucle sur
+  // TOUTES les instances (church + light), même correctif dual-branche que bloomBusRoleOf.
+  const busDepts = departments.filter(d => d.specialFunction === 'bloom_bus');
+  if (busDepts.some(d => ministries.some(m => m.id === d.ministryId && m.tuteurId === operator.id))) return true;
 
   const opRole = bloomBusRoleOf(operator, departments);
   if (!opRole) return false; // aucune fonction Bloom Bus → ne nomme personne

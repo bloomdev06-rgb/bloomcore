@@ -222,6 +222,8 @@ export default function BloomBusView({
   const [showAddBus, setShowAddBus] = useState(false);
   const [showDirectRegister, setShowDirectRegister] = useState(false);
   const [showAttachExisting, setShowAttachExisting] = useState(false);
+  // Clic sur un avatar de la barre du haut → attribution de rôle, même contrôle que le roster.
+  const [roleAssignMemberId, setRoleAssignMemberId] = useState<string | null>(null);
   const rosterPanelRef = useRef<HTMLDivElement>(null);
   const [expandedCommunes, setExpandedCommunes] = useState<string[]>([
     defaultCommune,
@@ -379,6 +381,28 @@ export default function BloomBusView({
   ];
   const canAssign = (target: Member, role: string) =>
     !!operator && canAssignBusRole(operator, operatorRolesForBus, target, role, busLines, departments, ministriesForBus);
+  // Un seul rendu du contrôle d'attribution, réutilisé par le roster ET par le clic sur un
+  // avatar de la barre du haut (point d'entrée §27 demandé) — même options/permissions.
+  const renderBusRoleSelect = (m: Member) => {
+    if (!operator) return null;
+    const courant = m.busRole ?? "";
+    const ouvertes = BUS_ROLE_CHOICES.filter((c) => c.value === courant || canAssign(m, c.role));
+    if (ouvertes.length <= 1) return null;
+    return (
+      <select
+        aria-label={`Fonction Bloom Bus de ${m.firstName} ${m.lastName}`}
+        value={courant}
+        onChange={(e) => onUpdateMember({ ...m, busRole: (e.target.value || undefined) as Member["busRole"] })}
+        className="shrink-0 border border-bc-border rounded-full px-2 py-1 text-[10px] font-bold bg-white text-bc-text"
+      >
+        {ouvertes.map((c) => (
+          <option key={c.value} value={c.value} disabled={c.value !== courant && !canAssign(m, c.role)}>
+            {c.value ? labelFor(c.value) : "Aucune fonction"}
+          </option>
+        ))}
+      </select>
+    );
+  };
 
   const isHierarchicalOperator = !!operator && (hasFullBloomBusAccess || bloomBusRole === "Responsable de Zone" || bloomBusRole === "Responsable de Commune");
   // Le roster reflète le NIVEAU sélectionné (comme la carte, cf. leaderPins) et requête les
@@ -426,8 +450,9 @@ export default function BloomBusView({
     "Responsable de Commune",
   ].includes(simulatedRole);
   // ECRANS-PAR-ONGLET.md §5.3 — CRUD territorial (créer bus/zone/commune) réservé à l'Admin,
-  // distinct de canEdit qui ne couvre que la saisie de rapport de suivi.
-  const canAdminTerritory = ["Admin", "Super Admin"].includes(simulatedRole);
+  // distinct de canEdit qui ne couvre que la saisie de rapport de suivi. §27 pont : le
+  // responsable du département Bloom Bus a la même autorité (hasFullBloomBusAccess, ligne 189).
+  const canAdminTerritory = ["Admin", "Super Admin"].includes(simulatedRole) || hasFullBloomBusAccess;
   // Enregistrement direct d'un membre (spec "responsables hiérarchiques Bloom Bus") —
   // Capitaine/Zone/Commune uniquement, hors procédure ADN "nouveau".
   const canRegisterMember = !!operator && !!onAddMember && canRegisterMemberViaBloomBus(operator, simulatedRole, departments);
@@ -819,13 +844,20 @@ export default function BloomBusView({
                     sinon deux fois plus de large et déborderait sur mobile ; le bouton « +N »
                     qui suit mène déjà à la liste complète, aucun membre n'est inaccessible. */}
                 {busMembers.slice(0, 6).map((m) => (
-                  <Avatar
+                  <button
                     key={m.id}
-                    src={m.avatarUrl}
-                    initials={`${m.firstName[0]}${m.lastName[0]}`}
-                    size="sm"
-                    className="w-16 h-16 text-base bg-bc-green/15 text-bc-green border-2 border-white"
-                  />
+                    type="button"
+                    onClick={() => setRoleAssignMemberId(m.id)}
+                    title={`${m.firstName} ${m.lastName} — attribuer une fonction`}
+                    className="active-scale"
+                  >
+                    <Avatar
+                      src={m.avatarUrl}
+                      initials={`${m.firstName[0]}${m.lastName[0]}`}
+                      size="sm"
+                      className="w-16 h-16 text-base bg-bc-green/15 text-bc-green border-2 border-white"
+                    />
+                  </button>
                 ))}
                 {busMembers.length > 6 && (
                   <button
@@ -1240,25 +1272,7 @@ export default function BloomBusView({
                         {/* §27 — fonction du MODULE. « Retirer » compte comme une attribution :
                             l'option vide est ouverte au même contrôle que les autres, sinon on
                             destituerait plus haut que soi. */}
-                        {operator && (() => {
-                          const courant = m.busRole ?? "";
-                          const ouvertes = BUS_ROLE_CHOICES.filter((c) => c.value === courant || canAssign(m, c.role));
-                          if (ouvertes.length <= 1) return null;
-                          return (
-                            <select
-                              aria-label={`Fonction Bloom Bus de ${m.firstName} ${m.lastName}`}
-                              value={courant}
-                              onChange={(e) => onUpdateMember({ ...m, busRole: (e.target.value || undefined) as Member["busRole"] })}
-                              className="shrink-0 border border-bc-border rounded-full px-2 py-1 text-[10px] font-bold bg-white text-bc-text"
-                            >
-                              {ouvertes.map((c) => (
-                                <option key={c.value} value={c.value} disabled={c.value !== courant && !canAssign(m, c.role)}>
-                                  {c.value ? labelFor(c.value) : "Aucune fonction"}
-                                </option>
-                              ))}
-                            </select>
-                          );
-                        })()}
+                        {renderBusRoleSelect(m)}
                         <ReportStatusBoxes
                           memberId={m.id}
                           reports={branchReports}
@@ -1584,6 +1598,27 @@ export default function BloomBusView({
           directBloomBusRegistration
         />
       )}
+
+      {(() => {
+        const m = roleAssignMemberId ? busMembers.find((x) => x.id === roleAssignMemberId) : null;
+        if (!m) return null;
+        return (
+          <Modal open={!!m} onClose={() => setRoleAssignMemberId(null)} title={`${m.firstName} ${m.lastName}`} maxWidth="max-w-sm">
+            <div className="flex items-center gap-3">
+              <Avatar
+                src={m.avatarUrl}
+                initials={`${m.firstName[0]}${m.lastName[0]}`}
+                size="sm"
+                className="w-12 h-12 bg-bc-green/15 text-bc-green border border-bc-border shrink-0"
+              />
+              <div className="min-w-0 flex-1">
+                <p className="text-xs text-bc-text-secondary mb-1">Fonction Bloom Bus</p>
+                {renderBusRoleSelect(m)}
+              </div>
+            </div>
+          </Modal>
+        );
+      })()}
 
       {showAttachExisting && (
         <AttachExistingMemberModal

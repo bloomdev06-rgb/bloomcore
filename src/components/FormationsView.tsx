@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { GraduationCap, Award, Plug, Clock, Plus, X, Check } from 'lucide-react';
 import { Member, Branch, PermissionMatrix, Delegation, CapabilityOverride, SpecialAuthorization } from '../types';
-import { load, save, resolveCapability } from '../data';
+import { load, resolveCapability } from '../data';
+import { useSyncedSave } from '../data/useSyncedSave';
 import { motion } from 'motion/react';
 import { staggerParent, staggerItem } from './ui/motion';
 import { Modal } from './ui/Modal';
@@ -33,7 +34,7 @@ export default function FormationsView({ members = [], activeBranch, simulatedRo
   const [memberId, setMemberId] = useState('');
   const [formation, setFormation] = useState(FORMATIONS[0]);
 
-  useEffect(() => { save('bc_certifications', certs); }, [certs]);
+  useSyncedSave('bc_certifications', certs);
 
   const scoped = members.filter(m => activeBranch === 'global' || m.branch === activeBranch);
   // Réconcilie les 2 formes (manuelle / École Bloom) vers une vue d'affichage unique.

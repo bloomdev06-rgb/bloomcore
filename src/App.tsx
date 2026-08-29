@@ -1,5 +1,6 @@
 import React, { useState, useEffect, lazy, Suspense } from 'react';
-import { load, save, seeds, useDepartments, useMinistries, useBusLines, useAdmins, deriveTimeBasedNotifications, apiBootstrap, apiPut, clearAuthToken, apiLogout, enableSync, canView, openNotificationStream, apiFetchCollection, labelFor, apiCreateMember, apiPatchMember, apiDeleteMember } from './data';
+import { load, save, seeds, seedOrEmpty, useDepartments, useMinistries, useBusLines, useAdmins, deriveTimeBasedNotifications, apiBootstrap, apiPut, clearAuthToken, apiLogout, enableSync, canView, openNotificationStream, apiFetchCollection, labelFor, apiCreateMember, apiPatchMember, apiDeleteMember } from './data';
+import { hasServerSession } from './data/api';
 import { reportName } from './data/reportNames';
 import { resolveMemberRole } from './data/roles';
 import { MEMBERS_TAB_DEPT_ONLY_ROLES } from './data/scope';
@@ -84,20 +85,25 @@ export default function App() {
   const [simulatedRole, setSimulatedRole] = useState('Pasteur');
 
   // Persistence States
-  const [members, setMembers] = useState<Member[]>(() => load('bc_members', seeds.members));
+  // seedOrEmpty : sous session serveur active, un cache local vidé ne doit jamais retomber
+  // sur les données de démo (même mécanisme que ministries/departments/projects/bus_lines,
+  // src/data/index.ts) — vide en attendant le bootstrap serveur, jamais la démo.
+  const [members, setMembers] = useState<Member[]>(() => load('bc_members', seedOrEmpty(seeds.members, hasServerSession())));
   // Lot 4 : purge des anciens events seed d'un localStorage existant (le serveur fait pareil au boot).
-  const [events, setEvents] = useState<Event[]>(() => load('bc_events', seeds.events).filter((e: Event) => !isLegacySeedEventId(e.id)));
-  const [reports, setReports] = useState<Report[]>(() => load('bc_reports', seeds.reports));
-  const [audits, setAudits] = useState<AuditLog[]>(() => load('bc_audits', seeds.audits));
-  const [notifications, setNotifications] = useState<AppNotification[]>(() => load('bc_notifications', seeds.notifications));
+  const [events, setEvents] = useState<Event[]>(() => load('bc_events', seedOrEmpty(seeds.events, hasServerSession())).filter((e: Event) => !isLegacySeedEventId(e.id)));
+  const [reports, setReports] = useState<Report[]>(() => load('bc_reports', seedOrEmpty(seeds.reports, hasServerSession())));
+  const [audits, setAudits] = useState<AuditLog[]>(() => load('bc_audits', seedOrEmpty(seeds.audits, hasServerSession())));
+  const [notifications, setNotifications] = useState<AppNotification[]>(() => load('bc_notifications', seedOrEmpty(seeds.notifications, hasServerSession())));
   // Merge seeds sous le stocké : les nouvelles capabilities (ex. view_*) apparaissent
-  // pour les localStorage existants, les réglages utilisateur gardent la priorité.
+  // pour les localStorage existants, les réglages utilisateur gardent la priorité. Pas un
+  // repli de démo (seeds.permissions = définitions de capacités, pas des données membres) :
+  // seedOrEmpty non applicable ici.
   const [permissionMatrix, setPermissionMatrix] = useState<PermissionMatrix>(
     () => ({ ...seeds.permissions, ...load('bc_permissions', {}) }),
   );
   const [settings, setSettings] = useState<AppSettings>(() => load('bc_settings', seeds.settings));
   // P1.4 — FormBuilder's field defs, now persisted + read by BloomBusView/EventsView.
-  const [forms, setForms] = useState<FormDef[]>(() => load('bc_forms', seeds.forms));
+  const [forms, setForms] = useState<FormDef[]>(() => load('bc_forms', seedOrEmpty(seeds.forms, hasServerSession())));
   // B3 — départements remontés dans App (source unique) : avant, MinisteresView et
   // DepartmentsView tenaient chacun une copie locale et s'écrasaient mutuellement.
   const [departments, setDepartments] = useState<Department[]>(useDepartments);

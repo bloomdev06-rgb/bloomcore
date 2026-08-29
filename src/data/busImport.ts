@@ -2,11 +2,14 @@
 // une passe. Un bus n'a pas de champ responsable en base (BusLineSchema) : le lien vit
 // sur le Member (departments.dept_bloom_bus + bloomBusId), d'où les deux listes en sortie.
 // ponytail: petit parser dédié plutôt que factoriser avec csvImport.ts pour un 2e appelant.
-import { BloomBusEntity, Member, DeptFunction } from '../types';
+import { BloomBusEntity, Member, DeptFunction, BusRole } from '../types';
 import { parseCsv } from './csvImport';
 
 const BUS_DEPT_ID = 'dept_bloom_bus';
 const BUS_FUNCTIONS: DeptFunction[] = ['responsable', 'capitaine', 'responsable_zone', 'responsable_commune'];
+// §27 — capitaine/responsable_zone/responsable_commune sont des fonctions du MODULE (busRole),
+// pas du département : le serveur rejette désormais ce vocabulaire dans `departments` (400).
+const TERRITORIAL: BusRole[] = ['capitaine', 'responsable_zone', 'responsable_commune'];
 
 const stripDiacritics = (s: string) => s.normalize('NFD').replace(/[̀-ͯ]/g, '');
 const norm = (s: string) => stripDiacritics((s ?? '').trim().toLowerCase());
@@ -77,11 +80,11 @@ export function importBusesFromCsv(
     const busId = `bus_import_${stamp}_${r}`;
 
     result.buses.push({ id: busId, name, commune, zone, centerLat, centerLng });
-    result.memberPatches.push({
-      ...member,
-      bloomBusId: busId,
-      departments: { ...member.departments, [BUS_DEPT_ID]: fonction },
-    });
+    result.memberPatches.push(
+      TERRITORIAL.includes(fonction as BusRole)
+        ? { ...member, bloomBusId: busId, busRole: fonction as BusRole }
+        : { ...member, bloomBusId: busId, departments: { ...member.departments, [BUS_DEPT_ID]: fonction } },
+    );
   }
   return result;
 }

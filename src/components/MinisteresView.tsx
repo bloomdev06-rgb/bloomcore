@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Branch, Ministry, Member, Report, Department, AuditLog } from '../types';
 import { Grid, ChevronRight, Users, Folder, ArrowLeft, BarChart3, GripVertical, Plus, X, Flame, Palette, MonitorSpeaker, HeartHandshake, Rocket, Network, BookOpen, TrendingUp, Sparkles, Clock, AlertCircle, Calendar, FolderKanban, Trash2 } from 'lucide-react';
 import { useMinistries, useProjects, load, save, activitiesSeed, labelFor } from '../data';
+import { apiDeleteItem } from '../data/api';
 import { DEFAULT_OPERATOR_NAME } from '../data/operator';
 import {
   activeMemberIds, dominantHealthLevel, isRed, moissonBySource, ojTotal,
@@ -147,6 +148,7 @@ export default function MinisteresView({ activeBranch, simulatedRole, members, r
   const [deletingMinistry, setDeletingMinistry] = useState<Ministry | null>(null);
   const deleteMinistry = (ministry: Ministry) => {
     setMinistries(prev => prev.filter(m => m.id !== ministry.id));
+    void apiDeleteItem('ministries', ministry.id).catch(() => {});
     onAddAuditLog?.({
       id: `aud_min_del_${Date.now()}`,
       timestamp: new Date().toISOString(),
@@ -236,7 +238,7 @@ export default function MinisteresView({ activeBranch, simulatedRole, members, r
     const ministryFollowUps = pendingFollowUps(ministryReports);
     const ministryRedCount = ministryMembers.filter(m => isRed(m, undefined, reports)).length;
     const ministryGrowthData = weeklyGrowthSeries(ministryMembers, ministryReports, effectivePeriod);
-    const ministryActivities = load('bc_activities', activitiesSeed).filter(a => mDeptIds.includes(a.departmentId));
+    const ministryActivities = load('bc_activities', activitiesSeed()).filter(a => mDeptIds.includes(a.departmentId));
     const ministryProjects = allProjects.filter(p => p.status === 'En cours' && p.scope === 'ministere' && p.ministryId === selected.id);
 
     return (

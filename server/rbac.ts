@@ -465,9 +465,15 @@ export async function assertCanWrite(name: string, ctx: RbacContext, incoming: a
     // n'importe quel capitaine pouvait supprimer/déplacer via l'API n'importe quel bus de
     // l'église entière, pas seulement le sien (l'UI le lui interdisait déjà — canAdminTerritory
     // masque le bouton, mais un appel API direct passait).
-    case 'bus_lines':
-      if (!hasAny(roles, ['Admin', 'Super Admin'])) throw new GuardError(403, 'bus_lines: CRUD territorial réservé à l\'Admin');
-      return;
+    case 'bus_lines': {
+      if (hasAny(roles, ['Admin', 'Super Admin'])) return;
+      // §27 pont : le responsable du département Bloom Bus a autorité pleine sur le module,
+      // y compris le CRUD territorial (créer/déplacer/supprimer bus/zone), pas seulement
+      // l'attribution de busRole (déjà couverte plus bas).
+      const deptsAll = await readCollection('departments') as Department[];
+      if (fullBloomBusAccess(member, roles[0] ?? 'Membre', deptsAll)) return;
+      throw new GuardError(403, 'bus_lines: CRUD territorial réservé à l\'Admin ou au responsable du département Bloom Bus');
+    }
 
     case 'audits': {
       // Journal inviolable : l'append-only vit dans guards.ts. Ici on empêche la

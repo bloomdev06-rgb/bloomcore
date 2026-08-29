@@ -172,4 +172,6 @@ export const useDepartments = () => load('bc_departments', seedOrEmpty(INITIAL_D
 export const useProjects = () => load('bc_projects', seedOrEmpty(INITIAL_PROJECTS, hasServerSession()));
 export const useBusLines = () => load('bc_bus_lines', seedOrEmpty(INITIAL_BUS_LINES, hasServerSession()));
 export const useAdmins = () => load('bc_admins', seedOrEmpty(INITIAL_ADMINS, hasServerSession()));
-export const activitiesSeed = INITIAL_ACTIVITIES;
+// Fonction (pas une constante) : hasServerSession() doit être relu à chaque appel, pas figé
+// au chargement du module — sinon un login sans rechargement de page garderait le repli démo.
+export const activitiesSeed = () => seedOrEmpty(INITIAL_ACTIVITIES, hasServerSession());
