@@ -9,12 +9,14 @@ import { isBusReportLocked } from '../packages/domain/reportLock.ts';
 import { getKv } from './datastore.ts';
 import { GuardError, readCollection, canonical } from './guards.ts';
 import { roleForDeptFn, roleForLevel } from '../packages/shared/migrate.ts';
+import { departmentToolRoles, memberCanReadProject } from '../packages/domain/access.ts';
 
 // M5 : valeurs de cursus snake_case §3 (comparées à member.pastoralCursus migré). Le
 // vocabulaire de RÔLES (FULL_SCOPE_ROLES, STAFF_ROLES…) reste stable — on remappe les
 // valeurs stockées vers ces noms de rôles au moment de la dérivation (cf. M5-PLAN.md §3.4).
 const PASTORAL_ROLES = ['pasteur_titulaire', 'pasteur_assistant', 'assistant_pasteur'];
-const FULL_SCOPE_ROLES = ['Super Admin', 'Admin', 'Pasteur Principal', 'Pasteur'];
+const AUTHORITY_ROLES = ['Super Admin', 'Admin', 'Pasteur Principal', 'Pasteur'];
+const CROSS_BRANCH_ROLES = ['Super Admin', 'Admin', 'Pasteur Principal'];
 const STAFF_ROLES = ['Responsable', 'Ministre', 'Pasteur', 'Admin', 'Super Admin'];
 const ABOVE_MEMBER_ROLES = [
   ...STAFF_ROLES, 'Adjoint', 'Coach', 'Leader',
@@ -36,7 +38,7 @@ const SCOPE_ROLE_ORDER: [string, string][] = [
   ['Leader', 'Leader'],
 ];
 
-export function resolveRoles(member: Member, admins: AdminAccount[], ministries: Ministry[]): string[] {
+export function resolveRoles(member: Member, admins: AdminAccount[], ministries: Ministry[], departments: Department[] = []): string[] {
   const roles = new Set<string>();
   // Convention adm_<memberId> (types.ts) ; l'id nu est toléré par robustesse.
   const adminEntry = admins.find(
@@ -46,6 +48,7 @@ export function resolveRoles(member: Member, admins: AdminAccount[], ministries:
   if (PASTORAL_ROLES.includes(member.pastoralCursus)) roles.add('Pasteur');
   if (ministries.some((m) => !(m as any).deletedAt && m.tuteurId === member.id)) roles.add('Ministre');
   for (const fn of Object.values(member.departments ?? {})) roles.add(roleForDeptFn(fn));
+  for (const role of departmentToolRoles(member, departments, ministries)) roles.add(role);
   // Fonction du MODULE Bloom Bus : elle ne vit plus dans `departments` depuis la
   // séparation §27, mais elle donne toujours le rôle correspondant (Capitaine de Bus,
   // Responsable de Zone/Commune) — sans quoi le membre perdrait son périmètre territorial.
@@ -66,7 +69,8 @@ export async function buildContext(memberId: string): Promise<RbacContext | null
   if (!member) return null;
   const admins = await readCollection('admins') as AdminAccount[];
   const ministries = await readCollection('ministries') as Ministry[];
-  return { member, roles: resolveRoles(member, admins, ministries) };
+  const departments = await readCollection('departments') as Department[];
+  return { member, roles: resolveRoles(member, admins, ministries, departments) };
 }
 
 const hasAny = (roles: string[], allowed: string[]) => roles.some((r) => allowed.includes(r));
@@ -182,7 +186,32 @@ export async function assertCanWrite(name: string, ctx: RbacContext, incoming: a
     }
 
     case 'members': {
-      if (!(await hasCapAnyRole(ctx, 'view_members'))) throw new GuardError(403, 'members: capacité view_members requise');
+      const baptismToolOnly = roles.includes('Baptême') && !hasAny(roles, ABOVE_MEMBER_ROLES);
+      if (!baptismToolOnly && !(await hasCapAnyRole(ctx, 'view_members'))) throw new GuardError(403, 'members: capacité view_members requise');
+      if (baptismToolOnly) {
+        const stored = new Map((await readCollection(name, true)).map((item: any) => [String(item.id), item]));
+        const baptismDeptIds = new Set((await readCollection('departments') as Department[])
+          .filter(department => department.specialFunction === 'bapteme').map(department => department.id));
+        if ((await removedItems(name, incoming, ctx)).length) throw new GuardError(403, 'members: le rôle Baptême ne peut supprimer aucun membre');
+        const allowed = new Set(['id', 'departments', 'currentStepId', 'baptismStatus', 'baptismDate', 'baptismViaDepartment', 'updatedAt']);
+        for (const item of await touchedItems(name, incoming)) {
+          const before = stored.get(String(item.id));
+          if (!before || item.branch !== member.branch) throw new GuardError(403, `members: ${item.id} hors du périmètre Baptême`);
+          for (const key of new Set([...Object.keys(before), ...Object.keys(item)])) {
+            if (!allowed.has(key) && canonical(before[key]) !== canonical(item[key])) {
+              throw new GuardError(403, `members: le rôle Baptême ne peut modifier '${key}'`);
+            }
+          }
+          const beforeDepts = before.departments ?? {};
+          const afterDepts = item.departments ?? {};
+          for (const departmentId of new Set([...Object.keys(beforeDepts), ...Object.keys(afterDepts)])) {
+            if (!baptismDeptIds.has(departmentId) && canonical(beforeDepts[departmentId]) !== canonical(afterDepts[departmentId])) {
+              throw new GuardError(403, `members: le rôle Baptême ne peut modifier le département ${departmentId}`);
+            }
+          }
+        }
+        return;
+      }
       // Point 1 (Phase 4) — département secondaire dans l'AUTRE branche (deptBranches) réservé
       // aux rôles Coach+ (COACH_AND_ABOVE, scope.ts). Contrôle sur la CIBLE de l'écriture, donc
       // placé AVANT le court-circuit full-scope ci-dessous : même un Admin ne doit pas pouvoir
@@ -223,11 +252,13 @@ export async function assertCanWrite(name: string, ctx: RbacContext, incoming: a
           }
         }
       }
-      if (hasAny(roles, FULL_SCOPE_ROLES)) return;
+      if (hasAny(roles, CROSS_BRANCH_ROLES)) return;
       // Symétrique de la lecture (filterReadable, fail-closed) : sans rôle de périmètre
       // déterminé, un opérateur n'écrit QUE sur sa propre fiche. Sinon inMemberScope ferait
       // du fail-open sur 'Membre' (scope.ts) → écriture sur n'importe quel membre.
-      const scopeEntry = SCOPE_ROLE_ORDER.find(([r]) => roles.includes(r));
+      const scopeEntry = roles.includes('Pasteur')
+        ? ['Pasteur', 'Pasteur'] as [string, string]
+        : SCOPE_ROLE_ORDER.find(([r]) => roles.includes(r));
       const departments = await readCollection('departments') as Department[];
       const ministries = await readCollection('ministries') as Ministry[];
       // Bus lines LIVES (pas le seed figé) : un bus créé/déplacé change les zones/communes
@@ -372,14 +403,17 @@ export async function assertCanWrite(name: string, ctx: RbacContext, incoming: a
     // qui Ministre sans aucun contrôle de portée (trou de sécurité, aucun chemin UI ne le
     // fait déjà : MinisteresView réserve l'édition à Pasteur/Admin/Super Admin — canEdit).
     case 'ministries':
-      if (!hasAny(roles, FULL_SCOPE_ROLES)) throw new GuardError(403, 'ministries: réservé au staff pastoral (Pasteur/Admin/Super Admin)');
+      if (!hasAny(roles, AUTHORITY_ROLES)) throw new GuardError(403, 'ministries: réservé au staff pastoral (Pasteur/Admin/Super Admin)');
+      if (!hasAny(roles, CROSS_BRANCH_ROLES)) {
+        for (const ministry of [...(await touchedItems(name, incoming)), ...(await removedItems(name, incoming, ctx))]) {
+          if (ministry.branch && ministry.branch !== member.branch) throw new GuardError(403, `ministries: ${ministry.id} appartient à l'autre branche`);
+        }
+      }
       return;
 
     case 'events':
-    case 'activities':
-    case 'departments':
-      if (!hasAny(roles, STAFF_ROLES)) throw new GuardError(403, `${name}: réservé aux Responsables et plus`);
-      if (name === 'events' && !hasAny(roles, FULL_SCOPE_ROLES)) {
+      if (!hasAny(roles, AUTHORITY_ROLES) && !roles.includes('GDC')) throw new GuardError(403, 'events: rôle GDC ou pastoral requis');
+      if (!hasAny(roles, CROSS_BRANCH_ROLES)) {
         for (const ev of [...(await touchedItems(name, incoming)), ...(await removedItems(name, incoming, ctx))]) {
           if (ev.branch && ev.branch !== 'global' && member.branch && ev.branch !== member.branch) {
             throw new GuardError(403, `events: ${ev.id} appartient à l'autre branche`);
@@ -388,8 +422,39 @@ export async function assertCanWrite(name: string, ctx: RbacContext, incoming: a
       }
       return;
 
+    case 'activities':
+    case 'departments': {
+      const departments = await readCollection('departments') as Department[];
+      const ministries = await readCollection('ministries') as Ministry[];
+      const managed = new Set(Object.entries(member.departments ?? {})
+        .filter(([, fn]) => fn === 'responsable').map(([id]) => id));
+      for (const ministry of ministries.filter(m => m.tuteurId === member.id)) {
+        departments.filter(d => d.ministryId === ministry.id && (!d.branch || d.branch === member.branch))
+          .forEach(d => managed.add(d.id));
+      }
+      const targets = [...(await touchedItems(name, incoming)), ...(await removedItems(name, incoming, ctx))];
+      if (hasAny(roles, CROSS_BRANCH_ROLES)) return;
+      if (roles.includes('Pasteur')) {
+        for (const target of targets) {
+          const dept = name === 'departments' ? target : departments.find(d => d.id === target.departmentId);
+          if (dept?.branch && dept.branch !== member.branch) throw new GuardError(403, `${name}: ${target.id} appartient à l'autre branche`);
+        }
+        return;
+      }
+      for (const target of targets) {
+        const departmentId = name === 'departments' ? target.id : target.departmentId;
+        if (!managed.has(departmentId)) throw new GuardError(403, `${name}: ${target.id} hors des départements supervisés`);
+      }
+      return;
+    }
+
     case 'reports': {
-      if (!hasAny(roles, ABOVE_MEMBER_ROLES) && !(await hasCapAnyRole(ctx, 'rapport_service'))) {
+      const reportTargets = [...(await touchedItems(name, incoming)), ...(await removedItems(name, incoming, ctx))];
+      const toolReporter = reportTargets.length > 0 && reportTargets.every(r =>
+        (r.reportType === 'rapport_culte' && roles.includes('GDC'))
+        || (r.reportType === 'rapport_portiers' && roles.includes('Portier')),
+      );
+      if (!toolReporter && !hasAny(roles, ABOVE_MEMBER_ROLES) && !(await hasCapAnyRole(ctx, 'rapport_service'))) {
         throw new GuardError(403, 'reports: rôle serviteur ou délégation requis');
       }
       // Verrou 24h : un rapport Bloom Bus rempli et/ou validé n'est plus modifiable (ni
@@ -412,7 +477,24 @@ export async function assertCanWrite(name: string, ctx: RbacContext, incoming: a
           }
         }
       }
-      if (!hasAny(roles, FULL_SCOPE_ROLES)) {
+      const departmentsForTools = await readCollection('departments') as Department[];
+      for (const r of reportTargets) {
+        const department = departmentsForTools.find(d => d.id === r.departmentId);
+        const isGdc = r.reportType === 'rapport_culte' || department?.specialFunction === 'gestion_cultes';
+        const isPortier = r.reportType === 'rapport_portiers' || department?.specialFunction === 'portiers';
+        if (r.reportType === 'rapport_culte' && department?.specialFunction !== 'gestion_cultes') {
+          throw new GuardError(400, `reports: ${r.id} doit cibler un département Gestion des Cultes`);
+        }
+        if (r.reportType === 'rapport_portiers' && department?.specialFunction !== 'portiers') {
+          throw new GuardError(400, `reports: ${r.id} doit cibler un département Portiers`);
+        }
+        if (isGdc && !hasAny(roles, [...AUTHORITY_ROLES, 'GDC'])) throw new GuardError(403, `reports: ${r.id} requiert le rôle GDC`);
+        if (isPortier && !hasAny(roles, [...AUTHORITY_ROLES, 'Portier'])) throw new GuardError(403, `reports: ${r.id} requiert le rôle Portier`);
+        if ((isGdc || isPortier) && department?.branch && !hasAny(roles, CROSS_BRANCH_ROLES) && department.branch !== member.branch) {
+          throw new GuardError(403, `reports: ${r.id} appartient à l'autre branche`);
+        }
+      }
+      if (!hasAny(roles, CROSS_BRANCH_ROLES)) {
         const scopeRole = SCOPE_ROLE_ORDER.find(([r]) => roles.includes(r))?.[1] ?? 'Membre';
         const allMembers = await readCollection('members') as Member[];
         const busLines = await readCollection('bus_lines') as BloomBusEntity[];
@@ -453,10 +535,25 @@ export async function assertCanWrite(name: string, ctx: RbacContext, incoming: a
       return;
 
     case 'integration_reports':
-    case 'projects':
       // Données opérationnelles (projets) — écriture réservée à l'encadrement.
       if (!hasAny(roles, ABOVE_MEMBER_ROLES)) throw new GuardError(403, `${name}: rôle d'encadrement requis`);
       return;
+
+    case 'projects': {
+      const targets = [...(await touchedItems(name, incoming)), ...(await removedItems(name, incoming, ctx))];
+      if (hasAny(roles, CROSS_BRANCH_ROLES)) return;
+      for (const project of targets) {
+        const branchOk = project.scope !== 'branche' || !project.branch || project.branch === member.branch;
+        const ministryOk = project.scope !== 'ministere' || (await readCollection('ministries') as Ministry[])
+          .some(m => m.id === project.ministryId && m.tuteurId === member.id && (!m.branch || m.branch === member.branch));
+        const pastoral = roles.includes('Pasteur') && branchOk;
+        const minister = roles.includes('Ministre') && ministryOk;
+        if (!pastoral && !minister && !memberCanReadProject(member.id, project)) {
+          throw new GuardError(403, `projects: ${project.id} hors de votre équipe`);
+        }
+      }
+      return;
+    }
 
     // 'bus_lines' à part : CRUD territorial (créer/déplacer/supprimer un bus/zone/commune),
     // pas une simple saisie — ECRANS-PAR-ONGLET.md §5.3 le réserve explicitement à l'Admin
@@ -528,7 +625,7 @@ export async function assertCanDelete(ctx: RbacContext, target: Member): Promise
 // client (rideau cosmétique) ; ici la donnée sensible n'est simplement plus envoyée.
 export async function filterReadable(name: string, ctx: RbacContext, items: any[]): Promise<any[]> {
   const { roles, member } = ctx;
-  const fullScope = hasAny(roles, FULL_SCOPE_ROLES);
+  const fullScope = hasAny(roles, CROSS_BRANCH_ROLES);
 
   switch (name) {
     case 'reports': {
@@ -645,7 +742,10 @@ export async function filterReadable(name: string, ctx: RbacContext, items: any[
         for (const f of blocked) delete hk[f];
         return { ...m, healthKPIs: hk };
       };
-      const scopeEntry = SCOPE_ROLE_ORDER.find(([r]) => roles.includes(r));
+      if (roles.includes('Baptême')) return items.filter(m => m.id === member.id || m.branch === member.branch).map(mask);
+      const scopeEntry = roles.includes('Pasteur')
+        ? ['Pasteur', 'Pasteur'] as [string, string]
+        : SCOPE_ROLE_ORDER.find(([r]) => roles.includes(r));
       // Aucun rôle de périmètre (simple membre) : inMemberScope fait du fail-open,
       // donc on court-circuite ici — il ne voit que sa propre fiche.
       if (!scopeEntry) return items.filter((m) => m.id === member.id).map(mask);
@@ -667,7 +767,7 @@ export async function filterReadable(name: string, ctx: RbacContext, items: any[
       // le rôle de l'OPÉRATEUR (src/data/roles.ts resolveMemberRole, appelé une seule fois,
       // sur lui-même) : on lui renvoie donc sa propre entrée, et rien d'autre. Les rôles
       // full-scope — qui incluent nécessairement les Admin — gardent la liste complète.
-      return hasAny(roles, FULL_SCOPE_ROLES)
+      return hasAny(roles, AUTHORITY_ROLES)
         ? items
         : items.filter((a: any) => a.id === `adm_${member.id}` || a.id === member.id);
 
@@ -686,6 +786,18 @@ export async function filterReadable(name: string, ctx: RbacContext, items: any[
         return items.filter((x) => !b(x) || b(x) === 'global' || b(x) === member.branch || x.scope === 'both');
       }
       return items;
+
+    case 'projects': {
+      if (fullScope) return items;
+      const ministries = await readCollection('ministries') as Ministry[];
+      const tutored = new Set(ministries.filter(m => m.tuteurId === member.id).map(m => m.id));
+      return items.filter(project => {
+        if (memberCanReadProject(member.id, project)) return true;
+        if (roles.includes('Pasteur')) return project.scope !== 'branche' || !project.branch || project.branch === member.branch;
+        return roles.includes('Ministre') && project.scope === 'ministere' && tutored.has(project.ministryId)
+          && (!project.branch || project.branch === member.branch);
+      });
+    }
 
     case 'notifications': {
       // Même cloisonnement par branche, PLUS confidentialité personnelle : une notification
@@ -706,7 +818,7 @@ export async function filterReadable(name: string, ctx: RbacContext, items: any[
     case 'audits':
       // Journal d'audit : PII (noms, operatorId, événements PASSWORD_RESET_ISSUED en clair).
       // Réservé à l'encadrement supérieur — invisible au simple membre.
-      return hasAny(roles, FULL_SCOPE_ROLES) ? items : [];
+      return hasAny(roles, AUTHORITY_ROLES) ? items : [];
 
     case 'capability_overrides':
       // Lecture symétrique à l'écriture (assertCanWrite ci-dessus) : la matrice dynamique

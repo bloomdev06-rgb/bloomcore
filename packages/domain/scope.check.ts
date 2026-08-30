@@ -25,6 +25,8 @@ const ministries: Ministry[] = [{ id: 'min_1', name: 'Louange', description: '',
 
 // Full-scope roles see everyone
 assert.equal(inMemberScope(mk({ id: 'op' }), mk({ id: 't' }), 'Super Admin', busLines, departments), true);
+assert.equal(inMemberScope(mk({ id: 'past', branch: 'church' }), mk({ id: 'same', branch: 'church' }), 'Pasteur', busLines, departments), true);
+assert.equal(inMemberScope(mk({ id: 'past', branch: 'church' }), mk({ id: 'other', branch: 'light' }), 'Pasteur', busLines, departments), false, 'Pasteur limité à sa branche');
 
 // Ministre — scoped to their ministry's departments
 const ministre = mk({ id: 'ministre_1' });

@@ -43,13 +43,14 @@ assert.deepEqual(
   ['dept_bloom_bus'],
 );
 
-// Responsable d'un département ET membre d'un autre : la fonction de responsable gagne,
-// quel que soit l'ordre des clés.
+// Plusieurs affectations réelles restent actives simultanément : le tableau de bord
+// agrège l'union au lieu de réduire le membre à un seul département.
 const double = membre({ dept_tech: 'membre', dept_bloom_bus: 'responsable' });
 assert.deepEqual(
   dashboardScope(double, 'Coach', [double], [], DEPTS, []).deptIds,
-  ['dept_bloom_bus'],
+  ['dept_tech', 'dept_bloom_bus'],
 );
+assert.equal(dashboardScope(double, 'Coach', [double], [], DEPTS, []).label, 'Mes départements');
 
 // Aucun département : la table reste le dernier recours, pour les profils de test.
 const sansDept = membre({});

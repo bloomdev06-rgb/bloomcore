@@ -1,8 +1,8 @@
-import React, { useState, useEffect, lazy, Suspense } from 'react';
-import { load, save, seeds, seedOrEmpty, useDepartments, useMinistries, useBusLines, useAdmins, deriveTimeBasedNotifications, apiBootstrap, apiPut, clearAuthToken, apiLogout, enableSync, canView, openNotificationStream, apiFetchCollection, labelFor, apiCreateMember, apiPatchMember, apiDeleteMember } from './data';
+import React, { useState, useEffect, useMemo, lazy, Suspense } from 'react';
+import { load, save, seeds, seedOrEmpty, useDepartments, useMinistries, useBusLines, useAdmins, deriveTimeBasedNotifications, apiBootstrap, apiPut, clearAuthToken, apiLogout, enableSync, canViewAnyRole, openNotificationStream, apiFetchCollection, labelFor, apiCreateMember, apiPatchMember, apiDeleteMember } from './data';
 import { hasServerSession } from './data/api';
 import { reportName } from './data/reportNames';
-import { resolveMemberRole } from './data/roles';
+import { resolveMemberRole, resolveMemberRoles } from './data/roles';
 import { MEMBERS_TAB_DEPT_ONLY_ROLES } from './data/scope';
 import { isLegacySeedEventId } from './data/events';
 import { DEFAULT_OPERATOR_NAME, operatorDisplayName } from './data/operator';
@@ -109,6 +109,16 @@ export default function App() {
   const [departments, setDepartments] = useState<Department[]>(useDepartments);
   // P4.19 — mock auth : identifie l'utilisateur connecté, remplace le hardcode mem_1.
   const [loggedInMemberId, setLoggedInMemberId] = useState<string | null>(() => load('bc_loggedInMemberId', null));
+  const ministrySeeds = useMinistries();
+  const adminAccounts = useAdmins();
+  const busLines = useBusLines();
+  const operator = members.find(m => m.id === loggedInMemberId) ?? members[0];
+  const activeRoles = useMemo(() => {
+    if (!operator) return ['Membre'];
+    return operator.testRole
+      ? [operator.testRole]
+      : [...resolveMemberRoles(operator, adminAccounts, ministrySeeds, departments)];
+  }, [operator, adminAccounts, ministrySeeds, departments]);
 
   // Persist on change — single swap point lives in ./data.
   // AUCUNE de ces collections ne doit être sauvegardée au premier rendu. Cet effet poussait
@@ -127,17 +137,17 @@ export default function App() {
   // de dépendre uniquement de l'effet de bord local du bouton de rôle dans Sidebar.tsx.
   // 'profile' est volontairement hors matrice (chacun voit toujours son propre profil).
   useEffect(() => {
-    if (activeTab !== 'profile' && !canView(permissionMatrix, activeTab, simulatedRole)) {
+    if (activeTab !== 'profile' && !canViewAnyRole(permissionMatrix, activeTab, activeRoles)) {
       setActiveTab('dashboard');
       return;
     }
     // Responsable/Adjoint : pas d'onglet Membres global, même si la matrice
     // l'autorise encore (elle reste nécessaire côté serveur pour l'onglet
     // Membres de leur page Département — cf. Sidebar.tsx).
-    if (activeTab === 'members' && MEMBERS_TAB_DEPT_ONLY_ROLES.includes(simulatedRole)) {
+    if (activeTab === 'members' && activeRoles.some(role => MEMBERS_TAB_DEPT_ONLY_ROLES.includes(role))) {
       setActiveTab('dashboard');
     }
-  }, [simulatedRole, activeTab, permissionMatrix]);
+  }, [activeRoles, activeTab, permissionMatrix]);
   useSyncedSave('bc_settings', settings);
   useSyncedSave('bc_forms', forms);
   // Jamais de sauvegarde au montage : elle repousserait le cache local (possiblement vide
@@ -251,11 +261,8 @@ export default function App() {
   }, [members, settings]);
 
   const departmentOptions = useDepartments();
-  const ministrySeeds = useMinistries();
   // Modal « Créer un département » — ouvert depuis la sidebar (pasteurs/admins).
   const [showCreateDept, setShowCreateDept] = useState(false);
-  const adminAccounts = useAdmins();
-  const busLines = useBusLines();
 
   // Le rôle qui pilote l'UI est dérivé du membre connecté (le panneau « Simuler profil »
   // a été retiré). Un compte de test peut forcer son rôle via `testRole` (profils de test,
@@ -263,7 +270,7 @@ export default function App() {
   useEffect(() => {
     if (!loggedInMemberId) return;
     const op = members.find((m) => m.id === loggedInMemberId);
-    if (op) setSimulatedRole(op.testRole || resolveMemberRole(op, adminAccounts, ministrySeeds));
+    if (op) setSimulatedRole(op.testRole || resolveMemberRole(op, adminAccounts, ministrySeeds, departments));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loggedInMemberId, members]);
 
@@ -587,8 +594,8 @@ export default function App() {
   const handleNotificationClick = (n: AppNotification) => {
     if (!n.resourceType || !n.resourceId) return;
     const tab = n.resourceType === 'member' ? 'members' : n.resourceType === 'report' ? 'reports' : 'events';
-    const allowed = canView(permissionMatrix, tab, simulatedRole) &&
-      !(tab === 'members' && MEMBERS_TAB_DEPT_ONLY_ROLES.includes(simulatedRole));
+    const allowed = canViewAnyRole(permissionMatrix, tab, activeRoles) &&
+      !(tab === 'members' && activeRoles.some(role => MEMBERS_TAB_DEPT_ONLY_ROLES.includes(role)));
     if (!allowed) {
       toast.error("Vous n'avez pas accès à cette section.");
       return;
@@ -604,19 +611,18 @@ export default function App() {
   };
 
   // P4.19 — membre connecté (remplace les anciens hardcodes mem_1).
-  const operator = members.find(m => m.id === loggedInMemberId) ?? members[0];
   // Cloisonnement par branche (PROFILS-INTERFACES) : un profil mono-branche est verrouillé
   // sur SA branche ; « Global » réservé au staff. Pasteurs/admins/ministres/coachs gardent
   // le commutateur — règle du cahier, inchangée. Miroir UI du garde-fou Header.
   useEffect(() => {
     if (!operator) return;
-    if (!MULTI_BRANCH_ROLES.includes(simulatedRole) && operator.branch && activeBranch !== operator.branch) {
+    if (!activeRoles.some(role => MULTI_BRANCH_ROLES.includes(role)) && operator.branch && activeBranch !== operator.branch) {
       setActiveBranch(operator.branch);
-    } else if (!GLOBAL_VIEW_ROLES.includes(simulatedRole) && activeBranch === 'global') {
+    } else if (!activeRoles.some(role => GLOBAL_VIEW_ROLES.includes(role)) && activeBranch === 'global') {
       setActiveBranch(operator.branch ?? 'church');
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [simulatedRole, activeBranch, operator?.id]);
+  }, [activeRoles, activeBranch, operator?.id]);
   // §6.2 — une notification ciblée (escalade J+7) n'est visible que du Ministre visé ;
   // Admin/Super Admin gardent une vue d'ensemble (même principe que le journal d'audit).
   const visibleNotifications = notifications
@@ -739,6 +745,7 @@ export default function App() {
             onUpdateReport={handleUpdateReport}
             activeBranch={activeBranch}
             simulatedRole={simulatedRole}
+            activeRoles={activeRoles}
             members={members}
             forms={forms}
           />
@@ -750,6 +757,7 @@ export default function App() {
             simulatedRole={simulatedRole}
             events={events}
             operator={operator}
+            members={members}
           />
         );
       case 'cursus':
@@ -770,7 +778,7 @@ export default function App() {
       case 'formations':
         return <FormationsView activeBranch={activeBranch} simulatedRole={simulatedRole} members={members} operator={operator} permissionMatrix={permissionMatrix} />;
       case 'programs':
-        return <ProgrammesView members={members} onUpdateMember={handleUpdateMember} onAddAuditLog={handleAddAuditLog} activeBranch={activeBranch} simulatedRole={simulatedRole} operator={operator} permissionMatrix={permissionMatrix} forms={forms} reports={reports} audits={audits} onAddReport={handleAddReport} />;
+        return <ProgrammesView members={members} onUpdateMember={handleUpdateMember} onAddAuditLog={handleAddAuditLog} activeBranch={activeBranch} simulatedRole={simulatedRole} activeRoles={activeRoles} operator={operator} permissionMatrix={permissionMatrix} forms={forms} reports={reports} audits={audits} onAddReport={handleAddReport} />;
       case 'reports':
         return <ReportsView reports={reports} activeBranch={activeBranch} simulatedRole={simulatedRole} members={members} events={events} />;
       case 'permissions':
@@ -814,6 +822,7 @@ export default function App() {
         setCollapsed={setSidebarCollapsed}
         activeBranch={activeBranch}
         simulatedRole={simulatedRole}
+        activeRoles={activeRoles}
         selectedDept={selectedDept}
         setSelectedDept={setSelectedDept}
         permissionMatrix={permissionMatrix}
@@ -867,7 +876,7 @@ export default function App() {
 
       {/* §14.3 — bouton flottant ADN (mobile) : accès rapide à la fiche d'accueil des nouveaux.
           Caché sur desktop (la sidebar porte déjà l'onglet) et masqué si déjà sur l'onglet ADN. */}
-      {canView(permissionMatrix, 'adn', simulatedRole) && activeTab !== 'adn' && (
+      {canViewAnyRole(permissionMatrix, 'adn', activeRoles) && activeTab !== 'adn' && (
         <button
           onClick={() => setActiveTab('adn')}
           className="md:hidden fixed bottom-6 right-6 z-40 w-14 h-14 rounded-full bg-bc-green text-white shadow-lg shadow-bc-green/30 flex items-center justify-center active-scale ease-out-spring"

@@ -176,7 +176,7 @@ export const INITIAL_DEPARTMENTS: Department[] = [
   { id: 'dept_gems', name: 'GEMS', type: 'normal', ministryId: 'min_affermissement', description: '' },
   { id: 'dept_reunion_cl', name: 'Réunion des C&L', type: 'normal', ministryId: 'min_affermissement', description: '' },
   { id: 'dept_bible_coffee', name: 'Bible Coffee', type: 'normal', ministryId: 'min_affermissement', description: '' },
-  { id: 'dept_bapteme', name: 'Baptême', type: 'special', specialFunction: 'parcours_etapes', ministryId: 'min_affermissement', description: 'Parcours étapes' },
+  { id: 'dept_bapteme', name: 'Baptême', type: 'special', specialFunction: 'bapteme', ministryId: 'min_affermissement', description: 'Parcours étapes' },
 ];
 
 export const INITIAL_ACTIVITIES: Activity[] = [
@@ -664,10 +664,11 @@ export const INITIAL_SETTINGS: AppSettings = {
 // oubliés par les anciennes listes en dur de la Sidebar). Sparse : seuls les rôles autorisés sont listés.
 const allow = (...roles: string[]) => Object.fromEntries(roles.map((r) => [r, true]));
 const STAFF = ['Super Admin', 'Admin', 'Pasteur Principal', 'Pasteur', 'Ministre'];
+const TOOL_STAFF = ['Super Admin', 'Admin', 'Pasteur Principal', 'Pasteur'];
 const ALL_PROFILES = [
   ...STAFF, 'Responsable', 'Adjoint', 'Coach', 'Leader', 'Capitaine de Bus',
   'Responsable de Zone', 'Responsable de Commune', 'ADN', 'Portier', 'GDC',
-  'Intégration', 'Membre', 'Nouveau',
+  'Intégration', 'Baptême', 'Trésorier', 'Responsable de section', 'Membre', 'Nouveau',
 ];
 
 export const VIEW_PERMISSIONS: PermissionMatrix = {
@@ -681,18 +682,18 @@ export const VIEW_PERMISSIONS: PermissionMatrix = {
   'view_departments': allow(...STAFF, 'Responsable', 'Adjoint', 'ADN', 'Portier', 'GDC', 'Intégration'),
   // D2 — aligné sur CAN_ACCESS_INTEGRATION (NouveauxView) : la Console Intégration est réservée
   // au département Intégration + la ligne pastorale. Coach/Leader/ADN/Portier/GDC ne doivent pas voir l'onglet.
-  'view_integration': allow(...STAFF, 'Intégration'),
-  'view_adn': allow(...STAFF, 'ADN'),
-  'view_rapportculte': allow(...STAFF, 'GDC'),
-  'view_denombrement': allow(...STAFF, 'Portier'),
-  'view_bloombus': allow(...STAFF, 'Responsable', 'Adjoint', 'Coach', 'Capitaine de Bus', 'Responsable de Zone', 'Responsable de Commune', 'Membre', 'Nouveau'),
-  'view_events': allow(...STAFF, 'Responsable', 'Adjoint', 'ADN', 'Portier', 'GDC'),
+  'view_integration': allow(...TOOL_STAFF, 'Intégration'),
+  'view_adn': allow(...TOOL_STAFF, 'ADN'),
+  'view_rapportculte': allow(...TOOL_STAFF, 'GDC'),
+  'view_denombrement': allow(...TOOL_STAFF, 'Portier'),
+  'view_bloombus': allow(...STAFF, 'Responsable', 'Adjoint', 'Trésorier', 'Responsable de section', 'Coach', 'Capitaine de Bus', 'Responsable de Zone', 'Responsable de Commune', 'Membre', 'Nouveau'),
+  'view_events': allow(...TOOL_STAFF, 'GDC'),
   // P4.2 (résiduel) : un équipier de projet peut être de n'importe quel profil
   // (Project.team n'est pas restreint par rôle) — ouvert à tous plutôt qu'une
   // liste en dur qui oublierait toujours un profil.
   'view_projects': allow(...ALL_PROFILES),
-  'view_cursus': allow(...STAFF, 'Responsable', 'Coach', 'Leader', 'ADN', 'Portier', 'GDC', 'Intégration', 'Membre'),
-  'view_formations': allow(...STAFF, 'Responsable', 'Coach', 'Leader', 'Membre', 'ADN', 'Portier', 'GDC', 'Intégration', 'Nouveau'),
+  'view_cursus': allow(...STAFF, 'Responsable', 'Trésorier', 'Responsable de section', 'Coach', 'Leader', 'ADN', 'Portier', 'GDC', 'Intégration', 'Membre'),
+  'view_formations': allow(...STAFF, 'Responsable', 'Trésorier', 'Responsable de section', 'Coach', 'Leader', 'Membre', 'ADN', 'Portier', 'GDC', 'Intégration', 'Nouveau'),
   'view_permissions': allow('Super Admin', 'Admin', 'Pasteur Principal'),
   'view_accounts': allow('Super Admin', 'Admin', 'Pasteur Principal'),
   'view_settings': allow('Super Admin', 'Admin', 'Pasteur Principal'),
@@ -702,7 +703,7 @@ export const VIEW_PERMISSIONS: PermissionMatrix = {
   // routés nulle part. Rapports agrège des données confidentielles inter-départements
   // (rapport_suivi_coach, etc.) → même niveau que view_audit + Responsable.
   'view_reports': allow(...STAFF, 'Responsable'),
-  'view_programs': allow(...STAFF, 'Responsable', 'ADN', 'Intégration'),
+  'view_programs': allow(...TOOL_STAFF, 'Baptême'),
 };
 
 export const DEFAULT_PERMISSION_MATRIX: PermissionMatrix = {
@@ -735,7 +736,7 @@ export const DEFAULT_PERMISSION_MATRIX: PermissionMatrix = {
     'Super Admin': true,
     'Pasteur': true,
     'Admin': true,
-    'Responsable': true,
+    'Baptême': true,
     'Coach': true,
     'Membre': false
   },

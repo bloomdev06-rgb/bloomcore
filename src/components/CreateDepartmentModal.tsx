@@ -7,7 +7,7 @@ import { Modal } from './ui/Modal';
 // alors que DepartmentsView est lazy-loadé — l'importer de là tirerait tout son chunk.
 export const SPECIAL_LABEL: Record<SpecialFunction, string> = {
   adn: 'ADN', portiers: 'Portiers', integration: 'Intégration',
-  bloom_bus: 'Département Bloom Bus', gestion_cultes: 'Gestion des Cultes', parcours_etapes: 'Parcours à étapes',
+  bloom_bus: 'Département Bloom Bus', gestion_cultes: 'Gestion des Cultes', parcours_etapes: 'Parcours à étapes', bapteme: 'Parcours Baptême',
 };
 
 type Scope = 'church' | 'light' | 'both';
@@ -79,7 +79,7 @@ export default function CreateDepartmentModal({
           {type === 'special' && (
             <select value={special} onChange={(e) => setSpecial(e.target.value as SpecialFunction)} className="w-full border border-bc-border rounded-xl px-3 py-2 text-sm bg-white">
               <option value="">— Fonction spéciale —</option>
-              {(['adn', 'portiers', 'integration', 'bloom_bus', 'gestion_cultes', 'parcours_etapes'] as SpecialFunction[]).map((f) => (
+              {(['adn', 'portiers', 'integration', 'bloom_bus', 'gestion_cultes', 'parcours_etapes', 'bapteme'] as SpecialFunction[]).map((f) => (
                 <option key={f} value={f}>{SPECIAL_LABEL[f]}</option>
               ))}
             </select>

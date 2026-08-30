@@ -7,6 +7,10 @@ export function canView(permissionMatrix: PermissionMatrix, tabId: string, role:
   return role === 'Super Admin' || !!permissionMatrix[`view_${tabId}`]?.[role];
 }
 
+export function canViewAnyRole(permissionMatrix: PermissionMatrix, tabId: string, roles: Iterable<string>): boolean {
+  return [...roles].some(role => canView(permissionMatrix, tabId, role));
+}
+
 // §11.3 — une capacité déléguable (DELEGABLE_CAPS) est accordée si le rôle l'a nativement
 // dans la matrice, OU si une délégation active cible cet opérateur précis (toId). Sans ce
 // second membre, la console de délégation reste un formulaire sans effet (cf. audit B5).

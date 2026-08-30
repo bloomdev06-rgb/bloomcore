@@ -22,7 +22,7 @@ import {
 export { deriveTimeBasedNotifications } from './notificationRules';
 export { apiBootstrap, apiLogin, clearAuthToken, apiLogout, apiPut, apiFetchCollection, openNotificationStream, syncQueueLength, isSyncing, apiCreateMember, apiPatchMember, apiDeleteMember } from './api';
 export { labelFor } from '../../packages/shared/migrate';
-export { canView, hasCapability, resolveCapability } from './permissions';
+export { canView, canViewAnyRole, hasCapability, resolveCapability } from './permissions';
 import { apiPut, hasServerSession } from './api';
 import { idbLoadAll, idbSet } from './idb';
 

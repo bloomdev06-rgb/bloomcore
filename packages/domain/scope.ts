@@ -25,7 +25,8 @@ export function dashboardScope(
   departments: Department[],
   ministries: Ministry[],
 ): DashboardScope {
-  const ownMinistry = role === 'Ministre' ? ministries.find(m => m.tuteurId === operator?.id) : undefined;
+  const ownMinistries = role === 'Ministre' ? ministries.filter(m => m.tuteurId === operator?.id) : [];
+  const ownMinistry = ownMinistries[0];
   // Les affectations RÉELLES du membre priment. ROLE_HOME_DEPT est une table codée en dur,
   // héritée du mode démonstration (« Simuler profil » faisait semblant d'appartenir à un
   // département correspondant au rôle choisi) : elle était testée EN PREMIER et écrasait donc
@@ -37,9 +38,10 @@ export function dashboardScope(
   const homeDeptId = Object.entries(operator?.departments ?? {}).find(([, fn]) => fn === 'responsable')?.[0]
     || Object.keys(operator?.departments ?? {})[0]
     || ROLE_HOME_DEPT[role];
+  const assignedDeptIds = Object.keys(operator?.departments ?? {});
   const deptIds: string[] | null =
-    role === 'Ministre' ? (ownMinistry ? departments.filter(d => d.ministryId === ownMinistry.id).map(d => d.id) : [])
-    : ['Responsable', 'Coach', 'Leader'].includes(role) ? (homeDeptId ? [homeDeptId] : [])
+    role === 'Ministre' ? departments.filter(d => ownMinistries.some(m => m.id === d.ministryId)).map(d => d.id)
+    : ['Responsable', 'Coach', 'Leader'].includes(role) ? (assignedDeptIds.length ? assignedDeptIds : homeDeptId ? [homeDeptId] : [])
     : null; // Pasteur/Pasteur Principal/Admin/Super Admin → toute l'église.
 
   if (deptIds === null) return { members, reports, deptIds: null, label: 'Global' };
@@ -50,18 +52,23 @@ export function dashboardScope(
   const scopedReports = reports.filter(r =>
     (r.departmentId && deptSet.has(r.departmentId)) ||
     (r.content?.memberId && memberIdSet.has(r.content.memberId)));
-  const label = ownMinistry ? ownMinistry.name // les noms de ministère contiennent déjà « Ministère … »
+  const label = ownMinistries.length > 1 ? 'Mes ministères'
+    : ownMinistry ? ownMinistry.name // les noms de ministère contiennent déjà « Ministère … »
+    : deptIds.length > 1 ? 'Mes départements'
     : deptIds.length ? `Département ${departments.find(d => d.id === deptIds[0])?.name ?? ''}`
     : 'Ma portée';
   return { members: scopedMembers, reports: scopedReports, deptIds, label };
 }
 
+// Autorité structurelle dans la branche pour le Pasteur, mais portée inter-branches
+// exclusivement pour les trois rôles globaux.
 export const FULL_SCOPE_ROLES = ['Super Admin', 'Admin', 'Pasteur Principal', 'Pasteur'];
+export const CROSS_BRANCH_ROLES = ['Super Admin', 'Admin', 'Pasteur Principal'];
 // PROFILS-INTERFACES : seuls la ligne pastorale/staff et le Coach (bi-branche) ont le
 // commutateur de branche ; tous les autres profils sont verrouillés sur Member.branch.
-export const MULTI_BRANCH_ROLES = ['Super Admin', 'Admin', 'Pasteur Principal', 'Pasteur', 'Ministre', 'Coach'];
+export const MULTI_BRANCH_ROLES = CROSS_BRANCH_ROLES;
 // La vue « Global » (consolidation des 2 branches) est réservée au staff.
-export const GLOBAL_VIEW_ROLES = ['Super Admin', 'Admin', 'Pasteur Principal', 'Pasteur', 'Ministre'];
+export const GLOBAL_VIEW_ROLES = CROSS_BRANCH_ROLES;
 // ponytail: proxy via shared department, not a real mentor/filleul link — upgrade
 // to a dedicated relation once that model exists.
 const DEPARTMENT_PROXY_ROLES = ['Responsable', 'Adjoint', 'Coach', 'Leader'];
@@ -127,7 +134,8 @@ export function canManageAccountOf(
   ministries: Ministry[] = [],
 ): boolean {
   if (target.id === operator.id) return false;
-  if (FULL_SCOPE_ROLES.includes(scopeRole)) return true;
+  if (CROSS_BRANCH_ROLES.includes(scopeRole)) return true;
+  if (scopeRole === 'Pasteur') return operator.branch === target.branch;
   if (!inMemberScope(operator, target, scopeRole, busLines, departments, ministries)) return false;
   return bestRank(operatorRoles) < bestRank(targetRoles);
 }
@@ -141,9 +149,11 @@ export function inMemberScope(
   ministries: Ministry[] = [],
 ): boolean {
   if (target.id === operator.id) return true;
-  if (FULL_SCOPE_ROLES.includes(role)) return true;
+  if (CROSS_BRANCH_ROLES.includes(role)) return true;
+  if (role === 'Pasteur') return operator.branch === target.branch;
 
   if (role === 'Ministre') {
+    if (operator.branch !== target.branch) return false;
     const ownMinistryIds = ministries.filter(m => m.tuteurId === operator.id).map(m => m.id);
     const targetDeptIds = Object.keys(target.departments);
     return departments.some(d => targetDeptIds.includes(d.id) && ownMinistryIds.includes(d.ministryId));

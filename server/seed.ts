@@ -131,6 +131,79 @@ export async function ensureSeeded(): Promise<void> {
   await reconcileSeedMembers();
   await reconcileLot3();
   await reconcileLot4();
+  await reconcileVisibilityAccess();
+}
+
+// Réconciliation RBAC 2026-08-29 : complète les nouvelles colonnes sans écraser les
+// personnalisations, puis révoque UNE fois les anciens accès aux outils départementaux.
+async function reconcileVisibilityAccess(): Promise<void> {
+  const permissions = ((await getKv('permissions')) ?? {}) as Record<string, Record<string, boolean>>;
+  const required: Record<string, string[]> = {
+    view_dashboard: ['Trésorier', 'Responsable de section'],
+    view_bloombus: ['Trésorier', 'Responsable de section'],
+    view_cursus: ['Trésorier', 'Responsable de section'],
+    view_formations: ['Trésorier', 'Responsable de section'],
+    view_events: ['GDC'],
+    view_programs: ['Baptême'],
+    modifier_jalons_bapteme_integration: ['Baptême'],
+  };
+  for (const [capability, roles] of Object.entries(required)) {
+    permissions[capability] ??= {};
+    for (const role of roles) if (!(role in permissions[capability])) permissions[capability][role] = true;
+  }
+  if (!(await getKv('visibility_access_v2_revoked'))) {
+    const revoke: Record<string, string[]> = {
+      view_events: ['Responsable', 'Adjoint', 'ADN', 'Portier', 'Intégration', 'Ministre'],
+      view_programs: ['Responsable', 'Adjoint', 'ADN', 'Portier', 'GDC', 'Intégration', 'Ministre'],
+      view_adn: ['Ministre'],
+      view_integration: ['Ministre'],
+      view_rapportculte: ['Ministre'],
+      view_denombrement: ['Ministre'],
+      modifier_jalons_bapteme_integration: ['Responsable', 'Adjoint', 'ADN', 'Portier', 'GDC', 'Intégration', 'Ministre'],
+    };
+    for (const [capability, roles] of Object.entries(revoke)) {
+      permissions[capability] ??= {};
+      for (const role of roles) delete permissions[capability][role];
+    }
+    await setKv('visibility_access_v2_revoked', true);
+  }
+  await setKv('permissions', permissions);
+
+  const departments = await getCollection('departments');
+  let departmentsChanged = false;
+  for (const department of departments as any[]) {
+    if (department.id === 'dept_bapteme' && department.specialFunction !== 'bapteme') {
+      department.specialFunction = 'bapteme';
+      departmentsChanged = true;
+    }
+  }
+  if (departmentsChanged) await setCollection('departments', departments);
+
+  const members = await getCollection('members');
+  const idsByName = new Map<string, string[]>();
+  for (const member of members as any[]) {
+    const name = `${member.firstName} ${member.lastName}`.trim();
+    idsByName.set(name, [...(idsByName.get(name) ?? []), member.id]);
+  }
+  const uniqueId = (name: string) => {
+    const ids = idsByName.get(name) ?? [];
+    return ids.length === 1 ? ids[0] : undefined;
+  };
+  const projects = await getCollection('projects');
+  let projectsChanged = false;
+  for (const project of projects as any[]) {
+    if (!project.pmoId) {
+      const id = uniqueId(project.pmo);
+      if (id) { project.pmoId = id; projectsChanged = true; }
+    }
+    for (const teammate of project.team ?? []) {
+      if (!teammate.memberId) {
+        const id = uniqueId(teammate.member);
+        if (id) { teammate.memberId = id; projectsChanged = true; }
+      }
+    }
+  }
+  if (projectsChanged) await setCollection('projects', projects);
 }
 
 // Lot 4 — remplacement des événements. Deux purges :

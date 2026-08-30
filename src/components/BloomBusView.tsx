@@ -222,7 +222,8 @@ export default function BloomBusView({
   const [showAddBus, setShowAddBus] = useState(false);
   const [showDirectRegister, setShowDirectRegister] = useState(false);
   const [showAttachExisting, setShowAttachExisting] = useState(false);
-  // Clic sur un avatar de la barre du haut → attribution de rôle, même contrôle que le roster.
+  // Clic sur un avatar de la barre du haut → attribution de fonction Bloom Bus.
+  // C'est l'unique point d'entrée UI : le roster inférieur reste dédié aux rapports membres.
   const [roleAssignMemberId, setRoleAssignMemberId] = useState<string | null>(null);
   const rosterPanelRef = useRef<HTMLDivElement>(null);
   const [expandedCommunes, setExpandedCommunes] = useState<string[]>([
@@ -381,8 +382,8 @@ export default function BloomBusView({
   ];
   const canAssign = (target: Member, role: string) =>
     !!operator && canAssignBusRole(operator, operatorRolesForBus, target, role, busLines, departments, ministriesForBus);
-  // Un seul rendu du contrôle d'attribution, réutilisé par le roster ET par le clic sur un
-  // avatar de la barre du haut (point d'entrée §27 demandé) — même options/permissions.
+  // Contrôle d'attribution affiché uniquement depuis le clic sur un avatar de la barre du haut.
+  // Les permissions restent calculées option par option avec le garde serveur partagé.
   const renderBusRoleSelect = (m: Member) => {
     if (!operator) return null;
     const courant = m.busRole ?? "";
@@ -1269,10 +1270,6 @@ export default function BloomBusView({
                           </div>
                           {editable && <Heart size={14} className="text-bc-green shrink-0" />}
                         </button>
-                        {/* §27 — fonction du MODULE. « Retirer » compte comme une attribution :
-                            l'option vide est ouverte au même contrôle que les autres, sinon on
-                            destituerait plus haut que soi. */}
-                        {renderBusRoleSelect(m)}
                         <ReportStatusBoxes
                           memberId={m.id}
                           reports={branchReports}

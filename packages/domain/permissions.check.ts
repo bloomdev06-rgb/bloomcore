@@ -1,6 +1,6 @@
 // Vérifie le moteur de capacités §5 : base ⊕ overrides ⊕ specialAuth (harnais node:assert).
 import assert from 'node:assert';
-import { resolveCapability } from './permissions.ts';
+import { canViewAnyRole, resolveCapability } from './permissions.ts';
 import { Member, PermissionMatrix, CapabilityOverride, SpecialAuthorization } from './types.ts';
 
 const CAP = 'consulter_situation_financiere';
@@ -79,5 +79,7 @@ assert.strictEqual(resolveCapability(matrix, CAP, member(), 'Leader', [], [], [{
 
 // 10. Super Admin garde tout (garde-fou base inchangé).
 assert.strictEqual(resolveCapability(matrix, 'n_importe_quoi', member(), 'Super Admin', []), true, 'Super Admin conserve tout');
+assert.strictEqual(canViewAnyRole({ view_events: { GDC: true } }, 'events', ['Responsable', 'GDC']), true, 'les droits de tous les rôles sont cumulés');
+assert.strictEqual(canViewAnyRole({ view_events: { GDC: true } }, 'events', ['Responsable']), false, 'un rôle sans droit ne voit pas l’onglet');
 
 console.log('permissions.check OK');

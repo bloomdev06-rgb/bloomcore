@@ -25,6 +25,7 @@ interface ProgrammesViewProps {
   onAddAuditLog: (log: AuditLog) => void;
   activeBranch: Branch;
   simulatedRole: string;
+  activeRoles: string[];
   operator?: Member;
   permissionMatrix: PermissionMatrix;
   forms?: FormDef[];
@@ -34,7 +35,7 @@ interface ProgrammesViewProps {
 }
 
 export default function ProgrammesView({
-  members, onUpdateMember, onAddAuditLog, activeBranch, simulatedRole, operator, permissionMatrix,
+  members, onUpdateMember, onAddAuditLog, activeBranch, simulatedRole, activeRoles, operator, permissionMatrix,
   forms = [], reports = [], audits = [], onAddReport,
 }: ProgrammesViewProps) {
   const busLines = useBusLines();
@@ -42,7 +43,7 @@ export default function ProgrammesView({
   const ministries = useMinistries();
   // §11.3 — capacité déléguable : rôle natif OU délégation active ciblant cet opérateur.
   const delegations = load('bc_delegations', [] as Delegation[]);
-  const canValidateBaptism = resolveCapability(permissionMatrix, 'modifier_jalons_bapteme_integration', operator, simulatedRole, delegations, load('bc_capability_overrides', [] as CapabilityOverride[]), load('bc_special_authorizations', [] as SpecialAuthorization[]));
+  const canValidateBaptism = activeRoles.some(role => resolveCapability(permissionMatrix, 'modifier_jalons_bapteme_integration', operator, role, delegations, load('bc_capability_overrides', [] as CapabilityOverride[]), load('bc_special_authorizations', [] as SpecialAuthorization[])));
 
   // Étapes réelles du parcours (FormBuilder fd_bapteme) — le fallback = les mêmes seedées.
   const steps = forms.find((f) => f.id === 'fd_bapteme')?.steps ?? FALLBACK_STEPS;
@@ -98,7 +99,7 @@ export default function ProgrammesView({
   // étape s'il porte le rôle validateur de CETTE étape, ou s'il est une autorité supérieure.
   const OVERRIDE_VALIDATORS = ['Pasteur', 'Pasteur Principal', 'Ministre', 'Admin', 'Super Admin'];
   const canValidateStep = (stepValidator?: string) =>
-    !stepValidator || simulatedRole === stepValidator || OVERRIDE_VALIDATORS.includes(simulatedRole);
+    !stepValidator || activeRoles.includes(stepValidator) || activeRoles.some(role => OVERRIDE_VALIDATORS.includes(role));
 
   // Avancer / reculer l'état d'un candidat. Dernière étape validée → baptisé (via département).
   const moveStep = (m: Member, dir: 1 | -1) => {

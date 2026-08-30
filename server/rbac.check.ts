@@ -29,6 +29,18 @@ assert.ok(resolveRoles(ministre as any, [], ministries as any).includes('Ministr
 const resp = baseMember({ id: 'm4', departments: { d1: 'responsable' } });
 assert.ok(resolveRoles(resp as any, [], []).includes('Responsable'), 'Responsable via departments');
 
+const toolDepartments = [
+  { id: 'd_gdc', name: 'GDC', ministryId: 'min1', type: 'special', specialFunction: 'gestion_cultes', branch: 'church' },
+  { id: 'd_adn', name: 'ADN', ministryId: 'min1', type: 'special', specialFunction: 'adn', branch: 'church' },
+  { id: 'd_eden', name: 'Eden', ministryId: 'min1', type: 'special', specialFunction: 'parcours_etapes', branch: 'church' },
+  { id: 'd_bap', name: 'Baptême', ministryId: 'min1', type: 'special', specialFunction: 'bapteme', branch: 'church' },
+];
+const multiDepartmentResp = baseMember({ id: 'm_tools', departments: { d_gdc: 'responsable', d_adn: 'responsable' } });
+const multiRoles = resolveRoles(multiDepartmentResp as any, [], [], toolDepartments as any);
+assert.ok(['Responsable', 'GDC', 'ADN'].every(role => multiRoles.includes(role)), 'les rôles des deux départements sont actifs simultanément');
+const edenMember = baseMember({ id: 'm_eden', departments: { d_eden: 'membre' } });
+assert.ok(!resolveRoles(edenMember as any, [], [], toolDepartments as any).includes('Baptême'), 'Eden Zero ne confère jamais le rôle Baptême');
+
 const simple = baseMember({ id: 'm5' });
 assert.deepEqual(resolveRoles(simple as any, [], []), ['Membre'], 'simple membre');
 
@@ -37,7 +49,7 @@ setKv('permissions', { view_members: { Responsable: true } });
 await applyWrite('members', [superAdmin, pasteur, ministre, resp, simple, baseMember({ id: 'm6', departments: { d1: 'membre' } }), baseMember({ id: 'm7' })]);
 await applyWrite('admins', [...admins, { id: 'adm_m7', name: 'AD', subtitle: '', role: 'Admin' }] as any);
 await applyWrite('ministries', ministries as any);
-await applyWrite('departments', [{ id: 'd1', name: 'D1', ministryId: 'min1', type: 'normal' }]);
+await applyWrite('departments', [{ id: 'd1', name: 'D1', ministryId: 'min1', type: 'normal' }, ...toolDepartments] as any);
 
 const ctxSimple = (await buildContext('m5'))!;
 await assert.rejects(
@@ -67,6 +79,18 @@ await assertCanWrite('members', ctxSA, [{ ...resp, deptBranches: { d1: 'light' }
 
 // Responsable : capacité OK (matrice), scope département — m6 partage d1, m5 non.
 const ctxResp = (await buildContext('m4'))!;
+
+const culteReport = { id: 'rep_gdc', reportType: 'rapport_culte', departmentId: 'd_gdc', targetBranch: 'church', date: '2026-08-29', content: {} };
+await assert.rejects(
+  () => assertCanWrite('reports', ctxResp, [culteReport]),
+  (e: any) => e instanceof GuardError && e.status === 403 && String(e.message).includes('GDC'),
+  'rapport de culte refusé au Responsable sans rôle GDC',
+);
+await assertCanWrite('reports', { member: multiDepartmentResp as any, roles: multiRoles }, [culteReport]);
+
+const projectForM6 = { id: 'p_m6', name: 'Projet', scope: 'branche', branch: 'church', status: 'En cours', pmo: 'M Six', pmoId: 'm6', team: [] };
+assert.deepEqual(await filterReadable('projects', ctxResp, [projectForM6]), [], 'un Responsable étranger ne lit pas le projet');
+assert.equal((await filterReadable('projects', (await buildContext('m6'))!, [projectForM6])).length, 1, 'le PMO lit son projet par identifiant membre');
 const allMembers = [superAdmin, pasteur, ministre, resp, simple, baseMember({ id: 'm6', departments: { d1: 'membre' } })];
 // Écriture whole-array (usage réel du client) éditant m6 dans son scope → OK.
 await assertCanWrite('members', ctxResp, allMembers.map((m: any) => (m.id === 'm6' ? { ...m, profession: 'edit' } : m)));
@@ -211,7 +235,7 @@ assert.deepEqual(
 );
 
 // Lot 4 — cloisonnement lecture des events par branche : un simple membre (church) ne
-// reçoit pas les événements light ; global/both passent ; le Pasteur reçoit tout.
+// reçoit pas les événements light ; global/both passent ; le Pasteur reste dans sa branche.
 {
   const evSet = [
     { id: 'e_c', title: 'C', type: 'Culte', date: '2026-07-19', branch: 'church', closed: false },
@@ -223,10 +247,10 @@ assert.deepEqual(
     ['e_c', 'e_g'],
     'membre mono-branche (church) ne lit pas les events light (lot 4)',
   );
-  assert.equal(
-    (await filterReadable('events', (await buildContext('m2'))!, evSet)).length,
-    3,
-    'Pasteur (multi-branche) lit les events des 2 branches (lot 4)',
+  assert.deepEqual(
+    (await filterReadable('events', (await buildContext('m2'))!, evSet)).map((e: any) => e.id),
+    ['e_c', 'e_g'],
+    'Pasteur lit uniquement les événements de sa branche et les événements globaux',
   );
 }
 

@@ -138,7 +138,7 @@ export default function DashboardView({ activeBranch, simulatedRole, members = [
     const baptismSeries = weeklyBaptismCounts(branchMembers, effectivePeriod);
     const moissonSeries = weeklyMoissonCounts(branchReports, effectivePeriod);
     const ojSeries = weeklyOjCounts(branchReports, effectivePeriod);
-    return { ownMinistry, homeDeptId, branchMembers, branchReports, branchEvents, waitingCount, redCount,
+    return { ownMinistry, homeDeptId, scopeLabel: scope.label, branchMembers, branchReports, branchEvents, waitingCount, redCount,
       pendingReceptionsCount, activeCount, upcomingEvents, activeBusCount, totalBusLines, moisson, oj,
       culteSeries, culteTotal, periodBaptised, baptisedViaDept, nouveauxEnAttente, followUps, health,
       projectsInProgress, growthData, activeSeries, baptismSeries, moissonSeries, ojSeries };
@@ -146,7 +146,7 @@ export default function DashboardView({ activeBranch, simulatedRole, members = [
   }, [operator, simulatedRole, members, reports, events, activeBranch, period, customFrom, customTo, departments, ministries, busLines, projects]);
 
   const {
-    ownMinistry, homeDeptId, branchMembers, branchReports, branchEvents, waitingCount, redCount,
+    ownMinistry, homeDeptId, scopeLabel: computedScopeLabel, branchMembers, branchReports, branchEvents, waitingCount, redCount,
     pendingReceptionsCount, activeCount, upcomingEvents, activeBusCount, totalBusLines, moisson, oj,
     culteSeries, culteTotal, periodBaptised, baptisedViaDept, nouveauxEnAttente, followUps, health,
     projectsInProgress, growthData, activeSeries, baptismSeries, moissonSeries, ojSeries,
@@ -158,8 +158,11 @@ export default function DashboardView({ activeBranch, simulatedRole, members = [
   // §13.3 — dashboard par profil. Encadrement = tableau décisionnel ; autres = tableau personnel.
   const LEADERSHIP = ['Pasteur', 'Pasteur Principal', 'Ministre', 'Admin', 'Super Admin', 'Responsable', 'Coach', 'Leader'];
   const isLeadership = LEADERSHIP.includes(simulatedRole);
-  const scopeLabel =
-    ['Pasteur', 'Pasteur Principal', 'Admin', 'Super Admin'].includes(simulatedRole) ? 'les deux branches'
+  const scopeLabel = computedScopeLabel === 'Mes départements' || computedScopeLabel === 'Mes ministères'
+    ? computedScopeLabel.toLowerCase()
+    :
+    ['Pasteur Principal', 'Admin', 'Super Admin'].includes(simulatedRole) ? 'les deux branches'
+    : simulatedRole === 'Pasteur' ? 'votre branche'
     : simulatedRole === 'Ministre' ? `votre ministère${ownMinistry ? ` (${ownMinistry.name})` : ''}`
     : `votre département${homeDeptId ? ` (${deptName(homeDeptId)})` : ''}`;
 

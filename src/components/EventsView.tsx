@@ -63,6 +63,7 @@ interface EventsViewProps {
   onUpdateReport?: (report: Report) => void;
   activeBranch: Branch;
   simulatedRole: string;
+  activeRoles?: string[];
   members?: Member[];
   forms?: FormDef[];
 }
@@ -99,6 +100,7 @@ export default function EventsView({
   onUpdateReport,
   activeBranch,
   simulatedRole,
+  activeRoles = [simulatedRole],
   members = [],
   forms = []
 }: EventsViewProps) {
@@ -433,7 +435,7 @@ export default function EventsView({
 
           <div className="flex items-center gap-2">
             {/* Édition d'une occurrence unique (#20) : ne modifie que cet enregistrement, la série continue inchangée. */}
-            {!selectedEvent.closed && ['Pasteur', 'Pasteur Principal', 'Admin', 'Super Admin', 'GDC'].includes(simulatedRole) && (
+            {!selectedEvent.closed && activeRoles.some(role => ['Pasteur', 'Pasteur Principal', 'Admin', 'Super Admin', 'GDC'].includes(role)) && (
               <button
                 onClick={() => {
                   setEditTitle(selectedEvent.title);
@@ -449,7 +451,7 @@ export default function EventsView({
               </button>
             )}
             {/* Annulation d'une occurrence : ce jour-là l'événement n'a pas lieu, la série continue. */}
-            {!selectedEvent.closed && ['Pasteur', 'Pasteur Principal', 'Admin', 'Super Admin', 'GDC'].includes(simulatedRole) && (
+            {!selectedEvent.closed && activeRoles.some(role => ['Pasteur', 'Pasteur Principal', 'Admin', 'Super Admin', 'GDC'].includes(role)) && (
               <button
                 id="event-cancel-btn"
                 onClick={() => onUpdateEvent?.({ ...selectedEvent, cancelled: !selectedEvent.cancelled })}
@@ -458,7 +460,7 @@ export default function EventsView({
                 <X size={14} /> {selectedEvent.cancelled ? "Rétablir l'occurrence" : "Annuler l'occurrence"}
               </button>
             )}
-            {!selectedEvent.closed && !selectedEvent.cancelled && ['Pasteur', 'Admin', 'Super Admin', 'ADN', 'Portier', 'GDC'].includes(simulatedRole) && (
+            {!selectedEvent.closed && !selectedEvent.cancelled && activeRoles.some(role => ['Pasteur', 'Pasteur Principal', 'Admin', 'Super Admin', 'GDC'].includes(role)) && (
               <button
                 onClick={() => setShowCounterModal(true)}
                 className="px-5 py-2.5 bg-bc-green text-white font-bold text-xs rounded-full hover:bg-bc-text transition-colors flex items-center gap-2 shadow-sm active:scale-95"
@@ -900,7 +902,7 @@ export default function EventsView({
 
         {/* CAHIER_DES_CHARGES.md §7.1 — création réservée au Responsable Gestion des Cultes,
             aux Ministres, aux Pasteurs, ou à un département (Responsable). */}
-        {['Pasteur', 'Admin', 'Responsable', 'Super Admin', 'Ministre'].includes(simulatedRole) && (
+        {activeRoles.some(role => ['Pasteur', 'Pasteur Principal', 'Admin', 'Super Admin', 'GDC'].includes(role)) && (
           <div className="flex gap-2 w-full md:w-auto">
             <button
               id="event-plan-btn"

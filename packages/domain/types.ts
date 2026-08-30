@@ -37,7 +37,7 @@ export type PastoralCursus =
 
 export type DepartmentType = 'normal' | 'special';
 
-export type SpecialFunction = 'adn' | 'portiers' | 'integration' | 'bloom_bus' | 'gestion_cultes' | 'parcours_etapes';
+export type SpecialFunction = 'adn' | 'portiers' | 'integration' | 'bloom_bus' | 'gestion_cultes' | 'parcours_etapes' | 'bapteme';
 
 // §7.2 — activité/routine récurrente d'un département (agenda).
 export interface Activity {
@@ -293,9 +293,10 @@ export interface Project {
   ministryId?: string; // when scope === 'ministere'
   status: 'En cours' | 'Planifié' | 'Terminé';
   pmo: string;
+  pmoId?: string;
   startDate?: string;
   endDate?: string;
-  team?: { member: string; role: string }[];
+  team?: { member: string; memberId?: string; role: string }[];
   objectives?: { id: string; label: string; done: boolean }[];
   actions?: ProjectTask[];
 }

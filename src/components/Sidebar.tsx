@@ -8,7 +8,7 @@ import {
   UserCheck, ClipboardList, Plus, DoorOpen, LogOut
 } from 'lucide-react';
 import { useMediaQuery } from '../hooks/useMediaQuery';
-import { useDepartments, useMinistries, canView as canViewTab } from '../data';
+import { useDepartments, useMinistries, canViewAnyRole } from '../data';
 import { MEMBERS_TAB_DEPT_ONLY_ROLES } from '../data/scope';
 import { domainStyle } from '../data/domainColors';
 
@@ -17,6 +17,7 @@ interface SidebarProps {
   setCollapsed: (collapsed: boolean) => void;
   activeBranch: Branch;
   simulatedRole: string;
+  activeRoles: string[];
   activeTab: string;
   setActiveTab: (tab: string) => void;
   selectedDept: string | null;
@@ -34,6 +35,7 @@ export default function Sidebar({
   setCollapsed,
   activeBranch,
   simulatedRole,
+  activeRoles,
   activeTab,
   setActiveTab,
   selectedDept,
@@ -107,11 +109,13 @@ export default function Sidebar({
 
   // P1.1 — la visibilité des onglets est pilotée par la PermissionMatrix (capability view_<tab>).
   // Règle partagée avec App.tsx (src/data/permissions.ts) pour ne jamais diverger.
-  const canView = (tabId: string, role: string = simulatedRole) => canViewTab(permissionMatrix, tabId, role);
-  // Tout profil non-STAFF ayant accès à l'onglet Départements est cantonné à son seul
-  // département (DepartmentsView l'y fait atterrir directement via ROLE_HOME_DEPT/defaultDept) :
-  // pas de liste déroulante pour en parcourir d'autres. Seul le STAFF garde la navigation complète.
-  const isDeptScoped = ['Responsable', 'Adjoint', 'Coach', 'Leader', 'ADN', 'Intégration', 'GDC', 'Portier'].includes(simulatedRole);
+  const canView = (tabId: string) => canViewAnyRole(permissionMatrix, tabId, activeRoles);
+  const globalDepartmentAccess = activeRoles.some(role => ['Super Admin', 'Admin', 'Pasteur Principal', 'Pasteur'].includes(role));
+  const tutoredMinistryIds = new Set(ministries.filter(m => m.tuteurId === operator?.id).map(m => m.id));
+  const ownDepartmentIds = new Set(Object.keys(operator?.departments ?? {}));
+  const visibleDepartments = globalDepartmentAccess
+    ? departments
+    : departments.filter(d => ownDepartmentIds.has(d.id) || tutoredMinistryIds.has(d.ministryId));
 
   // Coach/Leader : l'onglet Membres ne sert que si le Responsable leur a réellement
   // assigné des membres (Member.mentorId, la "ligne de mentorat" posée depuis la fiche
@@ -120,12 +124,12 @@ export default function Sidebar({
   // lien de mentorat ne sont pas "attribués".
   const hasAssignedMembers = !!operator && members.some(m => m.mentorId === operator.id);
   const filteredMainItems = mainMenuItems.filter(item => {
-    if (item.id === 'members' && ['Coach', 'Leader'].includes(simulatedRole)) {
+    if (item.id === 'members' && activeRoles.some(role => ['Coach', 'Leader'].includes(role))) {
       return canView(item.id) && hasAssignedMembers;
     }
     // Responsable/Adjoint gèrent leurs membres depuis l'onglet Membres de leur
     // page Département, pas depuis un onglet Membres global.
-    if (item.id === 'members' && MEMBERS_TAB_DEPT_ONLY_ROLES.includes(simulatedRole)) {
+    if (item.id === 'members' && activeRoles.some(role => MEMBERS_TAB_DEPT_ONLY_ROLES.includes(role))) {
       return false;
     }
     return canView(item.id);
@@ -204,7 +208,7 @@ export default function Sidebar({
                     {item.label}
                   </span>
                 )}
-                {item.id === 'departments' && isActive && !isDeptScoped && (!collapsed || !isDesktop) && (
+                {item.id === 'departments' && isActive && (!collapsed || !isDesktop) && (
                   <ChevronDown
                     size={16}
                     className={`z-10 transition-transform text-bc-green ${deptsExpanded ? '' : '-rotate-90'}`}
@@ -212,12 +216,12 @@ export default function Sidebar({
                 )}
               </button>
 
-              {/* Accordéon Ministère → Départements (sous l'item Départements) — masqué pour un
-                  Responsable/Adjoint, cantonné à son seul département (pas de liste à parcourir). */}
-              {item.id === 'departments' && isActive && deptsExpanded && !isDeptScoped && (!collapsed || !isDesktop) && (
+              {/* Accordéon Ministère → Départements : un profil scopé ne reçoit que l'union
+                  de ses départements réels, tandis que la ligne pastorale garde la liste globale. */}
+              {item.id === 'departments' && isActive && deptsExpanded && (!collapsed || !isDesktop) && (
                 <div className="mt-1 mb-2 ml-4 pl-3 border-l-2 border-bc-border space-y-0.5">
                   {/* Créer un département — en tête de la liste des ministères, pasteurs & admins seulement */}
-                  {['Pasteur', 'Pasteur Principal', 'Admin', 'Super Admin'].includes(simulatedRole) && onCreateDepartment && (
+                  {activeRoles.some(role => ['Pasteur', 'Pasteur Principal', 'Admin', 'Super Admin'].includes(role)) && onCreateDepartment && (
                     <button
                       id="sidebar-create-dept-btn"
                       onClick={onCreateDepartment}
@@ -227,7 +231,7 @@ export default function Sidebar({
                     </button>
                   )}
                   {ministries.map(ministry => {
-                    const mDepts = departments.filter(d => d.ministryId === ministry.id);
+                    const mDepts = visibleDepartments.filter(d => d.ministryId === ministry.id);
                     if (mDepts.length === 0) return null;
                     const expanded = expandedMinistries.has(ministry.id);
                     return (
