@@ -85,10 +85,6 @@ export function effectiveBranchFor(m: Member, deptId: string): Member['branch'] 
   return m.deptBranches?.[deptId] ?? m.branch;
 }
 
-// Rôles qui gèrent leurs membres uniquement depuis l'onglet Membres de leur page
-// Département, pas depuis l'onglet Membres global de la barre latérale.
-export const MEMBERS_TAB_DEPT_ONLY_ROLES = ['Responsable', 'Adjoint'];
-
 // Département "maison" d'un rôle sans affectation explicite (démo/simulation de profil).
 export const ROLE_HOME_DEPT: Record<string, string> = {
   Responsable: 'dept_tech', Adjoint: 'dept_tech', Coach: 'dept_louange', Leader: 'dept_mres',

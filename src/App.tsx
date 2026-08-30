@@ -3,7 +3,6 @@ import { load, save, seeds, seedOrEmpty, useDepartments, useMinistries, useBusLi
 import { hasServerSession } from './data/api';
 import { reportName } from './data/reportNames';
 import { resolveMemberRole, resolveMemberRoles } from './data/roles';
-import { MEMBERS_TAB_DEPT_ONLY_ROLES } from './data/scope';
 import { isLegacySeedEventId } from './data/events';
 import { DEFAULT_OPERATOR_NAME, operatorDisplayName } from './data/operator';
 import { MULTI_BRANCH_ROLES, GLOBAL_VIEW_ROLES } from './data/scope';
@@ -140,12 +139,6 @@ export default function App() {
     if (activeTab !== 'profile' && !canViewAnyRole(permissionMatrix, activeTab, activeRoles)) {
       setActiveTab('dashboard');
       return;
-    }
-    // Responsable/Adjoint : pas d'onglet Membres global, même si la matrice
-    // l'autorise encore (elle reste nécessaire côté serveur pour l'onglet
-    // Membres de leur page Département — cf. Sidebar.tsx).
-    if (activeTab === 'members' && activeRoles.some(role => MEMBERS_TAB_DEPT_ONLY_ROLES.includes(role))) {
-      setActiveTab('dashboard');
     }
   }, [activeRoles, activeTab, permissionMatrix]);
   useSyncedSave('bc_settings', settings);
@@ -594,8 +587,7 @@ export default function App() {
   const handleNotificationClick = (n: AppNotification) => {
     if (!n.resourceType || !n.resourceId) return;
     const tab = n.resourceType === 'member' ? 'members' : n.resourceType === 'report' ? 'reports' : 'events';
-    const allowed = canViewAnyRole(permissionMatrix, tab, activeRoles) &&
-      !(tab === 'members' && activeRoles.some(role => MEMBERS_TAB_DEPT_ONLY_ROLES.includes(role)));
+    const allowed = canViewAnyRole(permissionMatrix, tab, activeRoles);
     if (!allowed) {
       toast.error("Vous n'avez pas accès à cette section.");
       return;

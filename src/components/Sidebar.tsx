@@ -9,7 +9,6 @@ import {
 } from 'lucide-react';
 import { useMediaQuery } from '../hooks/useMediaQuery';
 import { useDepartments, useMinistries, canViewAnyRole } from '../data';
-import { MEMBERS_TAB_DEPT_ONLY_ROLES } from '../data/scope';
 import { domainStyle } from '../data/domainColors';
 
 interface SidebarProps {
@@ -124,13 +123,8 @@ export default function Sidebar({
   // lien de mentorat ne sont pas "attribués".
   const hasAssignedMembers = !!operator && members.some(m => m.mentorId === operator.id);
   const filteredMainItems = mainMenuItems.filter(item => {
-    if (item.id === 'members' && activeRoles.some(role => ['Coach', 'Leader'].includes(role))) {
+    if (item.id === 'members' && ['Coach', 'Leader'].includes(simulatedRole)) {
       return canView(item.id) && hasAssignedMembers;
-    }
-    // Responsable/Adjoint gèrent leurs membres depuis l'onglet Membres de leur
-    // page Département, pas depuis un onglet Membres global.
-    if (item.id === 'members' && activeRoles.some(role => MEMBERS_TAB_DEPT_ONLY_ROLES.includes(role))) {
-      return false;
     }
     return canView(item.id);
   });
