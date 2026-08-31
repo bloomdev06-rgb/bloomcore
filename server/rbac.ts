@@ -278,6 +278,22 @@ export async function assertCanWrite(name: string, ctx: RbacContext, incoming: a
       // resolveRoles → escalade de rôle). Les responsables gèrent bien ces champs sur les
       // AUTRES membres (target.id ≠ self, non bloqué ici) — jamais sur eux-mêmes.
       const storedById = new Map((await readCollection(name, true)).map((s: any) => [String(s.id), s]));
+      // Une auto-inscription pending est une demande d'adhésion, pas encore un membre
+      // opérationnel : sa validation et le cadrage initial du profil sont réservés au
+      // Responsable du département ou à une autorité supérieure (jamais Coach/Leader).
+      if (name === 'members') {
+        const approvalRoles = ['Responsable', 'Ministre', 'Pasteur', 'Pasteur Principal', 'Admin', 'Super Admin'];
+        for (const item of await touchedItems(name, incoming)) {
+          const before = storedById.get(String((item as any).id));
+          if (!before || before.deptAttachmentOrigin !== 'self_registration' || before.deptAttachmentStatus !== 'pending') continue;
+          const changed = ['deptAttachmentStatus', 'departments', 'level', 'pastoralCursus'].some(
+            (f) => canonical((item as any)[f]) !== canonical(before[f]),
+          );
+          if (changed && !roles.some((r) => approvalRoles.includes(r))) {
+            throw new GuardError(403, 'members: validation ou cadrage d\'une auto-inscription réservé au Responsable ou à une autorité supérieure');
+          }
+        }
+      }
       const selfBefore = storedById.get(String(member.id));
       if (selfBefore) {
         for (const item of await touchedItems(name, incoming)) {
