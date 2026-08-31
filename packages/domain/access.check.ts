@@ -10,6 +10,8 @@ const departments = [
   { id: 'bapteme', ministryId: 'min1', specialFunction: 'bapteme' },
 ] as Department[];
 assert.deepEqual([...departmentToolRoles(member, departments)].sort(), ['ADN', 'GDC'], 'cumule les outils des départements réels sans assimiler Eden au Baptême');
+const pendingSelfRegistration = { ...member, departments: { gdc: 'membre' }, deptAttachmentOrigin: 'self_registration', deptAttachmentStatus: 'pending' } as unknown as Member;
+assert.deepEqual([...departmentToolRoles(pendingSelfRegistration, departments)], [], 'une auto-inscription pending ne donne aucun rôle outil avant validation');
 
 const minister = { id: 'minister', branch: 'church', departments: {} } as unknown as Member;
 const ministries = [{ id: 'min1', tuteurId: 'minister' }] as Ministry[];

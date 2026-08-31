@@ -8,6 +8,13 @@ export const DEPARTMENT_TOOL_ROLE: Partial<Record<NonNullable<Department['specia
   bapteme: 'Baptême',
 };
 
+/** A self-registration is a request, not an active department membership. */
+export function isActiveDepartmentAttachment(member: Member, departmentId: string): boolean {
+  return !(member.deptAttachmentOrigin === 'self_registration'
+    && member.deptAttachmentStatus === 'pending'
+    && Object.prototype.hasOwnProperty.call(member.departments ?? {}, departmentId));
+}
+
 export function departmentToolRoles(
   member: Member,
   departments: Department[],
@@ -20,7 +27,7 @@ export function departmentToolRoles(
   );
   for (const department of departments) {
     if ((department as Department & { deletedAt?: string }).deletedAt) continue;
-    const direct = directIds.has(department.id);
+    const direct = directIds.has(department.id) && isActiveDepartmentAttachment(member, department.id);
     const tutored = tutoredMinistries.has(department.ministryId)
       && (!department.branch || department.branch === member.branch);
     if (!direct && !tutored) continue;

@@ -192,7 +192,10 @@ export default function DepartmentsView({ activeBranch, simulatedRole, members =
     onUpdateDepartments(prev => [...prev.map(d => d.id === selectedDeptData.id ? updatedExisting : d), linked]);
   };
 
-  const deptMembers = members.filter(m => selectedDept && Object.keys(m.departments).includes(selectedDept));
+  const deptMembersAll = members.filter(m => selectedDept && Object.keys(m.departments).includes(selectedDept));
+  // Une auto-inscription pending reste visible uniquement dans « Réceptions à valider »;
+  // elle ne doit pas être comptée dans le roster actif ni dans les statistiques du département.
+  const deptMembers = deptMembersAll.filter(m => !(m.deptAttachmentOrigin === 'self_registration' && m.deptAttachmentStatus === 'pending'));
   const deptResponsable = deptMembers.find(m => selectedDept && m.departments[selectedDept] === 'responsable');
   const byFunction = (fn: string) => deptMembers.filter(m => selectedDept && m.departments[selectedDept] === fn);
   // Nouveaux affectés à ce département, suivis par le Responsable jusqu'à Boss :
@@ -212,7 +215,7 @@ export default function DepartmentsView({ activeBranch, simulatedRole, members =
   const canValidate = ['Responsable', 'Coach', 'Leader', 'Pasteur', 'Ministre', 'Admin', 'Super Admin'].includes(simulatedRole);
   // Membres enregistrés directement par un responsable hiérarchique Bloom Bus (chemin distinct
   // de la procédure ADN "nouveau") — rattachement à ce département en attente de validation.
-  const pendingBloomBusAttachment = deptMembers.filter(m => m.deptAttachmentStatus === 'pending' && (m.deptAttachmentOrigin === 'bloom_bus' || m.deptAttachmentOrigin === 'self_registration'));
+  const pendingBloomBusAttachment = deptMembersAll.filter(m => m.deptAttachmentStatus === 'pending' && (m.deptAttachmentOrigin === 'bloom_bus' || m.deptAttachmentOrigin === 'self_registration'));
   // Chaque changement de statut passe par une confirmation explicite (popup) au clic sur la
   // personne, plutôt qu'une mutation directe au clic sur un bouton.
   const applyStatusTransition = () => {
