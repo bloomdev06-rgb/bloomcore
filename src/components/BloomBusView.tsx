@@ -63,6 +63,15 @@ const CULTE_SLOT_SHORT: Record<string, string> = {
   'Culte Bloom Light': 'Culte · Light',
 };
 
+type SelectedTerritory =
+  | { type: 'root' }
+  | { type: 'commune'; id: string }
+  // Le nom d'une zone n'est pas globalement unique : Commune + Zone forme son identité UI.
+  | { type: 'zone'; id: string; commune: string }
+  | { type: 'bus'; id: string };
+
+const zoneKey = (commune: string, zone: string) => `${commune}::${zone}`;
+
 // Échelle de santé : choix parmi 5 niveaux (au lieu d'un curseur).
 const RATINGS = [
   { v: 1, label: "Très mal" },
@@ -176,7 +185,7 @@ export default function BloomBusView({
   const [reassignTarget, setReassignTarget] = useState<string>("");
   const reassignZone = (fromCommune: string, fromZone: string, toCommune: string, toZone: string) => {
     setBusLines((prev) => prev.map((b) => (b.commune === fromCommune && b.zone === fromZone ? { ...b, commune: toCommune, zone: toZone } : b)));
-    if (selectedLevel.type === "zone" && selectedLevel.id === fromZone) setSelectedLevel({ type: "root" });
+    if (selectedLevel.type === "zone" && selectedLevel.id === fromZone && selectedLevel.commune === fromCommune) setSelectedLevel({ type: "root" });
   };
 
   // P4.4bis — hiérarchie/cloisonnement : le TITRE organisationnel (Ministre, Responsable
@@ -196,7 +205,7 @@ export default function BloomBusView({
     : busLines;
 
   const ownBus = operator ? busLines.find((b) => b.id === operator.bloomBusId) : undefined;
-  let defaultLevel: { type: "commune" | "zone" | "bus"; id: string } = { type: "commune", id: "Cocody" };
+  let defaultLevel: SelectedTerritory = { type: "commune", id: "Cocody" };
   let defaultCommune = "Cocody";
   let defaultZone = "Zone Est";
   const isOwnBusScoped = !hasFullBloomBusAccess &&
@@ -206,7 +215,7 @@ export default function BloomBusView({
     defaultCommune = ownBus.commune;
     defaultZone = ownBus.zone;
   } else if (!hasFullBloomBusAccess && bloomBusRole === "Responsable de Zone" && ownBus) {
-    defaultLevel = { type: "zone", id: ownBus.zone };
+    defaultLevel = { type: "zone", id: ownBus.zone, commune: ownBus.commune };
     defaultCommune = ownBus.commune;
     defaultZone = ownBus.zone;
   } else if (!hasFullBloomBusAccess && bloomBusRole === "Responsable de Commune") {
@@ -229,10 +238,8 @@ export default function BloomBusView({
   const [expandedCommunes, setExpandedCommunes] = useState<string[]>([
     defaultCommune,
   ]);
-  const [expandedZones, setExpandedZones] = useState<string[]>([defaultZone]);
-  const [selectedLevel, setSelectedLevel] = useState<
-    { type: "root" } | { type: "commune" | "zone" | "bus"; id: string }
-  >(defaultLevel);
+  const [expandedZones, setExpandedZones] = useState<string[]>([zoneKey(defaultCommune, defaultZone)]);
+  const [selectedLevel, setSelectedLevel] = useState<SelectedTerritory>(defaultLevel);
 
   const [showMemberReportModal, setShowMemberReportModal] = useState(false);
   const [showLifeReportModal, setShowLifeReportModal] = useState(false);
@@ -289,10 +296,12 @@ export default function BloomBusView({
     setExpandedCommunes((prev) =>
       prev.includes(c) ? prev.filter((x) => x !== c) : [...prev, c],
     );
-  const toggleZone = (z: string) =>
+  const toggleZone = (commune: string, zone: string) => {
+    const key = zoneKey(commune, zone);
     setExpandedZones((prev) =>
-      prev.includes(z) ? prev.filter((x) => x !== z) : [...prev, z],
+      prev.includes(key) ? prev.filter((x) => x !== key) : [...prev, key],
     );
+  };
 
   let activeBuses: BloomBusEntity[] = [];
   if (selectedLevel.type === "root") {
@@ -301,7 +310,7 @@ export default function BloomBusView({
     const b = visibleBusLines.find((b) => b.id === selectedLevel.id);
     if (b) activeBuses = [b];
   } else if (selectedLevel.type === "zone") {
-    activeBuses = visibleBusLines.filter((b) => b.zone === selectedLevel.id);
+    activeBuses = visibleBusLines.filter((b) => b.zone === selectedLevel.id && b.commune === selectedLevel.commune);
   } else {
     activeBuses = visibleBusLines.filter(
       (b) => b.commune === selectedLevel.id,
@@ -438,8 +447,9 @@ export default function BloomBusView({
       setExpandedCommunes((prev) => prev.includes(bus.commune) ? prev : [...prev, bus.commune]);
       setSelectedLevel({ type: "commune", id: bus.commune });
     } else if (selectedLevel.type === "commune") {
-      setExpandedZones((prev) => prev.includes(bus.zone) ? prev : [...prev, bus.zone]);
-      setSelectedLevel({ type: "zone", id: bus.zone });
+      const key = zoneKey(bus.commune, bus.zone);
+      setExpandedZones((prev) => prev.includes(key) ? prev : [...prev, key]);
+      setSelectedLevel({ type: "zone", id: bus.zone, commune: bus.commune });
     } else {
       setSelectedLevel({ type: "bus", id: bus.id });
     }
@@ -741,16 +751,16 @@ export default function BloomBusView({
                     return (
                     <div key={zone} className="space-y-1">
                       <div
-                        className={`flex items-center justify-between p-2 rounded-xl cursor-pointer active-scale ${selectedLevel.type === "zone" && selectedLevel.id === zone ? "bg-bc-green text-white" : "hover:bg-bc-canvas text-bc-text-secondary"}`}
+                        className={`flex items-center justify-between p-2 rounded-xl cursor-pointer active-scale ${selectedLevel.type === "zone" && selectedLevel.id === zone && selectedLevel.commune === commune ? "bg-bc-green text-white" : "hover:bg-bc-canvas text-bc-text-secondary"}`}
                         onClick={(e) => {
                           e.stopPropagation();
-                          setSelectedLevel({ type: "zone", id: zone });
-                          toggleZone(zone);
+                          setSelectedLevel({ type: "zone", id: zone, commune });
+                          toggleZone(commune, zone);
                         }}
                       >
                         <span className="font-bold text-xs flex items-center gap-2 min-w-0">
                           <span className="truncate">{zone}</span>
-                          <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded-full shrink-0 ${selectedLevel.type === "zone" && selectedLevel.id === zone ? "bg-white/20" : "bg-bc-canvas text-bc-text-secondary"}`}>
+                          <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded-full shrink-0 ${selectedLevel.type === "zone" && selectedLevel.id === zone && selectedLevel.commune === commune ? "bg-white/20" : "bg-bc-canvas text-bc-text-secondary"}`}>
                             {zoneCount}
                           </span>
                         </span>
@@ -758,13 +768,13 @@ export default function BloomBusView({
                           {canAdminTerritory && (
                             <button
                               onClick={(e) => { e.stopPropagation(); setReassignTarget(""); setDeletingZone({ commune, zone, buses }); }}
-                              className={`p-1 rounded-lg transition-colors active-scale ${selectedLevel.type === "zone" && selectedLevel.id === zone ? "text-white/80 hover:text-white" : "text-bc-text-secondary hover:text-bc-danger"}`}
+                              className={`p-1 rounded-lg transition-colors active-scale ${selectedLevel.type === "zone" && selectedLevel.id === zone && selectedLevel.commune === commune ? "text-white/80 hover:text-white" : "text-bc-text-secondary hover:text-bc-danger"}`}
                               title="Supprimer cette zone"
                             >
                               <Trash2 size={12} />
                             </button>
                           )}
-                          {expandedZones.includes(zone) ? (
+                          {expandedZones.includes(zoneKey(commune, zone)) ? (
                             <ChevronDown size={14} />
                           ) : (
                             <ChevronRight size={14} />
@@ -772,7 +782,7 @@ export default function BloomBusView({
                         </span>
                       </div>
 
-                      {expandedZones.includes(zone) && (
+                      {expandedZones.includes(zoneKey(commune, zone)) && (
                         <div className="pl-4 space-y-1">
                           {buses.map((bus) => {
                             const busCount = countForBusIds([bus.id]);
@@ -827,7 +837,7 @@ export default function BloomBusView({
               {selectedLevel.type === "root" && "Vue globale — Bloom Bus"}
               {selectedLevel.type === "commune" &&
                 `Commune: ${selectedLevel.id}`}
-              {selectedLevel.type === "zone" && `Zone: ${selectedLevel.id}`}
+              {selectedLevel.type === "zone" && `Zone: ${selectedLevel.commune} · ${selectedLevel.id}`}
               {selectedLevel.type === "bus" &&
                 `Bus: ${busLines.find((b) => b.id === selectedLevel.id)?.name}`}
             </h2>
