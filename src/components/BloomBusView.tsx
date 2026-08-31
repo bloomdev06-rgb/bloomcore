@@ -428,6 +428,23 @@ export default function BloomBusView({
     : selectedLevel.type === "root" ? "Responsables de Commune"
     : selectedLevel.type === "commune" ? "Responsables de Zone"
     : "Capitaines de Bus"; // zone
+  // Descente explicite dans la hiérarchie : la liste affichée à un niveau mène au
+  // territoire de la personne listée, sans jamais sortir de visibleBusLines (déjà RBAC-scopé).
+  const openChildTerritory = (member: Member) => {
+    if (selectedLevel.type === "bus" || !member.bloomBusId) return;
+    const bus = visibleBusLines.find((b) => b.id === member.bloomBusId);
+    if (!bus) return;
+    if (selectedLevel.type === "root") {
+      setExpandedCommunes((prev) => prev.includes(bus.commune) ? prev : [...prev, bus.commune]);
+      setSelectedLevel({ type: "commune", id: bus.commune });
+    } else if (selectedLevel.type === "commune") {
+      setExpandedZones((prev) => prev.includes(bus.zone) ? prev : [...prev, bus.zone]);
+      setSelectedLevel({ type: "zone", id: bus.zone });
+    } else {
+      setSelectedLevel({ type: "bus", id: bus.id });
+    }
+    requestAnimationFrame(() => rosterPanelRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }));
+  };
   // Disques de remplissage + courbe : le niveau suit le remplissage des responsables du niveau
   // DIRECTEMENT inférieur (commune → resp. de zone, zone → capitaines, bus → membres du bus),
   // pas de tous les membres du périmètre — même ensemble que le roster.
@@ -681,7 +698,7 @@ export default function BloomBusView({
             </div>
           )}
         </div>
-        {FULL_SCOPE_ROLES.includes(simulatedRole) && (
+        {hasFullBloomBusAccess && (
           <button
             onClick={() => setSelectedLevel({ type: "root" })}
             className={`flex items-center gap-2 p-2 mb-2 rounded-xl cursor-pointer active-scale font-bold text-sm ${selectedLevel.type === "root" ? "bg-bc-green text-white" : "hover:bg-bc-canvas text-bc-text-secondary"}`}
@@ -1191,7 +1208,11 @@ export default function BloomBusView({
                   </div>
                 )}
               </div>
-              <p className="text-[10px] text-bc-text-secondary mb-3">Clique un membre pour faire son rapport de suivi.</p>
+              <p className="text-[10px] text-bc-text-secondary mb-3">
+                {selectedLevel.type === "bus"
+                  ? "Clique un membre pour faire son rapport de suivi."
+                  : "Ouvre le périmètre d’un responsable pour descendre au niveau suivant."}
+              </p>
               {/* §6-7 — disques de remplissage cliquables : taux RÉEL des membres du Bloom Bus au
                   niveau affiché (membersFillRate sur les responsables du niveau directement
                   inférieur — rosterIds), identique à tous les niveaux.
@@ -1270,12 +1291,22 @@ export default function BloomBusView({
                           </div>
                           {editable && <Heart size={14} className="text-bc-green shrink-0" />}
                         </button>
-                        <ReportStatusBoxes
+                          <ReportStatusBoxes
                           memberId={m.id}
                           reports={branchReports}
                           now={now}
                           onValidate={operatorAutoValidates ? (week) => openValidateReport(m.id, week) : undefined}
-                        />
+                          />
+                        {selectedLevel.type !== "bus" && (
+                          <button
+                            type="button"
+                            onClick={() => openChildTerritory(m)}
+                            className="shrink-0 flex items-center gap-1 px-2.5 py-1.5 rounded-full bg-white border border-bc-border text-[10px] font-bold text-bc-green hover:bg-bc-green/10 active-scale"
+                            title="Ouvrir le territoire correspondant"
+                          >
+                            Voir <ChevronRight size={13} />
+                          </button>
+                        )}
                       </div>
                     );
                   })
