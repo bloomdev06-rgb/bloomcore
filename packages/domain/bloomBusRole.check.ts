@@ -5,7 +5,7 @@
 // départements existent en deux exemplaires, un par branche : un responsable rattaché à la
 // seconde instance ressortait sans aucune fonction Bloom Bus, donc sans accès au module.
 import assert from 'node:assert';
-import { bloomBusRoleOf, fullBloomBusAccess } from './scope.ts';
+import { bloomBusRoleOf, bloomBusRolesOf, fullBloomBusAccess } from './scope.ts';
 import { Department, Member } from './types.ts';
 
 const dept = (id: string, branch?: 'church' | 'light'): Department => ({
@@ -88,6 +88,12 @@ assert.equal(
   bloomBusRoleOf(avecBusRole({ dept_bloom_bus: 'responsable' }, 'capitaine'), DEPT_SEUL),
   'Responsable',
   'le pont prime sur une fonction territoriale plus basse',
+);
+const cumul = { ...avecBusRole({ dept_bloom_bus: 'responsable' }), busRoles: ['capitaine', 'responsable_zone'] } as Member;
+assert.deepEqual(
+  [...bloomBusRolesOf(cumul, DEPT_SEUL)].sort(),
+  ['Capitaine de Bus', 'Responsable', 'Responsable de Zone'].sort(),
+  'les fonctions territoriales cumulées restent toutes visibles même si Responsable pilote le périmètre',
 );
 
 // COMPATIBILITÉ : données d'avant la migration, fonction territoriale encore dans le

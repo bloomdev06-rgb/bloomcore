@@ -25,7 +25,7 @@ import { useSyncedSave } from "../data/useSyncedSave";
 import { CULTE_SLOT_KEYS, culteSlotLabel } from "../data/events";
 import { isBusReportLocked } from "../data/reportLock";
 import { toast } from "./ui/Toast";
-import { busInScope, bloomBusRoleOf, fullBloomBusAccess, canFillReportFor, canRegisterMemberViaBloomBus, canAssignBusRole, FULL_SCOPE_ROLES } from "../data/scope";
+import { busInScope, bloomBusRoleOf, bloomBusRolesOf, fullBloomBusAccess, canFillReportFor, canRegisterMemberViaBloomBus, canAssignBusRole, FULL_SCOPE_ROLES } from "../data/scope";
 import { moissonTotal, busVisitesTotal, busPresenceCulteTotal, busActivitesTotal, periodHealthLevels, periodRange, healthEvolutionSeries, Period, PeriodInput } from "../data/kpi";
 import { reportingWindow, weekId, weekLabel, mondaysInRange } from "../data/week";
 import { memberWeekStatus, membersFillRate } from "../data/completude";
@@ -325,7 +325,7 @@ export default function BloomBusView({
   const leaderPins: { id: string; name: string; lat: number; lng: number }[] = (() => {
     if (selectedLevel.type === "zone") {
       return activeBuses.flatMap((bus) => {
-        const captain = members.find((m) => m.bloomBusId === bus.id && bloomBusRoleOf(m, departments) === "Capitaine de Bus");
+        const captain = members.find((m) => m.bloomBusId === bus.id && bloomBusRolesOf(m, departments).has("Capitaine de Bus"));
         if (!captain) return [];
         const pos = captain.gps ?? { lat: bus.centerLat, lng: bus.centerLng };
         return [{ id: captain.id, name: `${captain.firstName} ${captain.lastName} (${bus.name})`, lat: pos.lat, lng: pos.lng }];
@@ -335,7 +335,7 @@ export default function BloomBusView({
       const zones = Array.from(new Set(activeBuses.map((b) => b.zone)));
       return zones.flatMap((zone) => {
         const zoneBus = activeBuses.find((b) => b.zone === zone);
-        const lead = members.find((m) => bloomBusRoleOf(m, departments) === "Responsable de Zone" && busLines.find((b) => b.id === m.bloomBusId)?.zone === zone);
+        const lead = members.find((m) => bloomBusRolesOf(m, departments).has("Responsable de Zone") && busLines.find((b) => b.id === m.bloomBusId)?.zone === zone);
         if (!lead || !zoneBus) return [];
         const pos = lead.gps ?? { lat: zoneBus.centerLat, lng: zoneBus.centerLng };
         return [{ id: lead.id, name: `${lead.firstName} ${lead.lastName} (${zone})`, lat: pos.lat, lng: pos.lng }];
@@ -345,7 +345,7 @@ export default function BloomBusView({
       const communes = Array.from(new Set(visibleBusLines.map((b) => b.commune)));
       return communes.flatMap((commune) => {
         const communeBus = visibleBusLines.find((b) => b.commune === commune);
-        const lead = members.find((m) => bloomBusRoleOf(m, departments) === "Responsable de Commune" && (busLines.find((b) => b.id === m.bloomBusId)?.commune ?? m.gps?.commune) === commune);
+        const lead = members.find((m) => bloomBusRolesOf(m, departments).has("Responsable de Commune") && (busLines.find((b) => b.id === m.bloomBusId)?.commune ?? m.gps?.commune) === commune);
         if (!lead || !communeBus) return [];
         const pos = lead.gps ?? { lat: communeBus.centerLat, lng: communeBus.centerLng };
         return [{ id: lead.id, name: `${lead.firstName} ${lead.lastName} (${commune})`, lat: pos.lat, lng: pos.lng }];
@@ -395,22 +395,31 @@ export default function BloomBusView({
   // Les permissions restent calculées option par option avec le garde serveur partagé.
   const renderBusRoleSelect = (m: Member) => {
     if (!operator) return null;
-    const courant = m.busRole ?? "";
-    const ouvertes = BUS_ROLE_CHOICES.filter((c) => c.value === courant || canAssign(m, c.role));
-    if (ouvertes.length <= 1) return null;
+    const current = new Set(m.busRoles ?? (m.busRole ? [m.busRole] : []));
+    const ouvertes = BUS_ROLE_CHOICES.filter((c) => c.value && (current.has(c.value as Member['busRole']) || canAssign(m, c.role)));
+    if (ouvertes.length === 0) return null;
     return (
-      <select
-        aria-label={`Fonction Bloom Bus de ${m.firstName} ${m.lastName}`}
-        value={courant}
-        onChange={(e) => onUpdateMember({ ...m, busRole: (e.target.value || undefined) as Member["busRole"] })}
-        className="shrink-0 border border-bc-border rounded-full px-2 py-1 text-[10px] font-bold bg-white text-bc-text"
-      >
-        {ouvertes.map((c) => (
-          <option key={c.value} value={c.value} disabled={c.value !== courant && !canAssign(m, c.role)}>
-            {c.value ? labelFor(c.value) : "Aucune fonction"}
-          </option>
-        ))}
-      </select>
+      <div className="flex flex-wrap justify-end gap-1" aria-label={`Fonctions Bloom Bus de ${m.firstName} ${m.lastName}`}>
+        {ouvertes.map((c) => {
+          const value = c.value as NonNullable<Member['busRole']>;
+          const active = current.has(value);
+          return (
+            <button
+              key={value}
+              type="button"
+              disabled={!active && !canAssign(m, c.role)}
+              onClick={() => {
+                const next = new Set(current);
+                active ? next.delete(value) : next.add(value);
+                onUpdateMember({ ...m, busRoles: [...next], busRole: undefined });
+              }}
+              className={`px-2 py-1 rounded-full text-[9px] font-bold border active-scale disabled:opacity-40 ${active ? 'bg-bc-green text-white border-bc-green' : 'bg-white text-bc-text-secondary border-bc-border'}`}
+            >
+              {labelFor(value)}
+            </button>
+          );
+        })}
+      </div>
     );
   };
 
@@ -429,7 +438,7 @@ export default function BloomBusView({
       : "Capitaine de Bus"; // zone
     const scopeBusIds = new Set((selectedLevel.type === "root" ? visibleBusLines : activeBuses).map((b) => b.id));
     return members.filter((m) =>
-      bloomBusRoleOf(m, departments) === wantRole
+      bloomBusRolesOf(m, departments).has(wantRole)
       && !!m.bloomBusId && scopeBusIds.has(m.bloomBusId)
       && (activeBranch === "global" || m.branch === activeBranch));
   })();

@@ -207,21 +207,23 @@ export function inMemberScope(
 // le symptôme « responsable du département mais accès limité à son seul bus ».
 // On parcourt donc toutes les instances et on retient la fonction réellement détenue, la plus
 // forte si le membre en a plusieurs (rankOf : plus le rang est petit, plus la fonction est haute).
-export function bloomBusRoleOf(operator: Member, departments: Department[]): string | undefined {
+export function bloomBusRolesOf(operator: Member, departments: Department[]): Set<string> {
   const busDepts = departments.filter(d => d.specialFunction === 'bloom_bus');
+  const roles = new Set<string>();
 
   // 1. LE PONT. Le responsable DU DÉPARTEMENT Bloom Bus est d'office au sommet du MODULE —
   //    la seule passerelle entre les deux réalités. Il n'a pas besoin de busRole.
   //    (Au-dessus de lui : son ministre de tutelle, les pasteurs et les admin, traités
   //    ailleurs par les rôles globaux.)
   for (const d of busDepts) {
-    if (operator.departments?.[d.id] === 'responsable') return 'Responsable';
+    if (operator.departments?.[d.id] === 'responsable') roles.add('Responsable');
   }
 
   // 2. La fonction TERRITORIALE, dans son champ dédié. Indépendante de toute fonction tenue
   //    dans le département : on peut être capitaine sans appartenir au département, ou
   //    adjoint du département sans aucune fonction territoriale.
-  if (operator.busRole) return roleForDeptFn(operator.busRole);
+  for (const role of operator.busRoles ?? []) roles.add(roleForDeptFn(role));
+  if (operator.busRole) roles.add(roleForDeptFn(operator.busRole));
 
   // 3. Compatibilité — données d'AVANT la séparation, où la fonction territoriale était rangée
   //    dans l'emplacement du département. Lue tant qu'elles n'ont pas été migrées
@@ -240,9 +242,16 @@ export function bloomBusRoleOf(operator: Member, departments: Department[]): str
   };
   for (const d of busDepts) {
     const legacy = LEGACY[String(operator.departments?.[d.id])];
-    if (legacy) return legacy;
+    if (legacy) roles.add(legacy);
   }
-  return undefined;
+  return roles;
+}
+
+// Le rôle le plus haut pilote le périmètre et les droits ; bloomBusRolesOf conserve toutes
+// les fonctions pour les listes hiérarchiques et l'affichage.
+export function bloomBusRoleOf(operator: Member, departments: Department[]): string | undefined {
+  const roles = bloomBusRolesOf(operator, departments);
+  return BUS_ROLE_LADDER.find((role) => roles.has(role));
 }
 
 export function fullBloomBusAccess(operator: Member, role: string, departments: Department[]): boolean {

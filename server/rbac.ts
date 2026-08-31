@@ -53,6 +53,7 @@ export function resolveRoles(member: Member, admins: AdminAccount[], ministries:
   // séparation §27, mais elle donne toujours le rôle correspondant (Capitaine de Bus,
   // Responsable de Zone/Commune) — sans quoi le membre perdrait son périmètre territorial.
   if (member.busRole) roles.add(roleForDeptFn(member.busRole));
+  for (const role of member.busRoles ?? []) roles.add(roleForDeptFn(role));
   if (member.level === 'coach' || member.level === 'leader') roles.add(roleForLevel(member.level));
   roles.add('Membre');
   return [...roles];
@@ -298,7 +299,7 @@ export async function assertCanWrite(name: string, ctx: RbacContext, incoming: a
       if (selfBefore) {
         for (const item of await touchedItems(name, incoming)) {
           if (String(item.id) !== String(member.id)) continue;
-          for (const f of ['departments', 'level', 'pastoralCursus', 'bloomBusId', 'deptAttachmentStatus', 'deptAttachmentOrigin', 'testRole']) {
+          for (const f of ['departments', 'level', 'pastoralCursus', 'bloomBusId', 'busRole', 'busRoles', 'deptAttachmentStatus', 'deptAttachmentOrigin', 'testRole']) {
             if (canonical((item as any)[f]) !== canonical((selfBefore as any)[f])) {
               throw new GuardError(403, `members: champ privilégié '${f}' non modifiable sur votre propre fiche`);
             }
@@ -375,13 +376,19 @@ export async function assertCanWrite(name: string, ctx: RbacContext, incoming: a
             }
           }
 
-          const busAvant = (before as Member | undefined)?.busRole;
-          const busApres = (item as Member).busRole;
-          if (canonical(busAvant) !== canonical(busApres)) {
+          const busAvant = [
+            ...((before as Member | undefined)?.busRoles ?? []),
+            ...((before as Member | undefined)?.busRole ? [(before as Member).busRole!] : []),
+          ];
+          const busApres = [
+            ...((item as Member).busRoles ?? []),
+            ...((item as Member).busRole ? [(item as Member).busRole!] : []),
+          ];
+          if (canonical([...new Set(busAvant)].sort()) !== canonical([...new Set(busApres)].sort())) {
             // Retrait comme attribution : les deux modifient la hiérarchie territoriale.
             // Le rang à franchir est le PLUS HAUT des deux, sinon un capitaine pourrait
             // destituer un responsable de commune en le « ramenant » à un rang qu'il domine.
-            for (const fn of [busApres, busAvant]) {
+            for (const fn of new Set([...busApres, ...busAvant])) {
               if (!fn) continue;
               const roleVise = roleForDeptFn(fn as any);
               if (!canAssignBusRole(member, roles, cible, roleVise, allBus, allDepts, allMinistries)) {

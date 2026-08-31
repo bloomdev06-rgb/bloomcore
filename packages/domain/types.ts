@@ -135,6 +135,9 @@ export interface Member {
   // Exception : le responsable DU DÉPARTEMENT Bloom Bus est d'office au sommet du module,
   // sans avoir besoin de ce champ (voir bloomBusRoleOf).
   busRole?: BusRole;
+  // Fonctions territoriales cumulables du module Bloom Bus. `busRole` reste lu pour les
+  // fiches historiques, mais toute nouvelle attribution alimente cette liste.
+  busRoles?: BusRole[];
 
   // Enregistrement direct par un responsable hiérarchique Bloom Bus (hors procédure ADN
   // "nouveau"), OU auto-inscription publique (Créer mon compte) — rattachement département

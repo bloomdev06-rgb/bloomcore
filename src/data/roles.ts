@@ -32,6 +32,7 @@ export function resolveMemberRoles(member: Member, admins: AdminAccount[] = [], 
   // séparation §27, mais elle donne toujours le rôle correspondant (Capitaine de Bus,
   // Responsable de Zone/Commune) — sans quoi le membre perdrait son périmètre territorial.
   if (member.busRole) roles.add(roleForDeptFn(member.busRole));
+  for (const role of member.busRoles ?? []) roles.add(roleForDeptFn(role));
   if (member.level === 'coach' || member.level === 'leader') roles.add(roleForLevel(member.level));
   if (member.level === 'nouveau') roles.add('Nouveau');
   roles.add('Membre');
