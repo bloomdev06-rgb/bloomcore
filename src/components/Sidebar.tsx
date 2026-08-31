@@ -112,9 +112,15 @@ export default function Sidebar({
   const globalDepartmentAccess = activeRoles.some(role => ['Super Admin', 'Admin', 'Pasteur Principal', 'Pasteur'].includes(role));
   const tutoredMinistryIds = new Set(ministries.filter(m => m.tuteurId === operator?.id).map(m => m.id));
   const ownDepartmentIds = new Set(Object.keys(operator?.departments ?? {}));
-  const visibleDepartments = globalDepartmentAccess
+  // Une famille multi-branches possède deux fiches techniques, mais une seule doit être
+  // proposée dans la branche active. Les profils globaux peuvent volontairement voir les deux
+  // en mode « global » ; les autres restent bornés à leur branche comme pour les autres dépts.
+  const branchDepartments = activeBranch === 'global'
     ? departments
-    : departments.filter(d => ownDepartmentIds.has(d.id) || tutoredMinistryIds.has(d.ministryId));
+    : departments.filter(d => !d.branch || d.branch === activeBranch);
+  const visibleDepartments = globalDepartmentAccess
+    ? branchDepartments
+    : branchDepartments.filter(d => ownDepartmentIds.has(d.id) || tutoredMinistryIds.has(d.ministryId));
 
   // Coach/Leader : l'onglet Membres ne sert que si le Responsable leur a réellement
   // assigné des membres (Member.mentorId, la "ligne de mentorat" posée depuis la fiche
