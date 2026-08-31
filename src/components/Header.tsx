@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { Bell, Search, RefreshCw, Layers, CheckCircle, ShieldAlert, Heart, Calendar, Menu, X } from 'lucide-react';
 import { Branch, AppNotification, Member } from '../types';
 import { operatorDisplayName } from '../data/operator';
@@ -47,6 +47,7 @@ export default function Header({
   const [notifFilter, setNotifFilter] = useState<'all' | AppNotification['type']>('all');
   const [showAllNotifModal, setShowAllNotifModal] = useState(false);
   const [isSweepActive, setIsSweepActive] = useState(false);
+  const notificationMenuRef = useRef<HTMLDivElement>(null);
   
   const unreadNotifs = notifications.filter(n => !n.read);
   const isChurch = activeBranch === 'church';
@@ -55,6 +56,17 @@ export default function Header({
   const canGlobalView = GLOBAL_VIEW_ROLES.includes(simulatedRole);
   const operatorInitials = operator ? `${operator.firstName[0]}${operator.lastName[0]}` : 'AG';
   const operatorName = operatorDisplayName(operator);
+
+  // Le panneau est un menu contextuel : un clic hors de la cloche et de son contenu le ferme,
+  // y compris sur mobile où il est rendu en position fixed.
+  useEffect(() => {
+    if (!showNotifDropdown) return;
+    const closeOnOutsidePointer = (event: PointerEvent) => {
+      if (!notificationMenuRef.current?.contains(event.target as Node)) setShowNotifDropdown(false);
+    };
+    document.addEventListener('pointerdown', closeOnOutsidePointer);
+    return () => document.removeEventListener('pointerdown', closeOnOutsidePointer);
+  }, [showNotifDropdown]);
 
   const renderNotifList = (list: AppNotification[]) => list.length === 0 ? (
     <div className="p-6 text-center text-xs text-bc-text-secondary">Aucune notification.</div>
@@ -226,7 +238,7 @@ export default function Header({
         </div>
 
         {/* Notifications Center */}
-        <div className="relative">
+        <div ref={notificationMenuRef} className="relative">
           <button
             id="header-notification-bell-btn"
             onClick={() => setShowNotifDropdown(!showNotifDropdown)}
