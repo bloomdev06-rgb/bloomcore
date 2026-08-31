@@ -249,7 +249,7 @@ export function buildTestDataset(departments: Department[], existingBusLines: Bl
   // -------- 3bis) Cursus pastoral (jusqu'à Pasteur) --------
   for (let k = 0; k < PASTORAL.length; k++) {
     members.push(mkMember(`stds_pastoral_${k}`, {
-      pastoralCursus: PASTORAL[k], level: 'coach', departments: { dept_mres: 'membre' as DeptFunction },
+      pastoralCursus: PASTORAL[k], level: 'coach', departments: { dept_actions_prophetiques: 'membre' as DeptFunction },
       gps: { lat: 5.36 + k * 0.005, lng: -3.99, commune: 'Cocody' },
     }));
   }

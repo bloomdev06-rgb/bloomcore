@@ -192,7 +192,13 @@ export default function DepartmentsView({ activeBranch, simulatedRole, members =
     onUpdateDepartments(prev => [...prev.map(d => d.id === selectedDeptData.id ? updatedExisting : d), linked]);
   };
 
-  const deptMembersAll = members.filter(m => selectedDept && Object.keys(m.departments).includes(selectedDept));
+  // Les départements ordinaires sont uniques et partagés ; leur contenu reste néanmoins
+  // borné à la branche active. Le mode Global agrège les deux branches dans une synthèse.
+  const deptMembersAll = members.filter(m =>
+    selectedDept
+    && Object.keys(m.departments).includes(selectedDept)
+    && (activeBranch === 'global' || m.branch === activeBranch),
+  );
   // Une auto-inscription pending reste visible uniquement dans « Réceptions à valider »;
   // elle ne doit pas être comptée dans le roster actif ni dans les statistiques du département.
   const deptMembers = deptMembersAll.filter(m => !(m.deptAttachmentOrigin === 'self_registration' && m.deptAttachmentStatus === 'pending'));

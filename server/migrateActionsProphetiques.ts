@@ -1,39 +1,37 @@
 import { getCollection, setCollection } from './datastore.ts';
 
-const CANONICAL = {
-  church: 'dept_actions_prophetiques_church',
-  light: 'dept_actions_prophetiques_light',
-} as const;
-const FAMILY_ID = 'fam_actions_prophetiques';
-const OLD_IDS = new Set(['dept_mres', 'dept_intercession']);
+const CANONICAL = 'dept_actions_prophetiques';
+// Inclut les deux ids de la première version de migration : le correctif converge aussi
+// les déploiements qui ont déjà créé une fiche Church et une fiche Light.
+const OLD_IDS = new Set([
+  'dept_mres', 'dept_intercession',
+  'dept_actions_prophetiques_church', 'dept_actions_prophetiques_light',
+]);
 const rank: Record<string, number> = { responsable: 0, adjoint: 1, tresorier: 2, responsable_section: 3, membre: 4 };
 
-const branchOf = (value: unknown): 'church' | 'light' => value === 'light' ? 'light' : 'church';
 const stronger = (a: unknown, b: unknown): string => (rank[String(a)] ?? 99) <= (rank[String(b)] ?? 99) ? String(a) : String(b);
 
-/** Idempotent migration of the two historical departments into one family. */
+/** Idempotent migration of historical departments into one shared department. */
 export async function runActionsProphetiquesMigration(): Promise<void> {
   try {
     const departments = await getCollection('departments') as any[];
     const old = departments.filter(d => OLD_IDS.has(String(d.id)) && !d.deletedAt);
-    if (!old.length && departments.some(d => d.id === CANONICAL.church || d.id === CANONICAL.light)) return;
+    if (!old.length && departments.some(d => d.id === CANONICAL && !d.deletedAt)) return;
     const ministryId = old[0]?.ministryId ?? 'min_intimite';
     const base = old[0] ?? { type: 'normal', description: '' };
-    const canonical = [
-      { id: CANONICAL.church, name: 'Actions prophétiques', type: base.type ?? 'normal', ministryId, description: base.description ?? '', branch: 'church', familyId: FAMILY_ID },
-      { id: CANONICAL.light, name: 'Actions prophétiques', type: base.type ?? 'normal', ministryId, description: base.description ?? '', branch: 'light', familyId: FAMILY_ID },
-    ];
+    const canonical = { id: CANONICAL, name: 'Actions prophétiques', type: base.type ?? 'normal', ministryId, description: base.description ?? '' };
     const nextDepartments = departments
       .filter(d => !OLD_IDS.has(String(d.id)))
-      .concat(canonical.filter(c => !departments.some(d => d.id === c.id)));
+      .concat(departments.some(d => d.id === CANONICAL && !d.deletedAt) ? [] : [canonical]);
     const members = await getCollection('members') as any[];
     const nextMembers = members.map(m => {
       const entries = Object.entries(m.departments ?? {}) as [string, string][];
       const matching = entries.filter(([id]) => OLD_IDS.has(id));
       if (!matching.length) return m;
       const rest = Object.fromEntries(entries.filter(([id]) => !OLD_IDS.has(id)));
-      const target = CANONICAL[branchOf(m.branch)];
-      rest[target] = matching.map(([, fn]) => fn).reduce((a, b) => stronger(a, b));
+      rest[CANONICAL] = [rest[CANONICAL], ...matching.map(([, fn]) => fn)]
+        .filter(Boolean)
+        .reduce((a, b) => stronger(a, b));
       return { ...m, departments: rest, updatedAt: new Date().toISOString() };
     });
     const remapCollection = async (name: string) => {
@@ -42,12 +40,10 @@ export async function runActionsProphetiquesMigration(): Promise<void> {
       const mapped = rows.map(row => {
         if (!OLD_IDS.has(String(row.departmentId)) && !OLD_IDS.has(String(row.organizer))) return row;
         changed = true;
-        const branch = branchOf(row.branch ?? row.targetBranch);
-        const target = CANONICAL[branch];
         return {
           ...row,
-          ...(OLD_IDS.has(String(row.departmentId)) ? { departmentId: target } : {}),
-          ...(OLD_IDS.has(String(row.organizer)) ? { organizer: target } : {}),
+          ...(OLD_IDS.has(String(row.departmentId)) ? { departmentId: CANONICAL } : {}),
+          ...(OLD_IDS.has(String(row.organizer)) ? { organizer: CANONICAL } : {}),
           updatedAt: new Date().toISOString(),
         };
       });

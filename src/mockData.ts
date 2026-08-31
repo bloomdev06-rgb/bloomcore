@@ -121,7 +121,7 @@ export const INITIAL_PROJECTS: Project[] = [
 ];
 
 export const INITIAL_MINISTRIES: Ministry[] = [
-  { id: 'min_intimite', name: "Ministère de l'Intimité", description: 'MRES, Bloom Praise, Intercession, Sainte Cène' },
+  { id: 'min_intimite', name: "Ministère de l'Intimité", description: 'Actions prophétiques, Bloom Praise, Sainte Cène' },
   { id: 'min_art', name: "Ministère de l'Art", description: 'Bloom Dancers, Bloom Cinema, Trap Church, Bloom Art' },
   { id: 'min_tech_scene', name: "Ministère de la Tech & Scène", description: 'Prod & Tech, Décoration, Traduction, Dirigeants' },
   { id: 'min_retention', name: "Ministère de la Rétention", description: 'Resho Bloom, ADN, Social, Intégration, OJ', tuteurId: 'mem_1' },
@@ -132,9 +132,8 @@ export const INITIAL_MINISTRIES: Ministry[] = [
 
 export const INITIAL_DEPARTMENTS: Department[] = [
   // 1. Ministère de l'Intimité
-  { id: 'dept_mres', name: 'MRES', type: 'normal', ministryId: 'min_intimite', description: '' },
+  { id: 'dept_actions_prophetiques', name: 'Actions prophétiques', type: 'normal', ministryId: 'min_intimite', description: '' },
   { id: 'dept_louange', name: 'Bloom Praise', type: 'normal', ministryId: 'min_intimite', description: '' },
-  { id: 'dept_intercession', name: 'Intercession', type: 'normal', ministryId: 'min_intimite', description: '' },
   { id: 'dept_sainte_cene', name: 'Sainte Cène', type: 'normal', ministryId: 'min_intimite', description: '' },
 
   // 2. Ministère de l'Art

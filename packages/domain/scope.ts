@@ -87,7 +87,7 @@ export function effectiveBranchFor(m: Member, deptId: string): Member['branch'] 
 
 // Département "maison" d'un rôle sans affectation explicite (démo/simulation de profil).
 export const ROLE_HOME_DEPT: Record<string, string> = {
-  Responsable: 'dept_tech', Adjoint: 'dept_tech', Coach: 'dept_louange', Leader: 'dept_mres',
+  Responsable: 'dept_tech', Adjoint: 'dept_tech', Coach: 'dept_louange', Leader: 'dept_actions_prophetiques',
   ADN: 'dept_adn', Intégration: 'dept_integration', GDC: 'dept_gdc', Portier: 'dept_ushers',
 };
 
