@@ -4,7 +4,7 @@
 // pas diverger sur la sémantique des capacités et du scope.
 import { Member, Ministry, PermissionMatrix, Delegation, AdminAccount, Department, BloomBusEntity, SpecialAuthorization, CapabilityOverride } from '../packages/domain/types.ts';
 import { resolveCapability } from '../packages/domain/permissions.ts';
-import { inMemberScope, canFillReportFor, busInScope, fullBloomBusAccess, bloomBusRoleOf, MULTI_BRANCH_ROLES, COACH_AND_ABOVE, canManageAccountOf, bestRank, canAssignBusRole } from '../packages/domain/scope.ts';
+import { inMemberScope, canFillReportFor, busInScope, fullBloomBusAccess, bloomBusRoleOf, MULTI_BRANCH_ROLES, COACH_AND_ABOVE, canManageAccountOf, bestRank, canAssignBusRole, FULL_SCOPE_ROLES } from '../packages/domain/scope.ts';
 import { isBusReportLocked } from '../packages/domain/reportLock.ts';
 import { getKv } from './datastore.ts';
 import { GuardError, readCollection, canonical } from './guards.ts';
@@ -535,6 +535,24 @@ export async function assertCanWrite(name: string, ctx: RbacContext, incoming: a
               if (!captainOrAbove) {
                 throw new GuardError(403, `reports: auto-validation interdite (réservée au capitaine)`);
               }
+            }
+          }
+          // Rapport d'activité Bloom Bus : même étanchéité territoriale que le rapport
+          // individuel. L'UI ne propose qu'un bus du périmètre, mais cette garde bloque aussi
+          // un POST/PATCH direct visant un autre bus.
+          if (r.reportType === 'rapport_bloom_bus_life') {
+            const busId = r.content?.busId;
+            if (typeof busId !== 'string' || !busId) {
+              throw new GuardError(400, `reports: ${r.id} doit contenir content.busId`);
+            }
+            const targetBus = busLines.find((b) => b.id === busId);
+            if (!targetBus) throw new GuardError(400, `reports: ${r.id} cible un Bloom Bus inconnu`);
+            const bloomBusScopeRole = roles.includes('Pasteur') ? 'Pasteur' : scopeRole;
+            const bbRole = bloomBusRoleOf(member, departments);
+            const manager = FULL_SCOPE_ROLES.includes(bloomBusScopeRole)
+              || ['Capitaine de Bus', 'Responsable de Zone', 'Responsable de Commune', 'Responsable'].includes(bbRole ?? '');
+            if (!manager || !busInScope(member, targetBus, bloomBusScopeRole, busLines, departments)) {
+              throw new GuardError(403, `reports: ${r.id} hors de votre périmètre Bloom Bus`);
             }
           }
         }

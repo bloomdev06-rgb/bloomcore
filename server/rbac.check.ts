@@ -331,7 +331,10 @@ assert.deepEqual(
     { id: 'd2', name: 'D2', ministryId: 'min1', type: 'normal' },
     { id: 'dept_bloom_bus', name: 'Bloom Bus', ministryId: 'min1', type: 'normal', specialFunction: 'bloom_bus' },
   ]);
-  await applyWrite('bus_lines', [{ id: 'bus1', name: 'B1', commune: 'Cocody', zone: 'Est' }] as any);
+  await applyWrite('bus_lines', [
+    { id: 'bus1', name: 'B1', commune: 'Cocody', zone: 'Est' },
+    { id: 'bus2', name: 'B2', commune: 'Yopougon', zone: 'Ouest' },
+  ] as any);
   await applyWrite('members', [
     superAdmin, pasteur, ministre,
     baseMember({ id: 'm4', departments: { d1: 'responsable' } }),
@@ -354,6 +357,16 @@ assert.deepEqual(
   // Rapport Bloom Bus → hiérarchie Bloom Bus, PAS la hiérarchie département du membre.
   assert.ok(!(await sees('m4', busReport)), 'Responsable de dépt ne voit PAS le rapport Bloom Bus de son membre (cloisonnement filière)');
   assert.ok(await sees('mCap', busReport), 'Capitaine du bus du membre voit son rapport Bloom Bus');
+
+  const ctxCap = (await buildContext('mCap'))!;
+  const lifeOwnBus = { id: 'r_life_own', reportType: 'rapport_bloom_bus_life', departmentId: 'dept_bloom_bus', confidential: false, targetBranch: 'church', date: '2026-07-15', authorId: 'mCap', content: { busId: 'bus1' } };
+  const lifeOtherBus = { ...lifeOwnBus, id: 'r_life_other', content: { busId: 'bus2' } };
+  await assertCanWrite('reports', ctxCap, [lifeOwnBus]);
+  await assert.rejects(
+    () => assertCanWrite('reports', ctxCap, [lifeOtherBus]),
+    (e: any) => e instanceof GuardError && e.status === 403,
+    'Capitaine ne peut pas écrire un rapport d’activité hors de son Bloom Bus',
+  );
 }
 
 // --- P2.0 — ministries : réservé au staff pastoral. Un Responsable/Ministre ne peut plus
