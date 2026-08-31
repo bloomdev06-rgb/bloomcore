@@ -325,7 +325,28 @@ export default function App() {
       if (result && !result.ok) {
         setMembers(prev => prev.filter(x => x.id !== enriched.id));
         toast.error(result.error ?? "Échec de l'enregistrement — réessayez.");
+        return;
       }
+
+      if (!result) {
+        // Le mode hors-ligne conserve l'ajout local et le met en file via useSyncedSave,
+        // mais il ne doit jamais produire un audit présenté comme une création confirmée.
+        toast.error("Serveur BloomCore indisponible : création locale en attente de synchronisation.");
+        return;
+      }
+
+      // L'audit de création est écrit uniquement après confirmation HTTP du POST. Avant
+      // cette confirmation, il pouvait rester un faux audit local alors que le membre était
+      // retiré au bootstrap suivant (API/proxy mal configuré ou serveur indisponible).
+      handleAddAuditLog({
+        id: genId('aud_reg'),
+        timestamp: new Date().toISOString(),
+        actionType: enriched.level === 'nouveau' ? 'MEMBER_REGISTERED_ADN' : 'MEMBER_CREATED_MANUAL',
+        operatorName: operatorDisplayName(operator),
+        operatorId: operator?.id ?? 'mem_1',
+        details: `Création du profil de ${enriched.firstName} ${enriched.lastName} (${enriched.level}).`,
+        branch: enriched.branch,
+      });
     });
 
     if (enriched.level === 'nouveau') {
@@ -337,18 +358,6 @@ export default function App() {
         { type: 'member', id: enriched.id },
       ));
     }
-
-    // Log Audit
-    const log: AuditLog = {
-      id: genId('aud_reg'),
-      timestamp: new Date().toISOString(),
-      actionType: enriched.level === 'nouveau' ? 'MEMBER_REGISTERED_ADN' : 'MEMBER_CREATED_MANUAL',
-      operatorName: operatorDisplayName(operator),
-      operatorId: operator?.id ?? 'mem_1',
-      details: `Création du profil de ${enriched.firstName} ${enriched.lastName} (${enriched.level}).`,
-      branch: enriched.branch
-    };
-    handleAddAuditLog(log);
 
     // P4.15 (a) — dédoublonnage : pas de merge auto (risque de perte de données),
     // on flague et notifie pour que l'opérateur tranche. "Doublon" = même téléphone,
