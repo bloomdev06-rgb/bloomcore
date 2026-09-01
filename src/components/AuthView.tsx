@@ -218,6 +218,9 @@ export default function AuthView({ members, onLogin }: AuthViewProps) {
               <button type="button" onClick={() => switchMode('register')} className="hover:text-bc-text">Créer mon compte</button>
               <button type="button" onClick={() => switchMode('reset')} className="hover:text-bc-text">Mot de passe oublié ?</button>
             </div>
+            <button type="button" onClick={() => switchMode('activate')} className="w-full text-xs text-bc-text-secondary hover:text-bc-text">
+              Compte validé, mais lien d’activation non reçu ?
+            </button>
           </form>
         )}
 

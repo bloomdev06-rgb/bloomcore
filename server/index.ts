@@ -267,6 +267,20 @@ async function issueAuthLink(member: any, purpose: 'activate' | 'reset'): Promis
   return token;
 }
 
+// La validation peut arriver soit par PATCH immédiat, soit par la synchronisation whole-array
+// offline-first. Dans les deux cas, l'invitation doit être émise UNE seule fois lors du vrai
+// passage pending → validated ; une simple édition ultérieure ne doit jamais la renvoyer.
+async function issueActivationAfterDepartmentValidation(before: any | undefined, after: any): Promise<void> {
+  if (
+    before?.deptAttachmentStatus === 'pending'
+    && after?.deptAttachmentStatus === 'validated'
+    && (after.deptAttachmentOrigin === 'bloom_bus' || after.deptAttachmentOrigin === 'self_registration')
+    && !(await getCredential(after.id))
+  ) {
+    await issueAuthLink(after, 'activate');
+  }
+}
+
 // Ces deux routes sont publiques ET expédient un email. Sans borne, n'importe qui pouvait
 // bombarder la boîte d'un membre dont il connaît l'adresse, et épuiser le quota d'envoi.
 // Clé = IP + identifiant, comme le verrou de login. Le 429 est renvoyé AVANT toute recherche
@@ -629,14 +643,7 @@ app.patch('/api/v1/members/:id', requireAuth, async (req, res) => {
     // deptAttachmentStatus/Origin) : c'est SEULEMENT à ce moment-là que le compte reçoit son
     // lien d'activation — pas à la création (le membre ne doit pas pouvoir se connecter avant
     // validation). Idempotent : si un credential existe déjà, on ne renvoie pas de lien.
-    if (
-      stored.deptAttachmentStatus === 'pending'
-      && patch.deptAttachmentStatus === 'validated'
-      && (result.deptAttachmentOrigin === 'bloom_bus' || result.deptAttachmentOrigin === 'self_registration')
-      && !(await getCredential(result.id))
-    ) {
-      await issueAuthLink(result, 'activate');
-    }
+    await issueActivationAfterDepartmentValidation(stored, result);
     return res.json(result);
   } catch (e) {
     if (e instanceof GuardError) return res.status(e.status).json({ error: e.message });
@@ -909,7 +916,13 @@ app.put('/api/v1/:name', requireAuth, async (req, res) => {
       // n'a qu'un sous-ensemble, son PUT ne doit pas tombstoner ce qu'il ne voit pas.
       // clientSync=true : sans `asOf`, ce client ne peut prouver aucune lecture récente et
       // n'a donc le droit que d'AJOUTER — jamais de modifier ni de supprimer l'existant.
-      const { added, conflicts } = await applyWrite(name, body, asOf, await preservedIds(name, (req as any).rbac), true);
+      // Mémorise l'état avant fusion : un PATCH et cette synchronisation peuvent se croiser.
+      // Sans cette comparaison, la synchro peut gagner la course et rendre la validation
+      // persistante sans jamais déclencher le lien d'activation.
+      const membersBefore = name === 'members'
+        ? new Map((await readCollection('members', true)).map((m: any) => [String(m.id), m]))
+        : null;
+      const { added, changed, conflicts } = await applyWrite(name, body, asOf, await preservedIds(name, (req as any).rbac), true);
       // Fan-out multicanal des notifications nouvellement créées (in-app déjà
       // réel côté client ; email/SMS/WhatsApp via adapters, simulés sans clés).
       if (name === 'notifications' && added.length) {
@@ -920,6 +933,11 @@ app.put('/api/v1/:name', requireAuth, async (req, res) => {
       // via lien" — chaque membre ajouté reçoit une invitation d'activation.
       if (name === 'members' && added.length) {
         for (const m of added) await issueAuthLink(m, 'activate');
+      }
+      if (name === 'members' && membersBefore) {
+        for (const m of changed) {
+          await issueActivationAfterDepartmentValidation(membersBefore.get(String(m.id)), m);
+        }
       }
       return res.json({ ok: true, syncedAt: new Date().toISOString(), conflicts });
     }
