@@ -25,6 +25,30 @@ export function webpushRows(notifId: string, subs: { endpoint: string; p256dh: s
 // une notification créée via écriture générique de la collection `notifications` (CRUD
 // admin, id arbitraire) ne doit jamais partir par email, même avec le flag activé.
 const FUNCTIONAL_EMAIL_PREFIXES = ['notif_selfreg_', 'notif_relance_', 'notif_pending3j_'];
+const ACTIVATION_SUBJECT = 'Activation de votre compte BloomCore';
+const RESET_SUBJECT = 'Réinitialisation de votre mot de passe BloomCore';
+const PENDING_REGISTRATION_SUBJECT = 'Votre demande d’inscription BloomCore est en attente de validation';
+
+// Chaque template Brevo correspond à un email d'authentification précis. Les
+// notifications fonctionnelles sans template dédié conservent le relais SMTP.
+export function brevoTemplateIdFor(subject: string): number | null {
+  const configured = subject === ACTIVATION_SUBJECT
+    ? process.env.BREVO_TEMPLATE_ACTIVATION_ID
+    : subject === RESET_SUBJECT
+      ? process.env.BREVO_TEMPLATE_RESET_ID
+      : subject === PENDING_REGISTRATION_SUBJECT
+        ? process.env.BREVO_TEMPLATE_PENDING_REGISTRATION_ID
+        : null;
+  return configured && /^\d+$/.test(configured) ? Number(configured) : null;
+}
+
+export function brevoTemplateConfigured(): boolean {
+  return !!process.env.BREVO_API_KEY && [
+    process.env.BREVO_TEMPLATE_ACTIVATION_ID,
+    process.env.BREVO_TEMPLATE_RESET_ID,
+    process.env.BREVO_TEMPLATE_PENDING_REGISTRATION_ID,
+  ].some((id) => /^\d+$/.test(id ?? ''));
+}
 export function isAuthenticationEmail(notifId: string): boolean {
   return notifId.startsWith('notif_auth_');
 }
@@ -45,7 +69,7 @@ export function shouldDispatchEmail(notifId: string, triggerEnabled: boolean, re
 
 // ponytail: adapters simulés — les clés env décident. Twilio/Nodemailer/web-push plus tard.
 export function transportConfigured(channel: Channel): boolean {
-  if (channel === 'email') return !!process.env.SMTP_HOST;
+  if (channel === 'email') return brevoTemplateConfigured() || !!process.env.SMTP_HOST;
   if (channel === 'webpush') return !!process.env.VAPID_PRIVATE_KEY;
   return !!process.env.TWILIO_ACCOUNT_SID;
 }
@@ -64,7 +88,8 @@ function maskRecipient(to: string): string {
 async function send(channel: Channel, member: Member, subject: string, body: string, dedupeKey: string): Promise<void> {
   const to = recipientAddress(channel, member);
   if (!to) return;
-  const status = transportConfigured(channel) ? 'pending' : 'simulated';
+  const emailConfigured = !!process.env.SMTP_HOST || (!!process.env.BREVO_API_KEY && brevoTemplateIdFor(subject) !== null);
+  const status = channel === 'email' ? (emailConfigured ? 'pending' : 'simulated') : (transportConfigured(channel) ? 'pending' : 'simulated');
   const { inserted } = await insertOutboxIfAbsent(dedupeKey, channel, to, subject, body, status, new Date().toISOString());
   if (inserted && status === 'simulated') {
     console.log(`[notify:${channel}→${maskRecipient(to)}] ${subject}`);
@@ -76,6 +101,8 @@ async function send(channel: Channel, member: Member, subject: string, body: str
 // Email via SMTP (nodemailer, import dynamique optionnel : si le paquet n'est pas
 // installé, l'envoi échoue proprement et la ligne reste 'failed', pas de crash).
 async function deliverEmail(to: string, subject: string, body: string): Promise<void> {
+  const templateId = process.env.BREVO_API_KEY ? brevoTemplateIdFor(subject) : null;
+  if (templateId !== null) return deliverBrevoTemplate(to, subject, body, templateId);
   const mod: any = await import('nodemailer' as any).catch(() => null);
   if (!mod?.createTransport) throw new Error('nodemailer indisponible (npm i nodemailer)');
   const transport = mod.createTransport({
@@ -85,6 +112,25 @@ async function deliverEmail(to: string, subject: string, body: string): Promise<
     auth: process.env.SMTP_USER ? { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS } : undefined,
   });
   await transport.sendMail({ from: process.env.SMTP_FROM || process.env.SMTP_USER, to, subject, text: body });
+}
+
+async function deliverBrevoTemplate(to: string, subject: string, body: string, templateId: number): Promise<void> {
+  const actionUrl = body.match(/https?:\/\/\S+/)?.[0] ?? '';
+  const res = await fetch('https://api.brevo.com/v3/smtp/email', {
+    method: 'POST',
+    headers: {
+      accept: 'application/json',
+      'content-type': 'application/json',
+      'api-key': process.env.BREVO_API_KEY!,
+    },
+    body: JSON.stringify({
+      to: [{ email: to }],
+      templateId,
+      subject,
+      params: { title: subject, message: body, action_url: actionUrl },
+    }),
+  });
+  if (!res.ok) throw new Error(`Brevo email ${res.status}`);
 }
 
 // SMS / WhatsApp via l'API REST Twilio (fetch, aucune dépendance).

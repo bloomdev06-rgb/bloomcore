@@ -400,6 +400,18 @@ app.post('/api/v1/auth/register', async (req, res) => {
   // pas par applyWrite — la métadonnée doit être posée à la main.
   await appendToCollection('members', [{ ...check.data, updatedAt: new Date().toISOString() }]);
 
+  // Confirme au demandeur que son compte attend la validation. L'id `notif_auth_*`
+  // rend cet email indépendant de ses préférences, puisqu'il n'a pas encore de compte actif.
+  const applicantNotification = {
+    id: `notif_auth_pending_registration_${check.data.id}`,
+    timestamp: new Date().toISOString(),
+    title: 'Votre demande d’inscription BloomCore est en attente de validation',
+    message: `Bonjour ${input.firstName},\n\nVotre demande d’inscription a bien été reçue. Le responsable du département ${department.name} va l’examiner.\n\nVous recevrez un email pour créer votre mot de passe dès que votre compte sera validé.`,
+    type: 'info' as const,
+    read: false,
+    targetMemberId: check.data.id,
+  };
+
   // Notifie le(s) responsable(s) du département choisi ; à défaut, le tuteur du ministère
   // (Ministre) ; à défaut, tous les comptes Admin/Super Admin — quelqu'un doit toujours être
   // notifié, "en fonction du champ d'action" (retour utilisateur).
@@ -414,12 +426,13 @@ app.post('/api/v1/auth/register', async (req, res) => {
     const adminIds = new Set((await readCollection('admins')).map((a: any) => String(a.id).replace(/^adm_/, '')));
     recipients = members.filter((m: any) => adminIds.has(m.id));
   }
+  const notifs = [applicantNotification];
   if (recipients.length) {
     // Ids déterministes (member × destinataire) → ré-appel idempotent, comme les alertes
     // du scheduler. On INSÈRE d'abord dans `notifications` (canal in-app = la cloche) PUIS
     // on dispatch les canaux hors-app : dispatch() ne fait que le fan-out email/SMS/push,
     // il n'écrit pas la collection (cf. scheduler.ts runSweep, même séquence).
-    const notifs = recipients.map((r: any) => ({
+    notifs.push(...recipients.map((r: any) => ({
       id: `notif_selfreg_${check.data.id}_${r.id}`,
       timestamp: new Date().toISOString(),
       title: 'Nouvelle demande d\'inscription',
@@ -427,13 +440,13 @@ app.post('/api/v1/auth/register', async (req, res) => {
       type: 'info' as const,
       read: false,
       targetMemberId: r.id,
-    }));
-    const knownNotifIds = new Set((await readCollection('notifications', true)).map((n: any) => n.id));
-    const freshNotifs = notifs.filter((n) => !knownNotifIds.has(n.id));
-    if (freshNotifs.length) {
-      await appendToCollection('notifications', freshNotifs.map((n) => ({ ...n, updatedAt: new Date().toISOString() })));
-      await dispatch(freshNotifs, members, await getKv('settings'));
-    }
+    })));
+  }
+  const knownNotifIds = new Set((await readCollection('notifications', true)).map((n: any) => n.id));
+  const freshNotifs = notifs.filter((n) => !knownNotifIds.has(n.id));
+  if (freshNotifs.length) {
+    await appendToCollection('notifications', freshNotifs.map((n) => ({ ...n, updatedAt: new Date().toISOString() })));
+    await dispatch(freshNotifs, members, await getKv('settings'));
   }
   poke(); // la demande en attente + la cloche apparaissent en direct chez le responsable
 

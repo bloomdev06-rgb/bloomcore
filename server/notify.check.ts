@@ -1,6 +1,6 @@
 // Test du fan-out Web Push (pur) + garde transport. Lancé via `npm test` (tsx).
 import assert from 'node:assert';
-import { webpushRows, transportConfigured, emailAllowed, shouldDispatchEmail } from './notify.ts';
+import { webpushRows, transportConfigured, emailAllowed, shouldDispatchEmail, brevoTemplateConfigured, brevoTemplateIdFor } from './notify.ts';
 
 const subs = [
   { endpoint: 'https://push.example/aaa', p256dh: 'p1', auth: 'a1' },
@@ -40,6 +40,7 @@ delete process.env.FUNCTIONAL_EMAILS_ENABLED;
 assert.equal(emailAllowed('notif_pending3j_m1'), false, 'fonctionnel bloqué par défaut');
 assert.equal(emailAllowed('notif_auth_reset_m1_123'), true, 'reset toujours envoyé');
 assert.equal(emailAllowed('notif_auth_activate_m1_123'), true, 'activation toujours envoyée');
+assert.equal(emailAllowed('notif_auth_pending_registration_m1'), true, 'confirmation d’inscription toujours envoyée');
 assert.equal(shouldDispatchEmail('notif_auth_activate_m1_123', false, false), true, 'activation contourne les préférences initiales');
 assert.equal(shouldDispatchEmail('notif_pending3j_m1', true, false), false, 'email fonctionnel respecte le refus du membre');
 process.env.FUNCTIONAL_EMAILS_ENABLED = 'true';
@@ -50,5 +51,28 @@ assert.equal(emailAllowed('notif_relance_mentor_mem_2_mem_3_2026-08-24'), true, 
 // id arbitraire) ne part jamais par email, même avec FUNCTIONAL_EMAILS_ENABLED=true.
 assert.equal(emailAllowed('notif_abcdef123'), false, 'notif générique jamais email, même flag actif');
 if (savedFlag === undefined) delete process.env.FUNCTIONAL_EMAILS_ENABLED; else process.env.FUNCTIONAL_EMAILS_ENABLED = savedFlag;
+
+// 6) Les trois templates Brevo ont chacun un identifiant explicite.
+const savedBrevoKey = process.env.BREVO_API_KEY;
+const savedBrevoActivation = process.env.BREVO_TEMPLATE_ACTIVATION_ID;
+const savedBrevoReset = process.env.BREVO_TEMPLATE_RESET_ID;
+const savedBrevoPending = process.env.BREVO_TEMPLATE_PENDING_REGISTRATION_ID;
+delete process.env.BREVO_API_KEY;
+delete process.env.BREVO_TEMPLATE_ACTIVATION_ID;
+delete process.env.BREVO_TEMPLATE_RESET_ID;
+delete process.env.BREVO_TEMPLATE_PENDING_REGISTRATION_ID;
+assert.equal(brevoTemplateConfigured(), false, 'sans configuration Brevo');
+process.env.BREVO_API_KEY = 'test-key';
+process.env.BREVO_TEMPLATE_ACTIVATION_ID = '41';
+process.env.BREVO_TEMPLATE_RESET_ID = '42';
+process.env.BREVO_TEMPLATE_PENDING_REGISTRATION_ID = '43';
+assert.equal(brevoTemplateConfigured(), true, 'clé et templates Brevo configurés');
+assert.equal(brevoTemplateIdFor('Activation de votre compte BloomCore'), 41, 'template activation');
+assert.equal(brevoTemplateIdFor('Réinitialisation de votre mot de passe BloomCore'), 42, 'template réinitialisation');
+assert.equal(brevoTemplateIdFor('Votre demande d’inscription BloomCore est en attente de validation'), 43, 'template attente');
+if (savedBrevoKey === undefined) delete process.env.BREVO_API_KEY; else process.env.BREVO_API_KEY = savedBrevoKey;
+if (savedBrevoActivation === undefined) delete process.env.BREVO_TEMPLATE_ACTIVATION_ID; else process.env.BREVO_TEMPLATE_ACTIVATION_ID = savedBrevoActivation;
+if (savedBrevoReset === undefined) delete process.env.BREVO_TEMPLATE_RESET_ID; else process.env.BREVO_TEMPLATE_RESET_ID = savedBrevoReset;
+if (savedBrevoPending === undefined) delete process.env.BREVO_TEMPLATE_PENDING_REGISTRATION_ID; else process.env.BREVO_TEMPLATE_PENDING_REGISTRATION_ID = savedBrevoPending;
 
 console.log('notify.check OK');
