@@ -1,6 +1,6 @@
 // Test du fan-out Web Push (pur) + garde transport. Lancé via `npm test` (tsx).
 import assert from 'node:assert';
-import { webpushRows, transportConfigured, emailAllowed } from './notify.ts';
+import { webpushRows, transportConfigured, emailAllowed, shouldDispatchEmail } from './notify.ts';
 
 const subs = [
   { endpoint: 'https://push.example/aaa', p256dh: 'p1', auth: 'a1' },
@@ -40,6 +40,8 @@ delete process.env.FUNCTIONAL_EMAILS_ENABLED;
 assert.equal(emailAllowed('notif_pending3j_m1'), false, 'fonctionnel bloqué par défaut');
 assert.equal(emailAllowed('notif_auth_reset_m1_123'), true, 'reset toujours envoyé');
 assert.equal(emailAllowed('notif_auth_activate_m1_123'), true, 'activation toujours envoyée');
+assert.equal(shouldDispatchEmail('notif_auth_activate_m1_123', false, false), true, 'activation contourne les préférences initiales');
+assert.equal(shouldDispatchEmail('notif_pending3j_m1', true, false), false, 'email fonctionnel respecte le refus du membre');
 process.env.FUNCTIONAL_EMAILS_ENABLED = 'true';
 assert.equal(emailAllowed('notif_pending3j_m1'), true, 'réactivable via le flag');
 assert.equal(emailAllowed('notif_selfreg_mem_2_mem_3'), true, 'auto-inscription réactivable via le flag');

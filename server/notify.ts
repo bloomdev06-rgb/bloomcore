@@ -25,10 +25,22 @@ export function webpushRows(notifId: string, subs: { endpoint: string; p256dh: s
 // une notification créée via écriture générique de la collection `notifications` (CRUD
 // admin, id arbitraire) ne doit jamais partir par email, même avec le flag activé.
 const FUNCTIONAL_EMAIL_PREFIXES = ['notif_selfreg_', 'notif_relance_', 'notif_pending3j_'];
+export function isAuthenticationEmail(notifId: string): boolean {
+  return notifId.startsWith('notif_auth_');
+}
+
 export function emailAllowed(notifId: string): boolean {
-  if (notifId.startsWith('notif_auth_')) return true;
+  if (isAuthenticationEmail(notifId)) return true;
   return process.env.FUNCTIONAL_EMAILS_ENABLED === 'true'
     && FUNCTIONAL_EMAIL_PREFIXES.some((p) => notifId.startsWith(p));
+}
+
+// Un lien d'activation ou de réinitialisation ne doit jamais dépendre des préférences de
+// notification enregistrées AVANT la première connexion : sans lui, le membre ne peut pas
+// définir son mot de passe. Les autres emails restent soumis aux deux opt-ins habituels.
+export function shouldDispatchEmail(notifId: string, triggerEnabled: boolean, recipientAllowsEmail: boolean): boolean {
+  return emailAllowed(notifId)
+    && (isAuthenticationEmail(notifId) || (triggerEnabled && recipientAllowsEmail));
 }
 
 // ponytail: adapters simulés — les clés env décident. Twilio/Nodemailer/web-push plus tard.
@@ -162,7 +174,12 @@ export async function dispatch(newNotifs: AppNotification[], members: Member[], 
     for (const m of recipients) {
       const prefs = m.notifChannels ?? DEFAULT_CHANNELS;
       for (const channel of ['email', 'sms', 'whatsapp'] as Channel[]) {
-        if (channel === 'email' && !emailAllowed(n.id)) continue;
+        if (channel === 'email') {
+          if (shouldDispatchEmail(n.id, triggerChannels.email, prefs.email)) {
+            await send(channel, m, n.title, n.message, `${n.id}:${channel}:${m.id}`);
+          }
+          continue;
+        }
         if (triggerChannels[channel] && prefs[channel]) {
           await send(channel, m, n.title, n.message, `${n.id}:${channel}:${m.id}`);
         }

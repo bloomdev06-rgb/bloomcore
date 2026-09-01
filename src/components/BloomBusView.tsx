@@ -396,7 +396,7 @@ export default function BloomBusView({
   const renderBusRoleSelect = (m: Member) => {
     if (!operator) return null;
     const current = new Set(m.busRoles ?? (m.busRole ? [m.busRole] : []));
-    const ouvertes = BUS_ROLE_CHOICES.filter((c) => c.value && (current.has(c.value as Member['busRole']) || canAssign(m, c.role)));
+    const ouvertes = BUS_ROLE_CHOICES.filter((c) => c.value && (current.has(c.value as NonNullable<Member['busRole']>) || canAssign(m, c.role)));
     if (ouvertes.length === 0) return null;
     return (
       <div className="flex flex-wrap justify-end gap-1" aria-label={`Fonctions Bloom Bus de ${m.firstName} ${m.lastName}`}>

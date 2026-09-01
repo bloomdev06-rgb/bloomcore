@@ -246,12 +246,17 @@ function isDeliverableEmail(email: unknown): boolean {
 async function issueAuthLink(member: any, purpose: 'activate' | 'reset'): Promise<string> {
   const token = await createOneTimeToken(member.id, purpose);
   const label = purpose === 'activate' ? 'Activation de votre compte BloomCore' : 'Réinitialisation de votre mot de passe BloomCore';
+  const link = `${APP_URL}/?${purpose}=${token}`;
+  const firstName = String(member.firstName ?? '').trim();
+  const message = purpose === 'activate'
+    ? `Bonjour${firstName ? ` ${firstName}` : ''},\n\nVotre compte BloomCore vient d’être créé. Cliquez sur le lien ci-dessous pour créer votre mot de passe et accéder à votre espace :\n\n${link}\n\nCe lien est personnel, utilisable une seule fois et valable 48 heures.\n\nSi vous n’attendiez pas cet email, vous pouvez l’ignorer.`
+    : `Bonjour${firstName ? ` ${firstName}` : ''},\n\nCliquez sur le lien ci-dessous pour créer un nouveau mot de passe BloomCore :\n\n${link}\n\nCe lien est personnel, utilisable une seule fois et valable 1 heure.\n\nSi vous n’avez pas demandé cette réinitialisation, vous pouvez l’ignorer.`;
   await dispatch(
     [{
       id: `notif_auth_${purpose}_${member.id}_${Date.now()}`,
       timestamp: new Date().toISOString(),
       title: label,
-      message: `${APP_URL}/?${purpose}=${token}`,
+      message,
       type: 'info',
       read: false,
       targetMemberId: member.id,
