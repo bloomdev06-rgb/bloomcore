@@ -17,13 +17,26 @@ import { save } from './index';
 //
 // BloomBusView portait déjà ce garde-fou à la main ; il est ici factorisé pour les autres
 // collections exposées (départements, ministères, projets, comptes admin).
-export function useSyncedSave<T>(key: string, value: T): void {
-  const skipFirst = useRef(true);
+export function useSyncedSave<T>(key: string, value: T, enabled = true): void {
+  const previousValue = useRef(value);
+  const wasEnabled = useRef(enabled);
   useEffect(() => {
-    if (skipFirst.current) {
-      skipFirst.current = false;
+    // StrictMode rejoue les effets de montage : un simple booléen "skipFirst" persistait
+    // alors les seeds au deuxième passage. Sans session validée, aucune écriture locale.
+    if (!enabled) {
+      wasEnabled.current = false;
+      previousValue.current = value;
       return;
     }
+    // Le passage « bootstrap terminé » active la persistance dans le même rendu qui pose
+    // les données serveur. Celles-ci deviennent la nouvelle base ; ce n'est pas une édition.
+    if (!wasEnabled.current) {
+      wasEnabled.current = true;
+      previousValue.current = value;
+      return;
+    }
+    if (Object.is(value, previousValue.current)) return;
+    previousValue.current = value;
     save(key, value);
-  }, [key, value]);
+  }, [enabled, key, value]);
 }

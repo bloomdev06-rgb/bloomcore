@@ -4,7 +4,6 @@ import { Member, Branch, Report, AuditLog, PermissionMatrix, Delegation, FormDef
 import { useDepartments, useBusLines, useProjects, load, resolveCapability, labelFor } from '../data';
 import { responsableIdsFor } from '../data/notificationRules';
 import { busSupervisorsOf, memberAssignmentsByBranch, bloomBusRoleOf } from '../data/scope';
-import { DEFAULT_OPERATOR_NAME } from '../data/operator';
 import { isRed } from '../data/kpi';
 import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend } from 'recharts';
 import { X, Edit, Phone, Mail, Compass, ShieldAlert, Activity, User, Briefcase, Calendar, MapPin, Database, ArrowRight, ArrowUpCircle, Clock, CheckCircle2, Coins } from 'lucide-react';
@@ -102,10 +101,11 @@ export default function Member360View({ member, onClose, onEdit, onUpdate, repor
   const [coachReportNotes, setCoachReportNotes] = useState('');
   const handleSaveCoachReport = (e: React.FormEvent) => {
     e.preventDefault();
+    if (!operator || !coachReportNotes.trim()) return;
     onAddReport?.({
       id: `rep_coach_${Date.now()}`,
-      authorId: 'mem_1',
-      authorName: DEFAULT_OPERATOR_NAME, // ponytail: opérateur figé tant que l'auth n'est pas là
+      authorId: operator.id,
+      authorName: `${operator.firstName} ${operator.lastName}`,
       authorRole: simulatedRole,
       targetBranch: member.branch,
       date: new Date().toISOString().split('T')[0],

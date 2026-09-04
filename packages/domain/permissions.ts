@@ -20,9 +20,12 @@ export function hasCapability(
   role: string,
   operatorId: string | undefined,
   delegations: Delegation[],
+  resourceDepartmentId?: string,
 ): boolean {
   if (role === 'Super Admin' || !!permissionMatrix[capability]?.[role]) return true;
-  return !!operatorId && delegations.some(d => d.right === capability && d.toId === operatorId);
+  return !!operatorId && !!resourceDepartmentId && delegations.some(d =>
+    !d.deletedAt && d.right === capability && d.toId === operatorId
+    && !!d.fromId && d.departmentId === resourceDepartmentId);
 }
 
 // Un membre "matche" un override selon l'axe ciblé et la branche (§2.6).
@@ -51,8 +54,9 @@ export function resolveCapability(
   delegations: Delegation[],
   overrides: CapabilityOverride[] = [],
   specialAuths: SpecialAuthorization[] = [],
+  resourceDepartmentId?: string,
 ): boolean {
-  const base = hasCapability(permissionMatrix, capability, role, operator?.id, delegations);
+  const base = hasCapability(permissionMatrix, capability, role, operator?.id, delegations, resourceDepartmentId);
   if (!operator) return base;
   const matching = overrides.filter(
     (o) => !o.deletedAt && o.capability === capability && memberMatchesOverride(operator, o),

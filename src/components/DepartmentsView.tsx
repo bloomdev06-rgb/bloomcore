@@ -86,11 +86,6 @@ export default function DepartmentsView({ activeBranch, simulatedRole, members =
   // changement de statut (réception / passage Stagiaire / passage Membre).
   const [statusConfirm, setStatusConfirm] = useState<{ member: Member; transition: 'reception' | 'stagiaire' | 'membre' | 'bloom_bus_validate' | 'bloom_bus_reject' } | null>(null);
   const isChurch = activeBranch === 'church';
-  // Le Responsable peut éditer un membre mais pas ses affectations de département ;
-  // Ministre/Pasteur/Admin/Super Admin gardent l'édition complète.
-  const canManageDeptMembers = ['Responsable', 'Pasteur Principal', 'Pasteur', 'Ministre', 'Admin', 'Super Admin'].includes(simulatedRole);
-  const canEditMemberDepartments = simulatedRole !== 'Responsable';
-
   // On atterrit directement sur le département du Responsable (opérateur courant).
   const operator = members.find(m => m.id === operatorId);
   const myDeptEntries = Object.entries(operator?.departments ?? {});
@@ -178,6 +173,13 @@ export default function DepartmentsView({ activeBranch, simulatedRole, members =
   const selectedDeptData = departments.find(d => d.id === selectedDept);
   const selectedMinistryData = INITIAL_MINISTRIES.find(m => m.id === selectedDeptData?.ministryId);
   const sf = specialFn(selectedDeptData);
+  const isGlobalAuthority = ['Pasteur Principal', 'Admin', 'Super Admin'].includes(simulatedRole);
+  const isBranchPastor = simulatedRole === 'Pasteur' && (!selectedDeptData?.branch || selectedDeptData.branch === operator?.branch);
+  const isTutoredMinistry = simulatedRole === 'Ministre' && selectedMinistryData?.tuteurId === operator?.id;
+  const isActualDeptResponsable = !!selectedDept && operator?.departments?.[selectedDept] === 'responsable';
+  // Les actions sont liées au département sélectionné, jamais au rôle aplati le plus haut.
+  const canManageDeptMembers = isGlobalAuthority || isBranchPastor || isTutoredMinistry || isActualDeptResponsable;
+  const canEditMemberDepartments = isGlobalAuthority || isBranchPastor || isTutoredMinistry;
 
   // Branche manquante d'un département scopé : présente si `branch` est défini et qu'aucune
   // fiche liée (même familyId, ou même id pour une fiche pas encore ratachée) ne couvre l'autre
@@ -218,7 +220,7 @@ export default function DepartmentsView({ activeBranch, simulatedRole, members =
   // Un membre en attente de validation Bloom Bus ne doit PAS apparaître aussi dans l'onglet
   // Stagiaires : sinon on le promeut Boss depuis là en court-circuitant « Réceptions à valider ».
   const deptStagiaires = deptMembers.filter(m => m.level === 'stagiaire' && m.deptAttachmentStatus !== 'pending');
-  const canValidate = ['Responsable', 'Coach', 'Leader', 'Pasteur', 'Ministre', 'Admin', 'Super Admin'].includes(simulatedRole);
+  const canValidate = canManageDeptMembers;
   // Membres enregistrés directement par un responsable hiérarchique Bloom Bus (chemin distinct
   // de la procédure ADN "nouveau") — rattachement à ce département en attente de validation.
   const pendingBloomBusAttachment = deptMembersAll.filter(m => m.deptAttachmentStatus === 'pending' && (m.deptAttachmentOrigin === 'bloom_bus' || m.deptAttachmentOrigin === 'self_registration'));
@@ -376,7 +378,7 @@ export default function DepartmentsView({ activeBranch, simulatedRole, members =
   };
 
   // Spec (§11.3) — un Responsable délègue une capacité dans son propre département.
-  const isDeptResponsable = simulatedRole === 'Responsable';
+  const isDeptResponsable = isActualDeptResponsable;
   const internalTabs = [
     { id: 'members', label: 'Membres' },
     { id: 'hierarchy', label: 'Hiérarchie & Assignations' },
@@ -412,10 +414,12 @@ export default function DepartmentsView({ activeBranch, simulatedRole, members =
     setDelegations(prev => [{
       id: `del_${Date.now()}`,
       from: `${deptResponsable.firstName} ${deptResponsable.lastName}`,
+      fromId: operator?.id,
       to: `${target.firstName} ${target.lastName}`,
       // §11.3 — l'id réel du délégataire : c'est ce qui rend la délégation effective
       // (hasCapability), pas seulement affichée dans la console.
       toId: target.id,
+      departmentId: selectedDept ?? undefined,
       scope: deptScopeLabel,
       right: delRight,
     }, ...prev]);

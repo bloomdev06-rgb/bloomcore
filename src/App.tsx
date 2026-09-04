@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, lazy, Suspense } from 'react';
-import { load, save, seeds, seedOrEmpty, useDepartments, useMinistries, useBusLines, useAdmins, deriveTimeBasedNotifications, apiBootstrap, apiPut, clearAuthToken, apiLogout, enableSync, canViewAnyRole, openNotificationStream, apiFetchCollection, labelFor, apiCreateMember, apiPatchMember, apiDeleteMember } from './data';
+import { load, save, seeds, seedOrEmpty, useDepartments, useMinistries, useBusLines, useAdmins, deriveTimeBasedNotifications, apiBootstrap, apiPut, clearAuthToken, apiLogout, purgeClientData, enableSync, canViewAnyRole, openNotificationStream, apiFetchCollection, labelFor, apiCreateMember, apiPatchMember, apiDeleteMember } from './data';
 import { hasServerSession } from './data/api';
 import { reportName } from './data/reportNames';
 import { resolveMemberRole, resolveMemberRoles } from './data/roles';
@@ -52,6 +52,7 @@ const BloomBusView = lazyRetry(() => import('./components/BloomBusView'));
 const EventsView = lazyRetry(() => import('./components/EventsView'));
 const ReportsView = lazyRetry(() => import('./components/ReportsView'));
 const ProgrammesView = lazyRetry(() => import('./components/ProgrammesView'));
+const PoleView = lazyRetry(() => import('./components/PoleView'));
 const FormationsView = lazyRetry(() => import('./components/FormationsView'));
 const MinisteresView = lazyRetry(() => import('./components/MinisteresView'));
 const DepartmentsView = lazyRetry(() => import('./components/DepartmentsView'));
@@ -108,13 +109,16 @@ export default function App() {
   const [departments, setDepartments] = useState<Department[]>(useDepartments);
   // P4.19 — mock auth : identifie l'utilisateur connecté, remplace le hardcode mem_1.
   const [loggedInMemberId, setLoggedInMemberId] = useState<string | null>(() => load('bc_loggedInMemberId', null));
+  const [bootstrapState, setBootstrapState] = useState<'idle' | 'loading' | 'ready' | 'error'>(() => hasServerSession() ? 'loading' : 'idle');
+  const [bootstrapNonce, setBootstrapNonce] = useState(0);
+  const [loggingOut, setLoggingOut] = useState(false);
   const ministrySeeds = useMinistries();
   const adminAccounts = useAdmins();
   const busLines = useBusLines();
   const operator = members.find(m => m.id === loggedInMemberId) ?? members[0];
   const activeRoles = useMemo(() => {
     if (!operator) return ['Membre'];
-    return operator.testRole
+    return import.meta.env.DEV && operator.testRole
       ? [operator.testRole]
       : [...resolveMemberRoles(operator, adminAccounts, ministrySeeds, departments)];
   }, [operator, adminAccounts, ministrySeeds, departments]);
@@ -126,12 +130,13 @@ export default function App() {
   // a écrasé des promotions de membres par une version antérieure : le cache, plus ancien que
   // le serveur, l'emportait quand même (computeDelta traite tout item différent comme un
   // upsert, sans comparer les dates). Voir src/data/useSyncedSave.ts.
-  useSyncedSave('bc_members', members);
-  useSyncedSave('bc_events', events);
-  useSyncedSave('bc_reports', reports);
-  useSyncedSave('bc_audits', audits);
-  useSyncedSave('bc_notifications', notifications);
-  useSyncedSave('bc_permissions', permissionMatrix);
+  const authenticatedPersistence = !!loggedInMemberId && bootstrapState === 'ready';
+  useSyncedSave('bc_members', members, authenticatedPersistence);
+  useSyncedSave('bc_events', events, authenticatedPersistence);
+  useSyncedSave('bc_reports', reports, authenticatedPersistence);
+  useSyncedSave('bc_audits', audits, authenticatedPersistence);
+  useSyncedSave('bc_notifications', notifications, authenticatedPersistence);
+  useSyncedSave('bc_permissions', permissionMatrix, authenticatedPersistence);
   // Garde globale : re-valide activeTab à chaque changement de rôle ou de matrice, plutôt que
   // de dépendre uniquement de l'effet de bord local du bouton de rôle dans Sidebar.tsx.
   // 'profile' est volontairement hors matrice (chacun voit toujours son propre profil).
@@ -141,11 +146,11 @@ export default function App() {
       return;
     }
   }, [activeRoles, activeTab, permissionMatrix]);
-  useSyncedSave('bc_settings', settings);
-  useSyncedSave('bc_forms', forms);
+  useSyncedSave('bc_settings', settings, authenticatedPersistence);
+  useSyncedSave('bc_forms', forms, authenticatedPersistence);
   // Jamais de sauvegarde au montage : elle repousserait le cache local (possiblement vide
   // ou périmé) et pourrait EFFACER les départements côté serveur. Voir useSyncedSave.
-  useSyncedSave('bc_departments', departments);
+  useSyncedSave('bc_departments', departments, authenticatedPersistence);
   useEffect(() => { save('bc_loggedInMemberId', loggedInMemberId); }, [loggedInMemberId]);
   // CHARTE-GRAPHIQUE.md §10 — cascade [data-branch] sur la racine, pas seulement le switcher.
   useEffect(() => { document.documentElement.setAttribute('data-branch', activeBranch); }, [activeBranch]);
@@ -166,8 +171,22 @@ export default function App() {
   // (deps [loggedInMemberId]) : les lectures deviennent auth-gated côté serveur,
   // le premier fetch pré-login peut donc être 401 → re-fetch une fois connecté.
   useEffect(() => {
-    apiBootstrap().then((data) => {
-      if (!data) return;
+    if (!loggedInMemberId) { setBootstrapState('idle'); return; }
+    let cancelled = false;
+    setBootstrapState('loading');
+    apiBootstrap().then(async (result) => {
+      if (cancelled) return;
+      if (result.status === 'unauthorized') {
+        clearAuthToken();
+        await purgeClientData();
+        if (!cancelled) window.location.reload();
+        return;
+      }
+      if (result.status === 'unavailable') {
+        setBootstrapState('error');
+        return;
+      }
+      const data = result.data;
       // Normalise departments (C3) : un membre serveur sans ce champ ferait crasher
       // Object.keys(m.departments) dans Members/Departments/scope.
       if (data.members) {
@@ -199,34 +218,55 @@ export default function App() {
       for (const name of ['delegations', 'ministries', 'certifications', 'admins', 'activities', 'integration_reports', 'projects', 'bus_lines']) {
         if (data[name]) save(`bc_${name}`, data[name]);
       }
-    }).finally(() => {
+      setBootstrapState('ready');
       // Sync serveur activée seulement après avoir lu l'état serveur (B2) : évite que les
       // effets de persistance du montage n'écrasent des données serveur plus fraîches.
       enableSync();
     });
-  }, [loggedInMemberId]);
+    return () => { cancelled = true; };
+  }, [loggedInMemberId, bootstrapNonce]);
 
   // Temps réel (§7) : à chaque poke SSE du serveur (nouvelle notif / alerte
   // d'intégration), re-fetch la collection notifications sans re-bootstrap complet.
   useEffect(() => {
     if (!loggedInMemberId) return;
-    const close = openNotificationStream(() => {
-      void apiFetchCollection('notifications').then((list) => {
-        if (list) setNotifications(list as AppNotification[]);
+    const refresh = (collection: string) => {
+      void apiFetchCollection(collection).then((list) => {
+        if (!list) return;
+        if (collection === 'notifications') setNotifications(list as AppNotification[]);
+        if (collection === 'members') setMembers((list as Member[]).map(m => ({ ...m, departments: m.departments ?? {} })));
+        if (collection === 'reports') setReports(list as Report[]);
+        if (collection === 'departments') setDepartments(list as Department[]);
+        if (collection === 'activities') save('bc_activities', list);
       });
-    });
-    return close;
+    };
+    const close = openNotificationStream(refresh);
+    const refreshMembers = () => {
+      if (document.visibilityState === 'visible') refresh('members');
+    };
+    window.addEventListener('focus', refreshMembers);
+    document.addEventListener('visibilitychange', refreshMembers);
+    return () => {
+      close();
+      window.removeEventListener('focus', refreshMembers);
+      document.removeEventListener('visibilitychange', refreshMembers);
+    };
   }, [loggedInMemberId]);
 
-  const handleLogout = () => {
+  const handleLogout = async () => {
+    if (loggingOut) return;
+    setLoggingOut(true);
     clearAuthToken();
     // Phase 6 (T6.1) — efface aussi le cookie de session côté serveur. Fire-and-forget :
     // le logout local (ci-dessus/ci-dessous) ne dépend jamais de cet appel réseau.
-    void apiLogout();
+    const serverLogout = apiLogout();
     // Poste partagé (contexte église) : purge toutes les données métier du compte, sinon
     // l'utilisateur suivant les verrait (F3). Le reload remonte l'app sur des seeds propres —
     // sans ça, l'état React en mémoire re-persisterait immédiatement les données purgées.
-    Object.keys(localStorage).filter((k) => k.startsWith('bc_')).forEach((k) => localStorage.removeItem(k));
+    const purge = purgeClientData();
+    setLoggedInMemberId(null); // ferme immédiatement SSE et les vues du compte courant
+    await purge;
+    await serverLogout;
     window.location.reload();
   };
 
@@ -263,7 +303,9 @@ export default function App() {
   useEffect(() => {
     if (!loggedInMemberId) return;
     const op = members.find((m) => m.id === loggedInMemberId);
-    if (op) setSimulatedRole(op.testRole || resolveMemberRole(op, adminAccounts, ministrySeeds, departments));
+    if (op) setSimulatedRole(import.meta.env.DEV && op.testRole
+      ? op.testRole
+      : resolveMemberRole(op, adminAccounts, ministrySeeds, departments));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loggedInMemberId, members]);
 
@@ -624,13 +666,10 @@ export default function App() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeRoles, activeBranch, operator?.id]);
-  // §6.2 — une notification ciblée (escalade J+7) n'est visible que du Ministre visé ;
-  // Admin/Super Admin gardent une vue d'ensemble (même principe que le journal d'audit).
-  const visibleNotifications = notifications
-    .filter(n =>
-      !n.targetMemberId || n.targetMemberId === operator?.id || ['Admin', 'Super Admin'].includes(simulatedRole)
-    )
-    .sort((a, b) => b.timestamp.localeCompare(a.timestamp));
+  // Le serveur a déjà retiré toutes les notifications hors périmètre. Ne pas les re-filtrer
+  // par un rôle UI unique : un responsable/ministre cumulant plusieurs fonctions doit voir
+  // l'union exacte des files qu'il supervise.
+  const visibleNotifications = [...notifications].sort((a, b) => b.timestamp.localeCompare(a.timestamp));
 
   // Render view depending on activeTab and simulated role permissions
   const renderActiveView = () => {
@@ -661,6 +700,7 @@ export default function App() {
             onAddReport={handleAddReport}
             activeBranch={activeBranch}
             simulatedRole={simulatedRole}
+            activeRoles={activeRoles}
             operator={operator}
             audits={audits}
             permissionMatrix={permissionMatrix}
@@ -669,6 +709,17 @@ export default function App() {
             onFocusMemberHandled={() => setFocusMemberId(null)}
           />
         );
+      case 'pole':
+        return operator ? <PoleView
+          operator={operator}
+          members={members}
+          reports={reports}
+          departments={departments}
+          onMemberChanged={(updated) => setMembers((prev) => prev.some((m) => m.id === updated.id)
+            ? prev.map((m) => m.id === updated.id ? updated : m)
+            : [...prev, updated])}
+          onReportAdded={(report) => setReports((prev) => prev.some((r) => r.id === report.id) ? prev : [...prev, report])}
+        /> : null;
       case 'integration':
         return (
           <NouveauxView
@@ -749,6 +800,7 @@ export default function App() {
             activeRoles={activeRoles}
             members={members}
             forms={forms}
+            operator={operator}
           />
         );
       case 'projects':
@@ -766,6 +818,7 @@ export default function App() {
           <CursusView
             activeBranch={activeBranch}
             simulatedRole={simulatedRole}
+            activeRoles={activeRoles}
             members={members}
             onUpdateMember={handleUpdateMember}
             onAddReport={handleAddReport}
@@ -809,8 +862,25 @@ export default function App() {
     }
   };
 
+  if (loggingOut) {
+    return <div className="flex min-h-dvh items-center justify-center bg-bc-canvas text-sm font-bold text-bc-text-secondary">Déconnexion sécurisée…</div>;
+  }
+
   if (!loggedInMemberId) {
     return <AuthView members={members} onLogin={setLoggedInMemberId} />;
+  }
+
+  if (bootstrapState !== 'ready') {
+    return <div className="flex min-h-dvh items-center justify-center bg-bc-canvas p-6">
+      <div className="w-full max-w-md rounded-2xl border border-bc-border bg-white p-6 text-center">
+        <h1 className="font-ui text-xl font-extrabold text-bc-text">{bootstrapState === 'error' ? 'Connexion au serveur impossible' : 'Chargement sécurisé…'}</h1>
+        <p className="mt-2 text-sm text-bc-text-secondary">{bootstrapState === 'error' ? 'Les données en cache restent masquées pour protéger les informations du compte précédent.' : 'Vérification de votre session et de vos droits.'}</p>
+        {bootstrapState === 'error' && <div className="mt-5 flex flex-col gap-2 sm:flex-row sm:justify-center">
+          <button onClick={() => setBootstrapNonce((n) => n + 1)} className="min-h-12 rounded-full bg-bc-green px-5 text-sm font-bold text-white">Réessayer</button>
+          <button onClick={() => void handleLogout()} className="min-h-12 rounded-full border border-bc-border px-5 text-sm font-bold text-bc-text">Se déconnecter</button>
+        </div>}
+      </div>
+    </div>;
   }
 
   return (

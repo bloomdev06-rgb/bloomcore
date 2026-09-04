@@ -1,6 +1,6 @@
 // Run: npx tsx src/data/scope.check.ts
 import assert from 'node:assert';
-import { inMemberScope, busInScope, directReportsOf, canFillReportFor, canManageAccountOf, rankOf, bestRank } from './scope.ts';
+import { inMemberScope, inMemberScopeForRoles, busInScope, directReportsOf, canFillReportFor, canManageAccountOf, rankOf, bestRank } from './scope.ts';
 import { Member, BloomBusEntity, Department, Ministry } from './types.ts';
 
 let nextId = 0;
@@ -33,6 +33,26 @@ const ministre = mk({ id: 'ministre_1' });
 assert.equal(inMemberScope(ministre, mk({ departments: { dept_1: 'membre' } }), 'Ministre', busLines, departments, ministries), true);
 assert.equal(inMemberScope(ministre, mk({ departments: { dept_2: 'membre' } }), 'Ministre', busLines, departments, ministries), false);
 
+// Rôles cumulés contextualisés : Responsable de dept_1 + simple membre de dept_2
+// ne donne aucune autorité sur les autres membres de dept_2.
+const multiResp = mk({ id: 'multi', departments: { dept_1: 'responsable', dept_2: 'membre' } });
+assert.equal(inMemberScopeForRoles(multiResp, mk({ departments: { dept_2: 'membre' } }), ['Responsable', 'Membre'], busLines, departments, ministries), false);
+assert.equal(inMemberScopeForRoles(multiResp, mk({ departments: { dept_1: 'membre' } }), ['Responsable', 'Membre'], busLines, departments, ministries), true);
+
+const poleLead = mk({ id: 'pole', departments: { dept_1: 'responsable_section' }, deptSections: { dept_1: 'sec_1' } });
+assert.equal(inMemberScopeForRoles(poleLead, mk({ departments: { dept_1: 'membre' }, deptSections: { dept_1: 'sec_1' } }), ['Responsable de section'], busLines, departments, ministries), true);
+assert.equal(inMemberScopeForRoles(poleLead, mk({ departments: { dept_1: 'membre' }, deptSections: { dept_1: 'sec_2' } }), ['Responsable de section'], busLines, departments, ministries), false);
+assert.equal(inMemberScope(mk({ branch: 'church' }), mk({ branch: 'church' }), 'Baptême', busLines, departments), true);
+assert.equal(inMemberScope(mk({ branch: 'church' }), mk({ branch: 'light' }), 'Baptême', busLines, departments), false);
+assert.equal(inMemberScope(mk({ branch: 'church' }), mk({ branch: 'church', level: 'nouveau' }), 'Intégration', busLines, departments), true);
+assert.equal(inMemberScope(mk({ branch: 'church' }), mk({ branch: 'church', level: 'boss' }), 'Intégration', busLines, departments), false);
+const integrationAndResp = mk({ id: 'integration_resp', branch: 'church', departments: { dept_1: 'responsable', dept_2: 'membre' } });
+assert.equal(inMemberScopeForRoles(
+  integrationAndResp,
+  mk({ branch: 'church', level: 'boss', departments: { dept_1: 'membre' } }),
+  ['Intégration', 'Responsable'], busLines, departments, ministries,
+), true, 'le rôle Intégration ne masque pas la portée d’un second rôle cumulé');
+
 // Capitaine — same bus only
 assert.equal(inMemberScope(mk({ bloomBusId: 'bus_a' }), mk({ bloomBusId: 'bus_a' }), 'Capitaine de Bus', busLines, departments), true);
 assert.equal(inMemberScope(mk({ bloomBusId: 'bus_a' }), mk({ bloomBusId: 'bus_b' }), 'Capitaine de Bus', busLines, departments), false);
@@ -45,23 +65,28 @@ assert.equal(inMemberScope(mk({ bloomBusId: 'bus_a' }), mk({ bloomBusId: 'bus_b'
 assert.equal(inMemberScope(mk({ gps: { lat: 0, lng: 0, commune: 'Cocody' } }), mk({ gps: { lat: 0, lng: 0, commune: 'Cocody' } }), 'Responsable de Commune', busLines, departments), true);
 assert.equal(inMemberScope(mk({ gps: { lat: 0, lng: 0, commune: 'Cocody' } }), mk({ gps: { lat: 0, lng: 0, commune: 'Yopougon' } }), 'Responsable de Commune', busLines, departments), false);
 
-// Shared-department proxy roles (Responsable/Adjoint/Coach/Leader)
+// Responsables/Adjoints : la fonction supervisrice doit être réellement tenue dans le département.
 assert.equal(inMemberScope(mk({ departments: { dept_1: 'responsable' } }), mk({ departments: { dept_1: 'membre' } }), 'Responsable', busLines, departments), true);
 assert.equal(inMemberScope(mk({ departments: { dept_1: 'responsable' } }), mk({ departments: { dept_2: 'membre' } }), 'Responsable', busLines, departments), false);
 
 // Correctif audit (Phase 4) — même département partagé, mais branches différentes : plus
 // de fuite cross-branche pour les rôles proxy-département.
 assert.equal(inMemberScope(mk({ branch: 'church', departments: { dept_1: 'responsable' } }), mk({ branch: 'light', departments: { dept_1: 'membre' } }), 'Responsable', busLines, departments), false);
-// deptBranches (Coach+ en département secondaire dans l'autre branche) rétablit la portée
-// pour CE département précis, sans affecter sa branche d'attache par ailleurs.
+// Coach/Leader : le partage d'un département ne suffit plus ; il faut une relation mentorId
+// explicite et la même branche d'attache.
 assert.equal(inMemberScope(
-  mk({ branch: 'church', departments: { dept_1: 'membre' }, deptBranches: { dept_1: 'light' } }),
-  mk({ branch: 'light', departments: { dept_1: 'membre' } }),
+  mk({ id: 'coach_explicit', branch: 'church', departments: { dept_1: 'membre' } }),
+  mk({ branch: 'church', departments: { dept_1: 'membre' }, mentorId: 'coach_explicit' }),
   'Coach', busLines, departments,
 ), true);
+assert.equal(inMemberScope(
+  mk({ id: 'coach_shared', branch: 'church', departments: { dept_1: 'membre' } }),
+  mk({ branch: 'church', departments: { dept_1: 'membre' } }),
+  'Coach', busLines, departments,
+), false);
 
-// Unhandled role fails open
-assert.equal(inMemberScope(mk(), mk(), 'Nouveau', busLines, departments), true);
+// Unhandled role fails closed.
+assert.equal(inMemberScope(mk(), mk(), 'Nouveau', busLines, departments), false);
 
 // Operator always sees themself
 assert.equal(inMemberScope(mk({ id: 'same' }), mk({ id: 'same' }), 'Coach', busLines, departments), true);

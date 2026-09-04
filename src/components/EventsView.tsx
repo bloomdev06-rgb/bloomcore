@@ -66,6 +66,7 @@ interface EventsViewProps {
   activeRoles?: string[];
   members?: Member[];
   forms?: FormDef[];
+  operator?: Member;
 }
 
 // Les types d'événement sont des chaînes libres (Culte, 80/20, Inside, Séminaire…)
@@ -102,7 +103,8 @@ export default function EventsView({
   simulatedRole,
   activeRoles = [simulatedRole],
   members = [],
-  forms = []
+  forms = [],
+  operator
 }: EventsViewProps) {
   // P1.4 — labels read live from FormBuilder's fd_adn FormDef, id-matched.
   const adnForm = forms.find((f) => f.id === 'fd_adn');
@@ -276,20 +278,30 @@ export default function EventsView({
 
   const handleSaveCounters = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!selectedEventId) return;
+    if (!selectedEventId || !operator) return;
 
     const targetEvent = events.find(ev => ev.id === selectedEventId);
     if (!targetEvent) return;
 
+    const authorName = `${operator.firstName} ${operator.lastName}`;
+    const authorRole = activeRoles[0] ?? simulatedRole;
+    const authority = activeRoles.some(role => ['Pasteur', 'Pasteur Principal', 'Admin', 'Super Admin'].includes(role));
+    const canWritePortiers = authority || activeRoles.includes('Portier');
+    const canWriteAdn = authority || activeRoles.includes('ADN');
+    const portiersDepartmentId = departments.find(d => d.specialFunction === 'portiers')?.id;
+    const adnDepartmentId = departments.find(d => d.specialFunction === 'adn')?.id;
+    const gdcDepartmentId = departments.find(d => d.specialFunction === 'gestion_cultes')?.id;
+
     // Generate Portiers report
     const portiersReport: Report = {
       id: `rep_portiers_${Date.now()}`,
-      authorId: 'mem_4', // Simulated Nathalie Eshun or Portier staff
-      authorName: 'Equipe Portiers',
-      authorRole: 'Responsable Portiers',
+      authorId: operator.id,
+      authorName,
+      authorRole,
       targetBranch: activeBranch,
       date: new Date().toISOString().split('T')[0],
       reportType: 'rapport_portiers',
+      departmentId: portiersDepartmentId,
       eventId: selectedEventId,
       confidential: false,
       content: {
@@ -303,12 +315,13 @@ export default function EventsView({
     // Generate ADN report
     const adnReport: Report = {
       id: `rep_adn_${Date.now()}`,
-      authorId: 'mem_3',
-      authorName: 'Kady Bamba',
-      authorRole: 'Responsable ADN',
+      authorId: operator.id,
+      authorName,
+      authorRole,
       targetBranch: activeBranch,
       date: new Date().toISOString().split('T')[0],
       reportType: 'rapport_adn',
+      departmentId: adnDepartmentId,
       eventId: selectedEventId,
       confidential: false,
       content: {
@@ -322,12 +335,13 @@ export default function EventsView({
     // Generate full culte synthesis report
     const culteReport: Report = {
       id: `rep_culte_${Date.now()}`,
-      authorId: 'mem_2',
-      authorName: 'Jean-Marc Kouamé',
-      authorRole: 'Responsable de Gestion des Cultes',
+      authorId: operator.id,
+      authorName,
+      authorRole,
       targetBranch: activeBranch,
       date: new Date().toISOString().split('T')[0],
       reportType: 'rapport_culte',
+      departmentId: gdcDepartmentId,
       eventId: selectedEventId,
       confidential: false,
       content: {
@@ -357,24 +371,30 @@ export default function EventsView({
     // Conciliation avec les onglets Dénombrement / ADN / Rapport de culte : un seul
     // rapport de chaque type par événement (upsert), sinon les stats doublent. Les
     // champs texte déjà remplis (prédicateur, thème…) ne sont pas écrasés par du vide.
-    const existingPortiers = (reports ?? []).find(r => r.reportType === 'rapport_portiers' && r.eventId === selectedEventId);
-    if (existingPortiers && onUpdateReport) {
-      onUpdateReport({ ...existingPortiers, content: { ...existingPortiers.content, ...portiersReport.content } });
-    } else {
-      onAddReport(portiersReport);
+    const existingPortiers = reports.find(r => r.reportType === 'rapport_portiers' && r.eventId === selectedEventId);
+    if (canWritePortiers && portiersDepartmentId) {
+      if (existingPortiers && onUpdateReport) {
+        onUpdateReport({ ...existingPortiers, content: { ...existingPortiers.content, ...portiersReport.content } });
+      } else {
+        onAddReport(portiersReport);
+      }
     }
-    const existingAdn = (reports ?? []).find(r => r.reportType === 'rapport_adn' && r.eventId === selectedEventId);
-    const existingCulte = (reports ?? []).find(r => r.reportType === 'rapport_culte' && r.eventId === selectedEventId);
-    if (existingAdn && onUpdateReport) {
-      onUpdateReport({ ...existingAdn, content: { ...existingAdn.content, ...adnReport.content } });
-    } else {
-      onAddReport(adnReport);
+    const existingAdn = reports.find(r => r.reportType === 'rapport_adn' && r.eventId === selectedEventId);
+    const existingCulte = reports.find(r => r.reportType === 'rapport_culte' && r.eventId === selectedEventId);
+    if (canWriteAdn && adnDepartmentId) {
+      if (existingAdn && onUpdateReport) {
+        onUpdateReport({ ...existingAdn, content: { ...existingAdn.content, ...adnReport.content } });
+      } else {
+        onAddReport(adnReport);
+      }
     }
-    if (existingCulte && onUpdateReport) {
-      const nonEmpty = Object.fromEntries(Object.entries(culteReport.content).filter(([, v]) => v !== '' && v !== undefined));
-      onUpdateReport({ ...existingCulte, content: { ...existingCulte.content, ...nonEmpty } });
-    } else {
-      onAddReport(culteReport);
+    if (gdcDepartmentId) {
+      if (existingCulte && onUpdateReport) {
+        const nonEmpty = Object.fromEntries(Object.entries(culteReport.content).filter(([, v]) => v !== '' && v !== undefined));
+        onUpdateReport({ ...existingCulte, content: { ...existingCulte.content, ...nonEmpty } });
+      } else {
+        onAddReport(culteReport);
+      }
     }
 
     // Clôture persistée (B1) : muter targetEvent.closed en place ne déclenchait aucun

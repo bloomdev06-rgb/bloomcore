@@ -140,6 +140,7 @@ async function reconcileVisibilityAccess(): Promise<void> {
   const permissions = ((await getKv('permissions')) ?? {}) as Record<string, Record<string, boolean>>;
   const required: Record<string, string[]> = {
     view_dashboard: ['Trésorier', 'Responsable de section'],
+    view_pole: ['Responsable de section'],
     view_bloombus: ['Trésorier', 'Responsable de section'],
     view_cursus: ['Trésorier', 'Responsable de section'],
     view_formations: ['Trésorier', 'Responsable de section'],

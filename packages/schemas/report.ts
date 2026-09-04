@@ -19,6 +19,7 @@ export const ReportSchema = z.object({
   reportType: z.enum(REPORT_TYPES),
   eventId: z.string().optional(),
   departmentId: z.string().optional(),
+  sectionId: z.string().optional(),
   confidential: z.boolean(),
   partagerAvecResponsableDept: z.boolean().optional(),
   validated: z.boolean().optional(),

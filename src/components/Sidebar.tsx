@@ -5,7 +5,7 @@ import {
   LayoutDashboard, Users, Grid, LayoutList, Bus, Calendar,
   Activity, Heart, GraduationCap, Shield, UserCog, Settings,
   FormInput, History, X, UserPlus, ChevronDown, FileText, Droplet,
-  UserCheck, ClipboardList, Plus, DoorOpen, LogOut
+  UserCheck, ClipboardList, Plus, DoorOpen, LogOut, UsersRound
 } from 'lucide-react';
 import { useMediaQuery } from '../hooks/useMediaQuery';
 import { useDepartments, useMinistries, canViewAnyRole } from '../data';
@@ -83,6 +83,7 @@ export default function Sidebar({
   const mainMenuItems = [
     { id: 'dashboard', label: 'Accueil', icon: LayoutDashboard },
     { id: 'members', label: 'Membres', icon: Users },
+    { id: 'pole', label: 'Mon pôle', icon: UsersRound },
     { id: 'ministeres', label: 'Ministères', icon: Grid },
     { id: 'departments', label: 'Départements', icon: LayoutList },
     { id: 'integration', label: 'Intégration', icon: UserPlus },

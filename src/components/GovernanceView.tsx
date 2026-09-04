@@ -65,7 +65,7 @@ export default function GovernanceView({
 
   // P1.1 — lignes "accès aux onglets" (view_*) éditables dans la matrice
   const TAB_LABELS: Record<string, string> = {
-    dashboard: 'Accueil', members: 'Membres', ministeres: 'Ministères',
+    dashboard: 'Accueil', members: 'Membres', pole: 'Mon pôle', ministeres: 'Ministères',
     departments: 'Départements', integration: 'Intégration', bloombus: 'Bloom Bus',
     events: 'Cultes & Événements', projects: 'Projets', cursus: 'Cursus Pastoral',
     formations: 'Formations', permissions: 'Permissions', accounts: 'Comptes & Admins',
@@ -82,7 +82,7 @@ export default function GovernanceView({
   const allCapabilities = [...capabilitiesList, ...viewCapabilities];
 
   // Colonnes dérivées de la matrice (ordre canonique), plus de liste en dur
-  const ROLE_ORDER = ['Super Admin', 'Admin', 'Pasteur Principal', 'Pasteur', 'Ministre', 'Responsable', 'Adjoint', 'Coach', 'Leader', 'Capitaine de Bus', 'Responsable de Zone', 'Responsable de Commune', 'ADN', 'Portier', 'GDC', 'Intégration', 'Membre', 'Nouveau'];
+  const ROLE_ORDER = ['Super Admin', 'Admin', 'Pasteur Principal', 'Pasteur', 'Ministre', 'Responsable', 'Adjoint', 'Responsable de section', 'Coach', 'Leader', 'Capitaine de Bus', 'Responsable de Zone', 'Responsable de Commune', 'ADN', 'Portier', 'GDC', 'Intégration', 'Membre', 'Nouveau'];
   const presentRoles = new Set(Object.values(permissionMatrix).flatMap(o => Object.keys(o)));
   const roles = ROLE_ORDER.filter(r => presentRoles.has(r));
   // §11.2 — config réservée à Admin / Pasteur Principal / Super Admin (pas 'Pasteur' générique).

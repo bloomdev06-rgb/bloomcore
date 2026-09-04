@@ -2,7 +2,7 @@ import React, { useState, useDeferredValue } from 'react';
 import { Branch, Member, PastoralCursus, Report } from '../types';
 import { Heart, User, ArrowUpCircle, FileText, Share2, Search, PenLine, LayoutList, Network, X } from 'lucide-react';
 import { useBusLines, useDepartments, useMinistries, labelFor } from '../data';
-import { inMemberScope } from '../data/scope';
+import { inMemberScopeForRoles } from '../data/scope';
 import { motion } from 'motion/react';
 import { staggerParent, staggerItem } from './ui/motion';
 import { Avatar } from './ui/Avatar';
@@ -11,6 +11,7 @@ import { Modal } from './ui/Modal';
 interface CursusViewProps {
   activeBranch: Branch;
   simulatedRole: string;
+  activeRoles: string[];
   members: Member[];
   onUpdateMember: (m: Member) => void;
   onAddReport?: (r: Report) => void;
@@ -23,7 +24,7 @@ const nextCursus = (c: PastoralCursus): PastoralCursus => CURSUS_ORDER[Math.min(
 const isTop = (c: PastoralCursus) => CURSUS_ORDER.indexOf(c) === CURSUS_ORDER.length - 1;
 
 
-export default function CursusView({ activeBranch, simulatedRole, members = [], onUpdateMember, onAddReport, operator }: CursusViewProps) {
+export default function CursusView({ activeBranch, simulatedRole, activeRoles, members = [], onUpdateMember, onAddReport, operator }: CursusViewProps) {
   const busLines = useBusLines();
   const departments = useDepartments();
   const ministries = useMinistries();
@@ -69,7 +70,7 @@ export default function CursusView({ activeBranch, simulatedRole, members = [], 
   const cursusBase = members.filter(m =>
     m.pastoralCursus &&
     m.pastoralCursus !== 'aucun' &&
-    (!operator || inMemberScope(operator, m, simulatedRole, busLines, departments, ministries))
+    (!operator || inMemberScopeForRoles(operator, m, activeRoles, busLines, departments, ministries))
   );
   const cursusMembers = cursusBase.filter(m => m.branch === operatorBranch);
 

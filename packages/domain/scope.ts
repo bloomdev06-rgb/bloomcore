@@ -69,9 +69,10 @@ export const CROSS_BRANCH_ROLES = ['Super Admin', 'Admin', 'Pasteur Principal'];
 export const MULTI_BRANCH_ROLES = CROSS_BRANCH_ROLES;
 // La vue « Global » (consolidation des 2 branches) est réservée au staff.
 export const GLOBAL_VIEW_ROLES = CROSS_BRANCH_ROLES;
-// ponytail: proxy via shared department, not a real mentor/filleul link — upgrade
-// to a dedicated relation once that model exists.
-const DEPARTMENT_PROXY_ROLES = ['Responsable', 'Adjoint', 'Coach', 'Leader'];
+const DEPARTMENT_SUPERVISOR_FUNCTION: Record<string, string> = {
+  Responsable: 'responsable',
+  Adjoint: 'adjoint',
+};
 
 // Point 1 — seuls ces rôles peuvent tenir un département secondaire dans l'AUTRE branche
 // (Member.deptBranches) ; Leader et Membre restent cantonnés à leur branche d'attache.
@@ -124,16 +125,32 @@ export function canManageAccountOf(
   operatorRoles: string[],
   target: Member,
   targetRoles: string[],
-  scopeRole: string,
+  _scopeRole: string,
   busLines: BloomBusEntity[],
   departments: Department[],
   ministries: Ministry[] = [],
 ): boolean {
   if (target.id === operator.id) return false;
-  if (CROSS_BRANCH_ROLES.includes(scopeRole)) return true;
-  if (scopeRole === 'Pasteur') return operator.branch === target.branch;
-  if (!inMemberScope(operator, target, scopeRole, busLines, departments, ministries)) return false;
+  if (!inMemberScopeForRoles(operator, target, operatorRoles, busLines, departments, ministries)) return false;
   return bestRank(operatorRoles) < bestRank(targetRoles);
+}
+
+/**
+ * Union des périmètres réellement détenus par un opérateur. Les rôles sont cumulables,
+ * mais chacun reste attaché à sa source : être Responsable de D1 ne transforme jamais
+ * une simple appartenance à D2 en responsabilité sur D2.
+ */
+export function inMemberScopeForRoles(
+  operator: Member,
+  target: Member,
+  roles: Iterable<string>,
+  busLines: BloomBusEntity[],
+  departments: Department[],
+  ministries: Ministry[] = [],
+): boolean {
+  if (target.id === operator.id) return true;
+  return [...new Set(roles)].some((role) =>
+    inMemberScope(operator, target, role, busLines, departments, ministries));
 }
 
 export function inMemberScope(
@@ -171,8 +188,11 @@ export function inMemberScope(
     return !!operatorCommune && operatorCommune === targetCommune;
   }
 
-  if (DEPARTMENT_PROXY_ROLES.includes(role)) {
-    const operatorDeptIds = Object.keys(operator.departments);
+  const supervisorFunction = DEPARTMENT_SUPERVISOR_FUNCTION[role];
+  if (supervisorFunction) {
+    const operatorDeptIds = Object.entries(operator.departments ?? {})
+      .filter(([, fn]) => fn === supervisorFunction)
+      .map(([id]) => id);
     const targetDeptIds = Object.keys(target.departments);
     // Correctif audit (validé, Phase 4) — un même département partagé entre les deux branches
     // ne donne portée que sur les membres qui y servent au nom de LA MÊME branche que
@@ -183,9 +203,35 @@ export function inMemberScope(
       targetDeptIds.includes(id) && effectiveBranchFor(operator, id) === effectiveBranchFor(target, id));
   }
 
-  // ponytail: fail-open for roles not covered above — the page-level
-  // `view_members` gate already restricts who reaches this far.
-  return true;
+  // Coach/Leader : la portée est la relation d'accompagnement explicite, pas une simple
+  // appartenance au même département (qui exposait tous les collègues du département).
+  if (role === 'Coach' || role === 'Leader') {
+    return target.mentorId === operator.id && operator.branch === target.branch;
+  }
+
+  // Responsable de pôle/section : uniquement les personnes rattachées à SON pôle dans
+  // le même département et la même branche effective.
+  if (role === 'Responsable de section') {
+    return Object.entries(operator.departments ?? {}).some(([deptId, fn]) => {
+      const sectionId = operator.deptSections?.[deptId];
+      return fn === 'responsable_section'
+        && !!sectionId
+        && target.departments?.[deptId] !== undefined
+        && target.deptSections?.[deptId] === sectionId
+        && effectiveBranchFor(operator, deptId) === effectiveBranchFor(target, deptId);
+    });
+  }
+
+  // Outils transverses bornés : Baptême travaille sur les personnes de sa branche ;
+  // Intégration uniquement sur les nouveaux/demandes encore en traitement.
+  if (role === 'Baptême') return operator.branch === target.branch;
+  if (role === 'Intégration') {
+    return operator.branch === target.branch
+      && (target.level === 'nouveau' || target.deptAttachmentStatus === 'pending');
+  }
+
+  // Rôle inconnu ou sans portée métier : refus par défaut.
+  return false;
 }
 
 // Bloom Bus hierarchy/cloisonnement (P4.4bis) — le TITRE organisationnel (Ministre,

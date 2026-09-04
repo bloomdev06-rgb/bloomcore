@@ -27,6 +27,8 @@ import { loginKey, isLocked, recordFail, clearFails, tooManyRequests } from './r
 import { redisHealthy } from './redis.ts';
 import { getStorage, SIGNED_URL_TTL_SEC } from './storage.ts';
 import { z } from 'zod';
+import { effectiveBranchFor } from '../packages/domain/scope.ts';
+import type { Member } from '../packages/domain/types.ts';
 import { MemberSchema, MemberPatchSchema } from '../packages/schemas/member.ts';
 import { ReportSchema, ReportPatchSchema } from '../packages/schemas/report.ts';
 import {
@@ -616,6 +618,7 @@ app.post('/api/v1/members', requireAuth, async (req, res) => {
     const body = await deltaToWhole('members', [member], []);
     await assertCanWrite('members', (req as any).rbac, body);
     const { added } = await applyWrite('members', body, undefined, await preservedIds('members', (req as any).rbac));
+    poke('members');
     // Spec : "compte créé à l'enrôlement, le membre définit son mot de passe via lien" —
     // identique au comportement du PUT whole-array (voir plus bas dans ce fichier).
     for (const m of added) await issueAuthLink(m, 'activate');
@@ -639,6 +642,7 @@ app.patch('/api/v1/members/:id', requireAuth, async (req, res) => {
     await assertCanWrite('members', (req as any).rbac, body);
     const { added, changed } = await applyWrite('members', body, undefined, await preservedIds('members', (req as any).rbac));
     const result = [...added, ...changed].find((m: any) => String(m.id) === String(req.params.id)) ?? merged;
+    poke('members');
     // Validation d'un rattachement en attente (Bloom Bus ou auto-inscription, cf.
     // deptAttachmentStatus/Origin) : c'est SEULEMENT à ce moment-là que le compte reçoit son
     // lien d'activation — pas à la création (le membre ne doit pas pouvoir se connecter avant
@@ -662,7 +666,135 @@ app.delete('/api/v1/members/:id', requireAuth, async (req, res) => {
     const body = await deltaToWhole('members', [], [req.params.id]);
     await assertCanWrite('members', (req as any).rbac, body);
     await applyWrite('members', body, undefined, await preservedIds('members', (req as any).rbac));
+    poke('members');
     return res.status(204).end();
+  } catch (e) {
+    if (e instanceof GuardError) return res.status(e.status).json({ error: e.message });
+    throw e;
+  }
+});
+
+function assertOwnPole(ctx: RbacContext, departmentId: string, sectionId: string): void {
+  if (ctx.member.departments?.[departmentId] !== 'responsable_section'
+    || ctx.member.deptSections?.[departmentId] !== sectionId) {
+    throw new GuardError(403, 'pôle: vous ne dirigez pas ce pôle');
+  }
+}
+
+async function poleContext(ctx: RbacContext, departmentId: string, sectionId: string) {
+  assertOwnPole(ctx, departmentId, sectionId);
+  const departments = await readCollection('departments') as any[];
+  const department = departments.find((d) => d.id === departmentId && d.sections?.some((s: any) => s.id === sectionId));
+  if (!department) throw new GuardError(404, 'pôle: département ou pôle introuvable');
+  const members = await readCollection('members', true) as Member[];
+  return { department, members };
+}
+
+// Endpoints d'intention « Mon pôle ». Ils n'exposent jamais le PATCH membre complet :
+// un responsable de pôle peut uniquement rattacher/détacher une personne de SON pôle.
+app.get('/api/v1/poles/:departmentId/:sectionId/candidates', requireAuth, async (req, res) => {
+  try {
+    const ctx = (req as any).rbac as RbacContext;
+    const { members } = await poleContext(ctx, req.params.departmentId, req.params.sectionId);
+    const candidates = members.filter((m: any) => !m.deletedAt
+      && m.id !== ctx.member.id
+      && m.departments?.[req.params.departmentId] !== undefined
+      && !m.deptSections?.[req.params.departmentId]
+      && m.departments?.[req.params.departmentId] !== 'responsable_section'
+      && !['nouveau', 'stagiaire'].includes(m.level)
+      && m.deptAttachmentStatus !== 'pending'
+      && m.deptAttachmentStatus !== 'rejected'
+      && effectiveBranchFor(m, req.params.departmentId) === effectiveBranchFor(ctx.member, req.params.departmentId));
+    return res.json(candidates.map((m) => ({ id: m.id, firstName: m.firstName, lastName: m.lastName, level: m.level, avatarUrl: m.avatarUrl })));
+  } catch (e) {
+    if (e instanceof GuardError) return res.status(e.status).json({ error: e.message });
+    throw e;
+  }
+});
+
+app.post('/api/v1/poles/:departmentId/:sectionId/members/:memberId', requireAuth, async (req, res) => {
+  try {
+    const ctx = (req as any).rbac as RbacContext;
+    const { members } = await poleContext(ctx, req.params.departmentId, req.params.sectionId);
+    const target = members.find((m: any) => m.id === req.params.memberId && !m.deletedAt);
+    if (!target) throw new GuardError(404, 'pôle: membre introuvable');
+    if (target.departments?.[req.params.departmentId] === undefined
+      || target.departments?.[req.params.departmentId] === 'responsable_section'
+      || target.deptAttachmentStatus === 'pending'
+      || target.deptAttachmentStatus === 'rejected'
+      || ['nouveau', 'stagiaire'].includes(target.level)
+      || effectiveBranchFor(target, req.params.departmentId) !== effectiveBranchFor(ctx.member, req.params.departmentId)) {
+      throw new GuardError(403, 'pôle: ce membre ne peut pas être ajouté par le Responsable de pôle');
+    }
+    if (target.deptSections?.[req.params.departmentId]) {
+      throw new GuardError(409, 'pôle: ce membre appartient déjà à un pôle');
+    }
+    const updated = { ...target, deptSections: { ...(target.deptSections ?? {}), [req.params.departmentId]: req.params.sectionId } };
+    const body = members.filter((m: any) => !m.deletedAt).map((m) => m.id === target.id ? updated : m);
+    const { changed } = await applyWrite('members', body);
+    poke('members');
+    return res.json(changed.find((m: any) => m.id === target.id) ?? updated);
+  } catch (e) {
+    if (e instanceof GuardError) return res.status(e.status).json({ error: e.message });
+    throw e;
+  }
+});
+
+app.delete('/api/v1/poles/:departmentId/:sectionId/members/:memberId', requireAuth, async (req, res) => {
+  try {
+    const ctx = (req as any).rbac as RbacContext;
+    const { members } = await poleContext(ctx, req.params.departmentId, req.params.sectionId);
+    const target = members.find((m: any) => m.id === req.params.memberId && !m.deletedAt);
+    if (!target || target.deptSections?.[req.params.departmentId] !== req.params.sectionId) {
+      throw new GuardError(404, 'pôle: membre absent de votre pôle');
+    }
+    if (target.id === ctx.member.id || target.departments?.[req.params.departmentId] === 'responsable_section') {
+      throw new GuardError(403, 'pôle: retrait du Responsable de pôle interdit');
+    }
+    const deptSections = { ...(target.deptSections ?? {}) };
+    delete deptSections[req.params.departmentId];
+    const updated = { ...target, deptSections };
+    const body = members.filter((m: any) => !m.deletedAt).map((m) => m.id === target.id ? updated : m);
+    const { changed } = await applyWrite('members', body);
+    poke('members');
+    return res.json(changed.find((m: any) => m.id === target.id) ?? updated);
+  } catch (e) {
+    if (e instanceof GuardError) return res.status(e.status).json({ error: e.message });
+    throw e;
+  }
+});
+
+const PoleFollowupSchema = z.object({ memberId: z.string().min(1), notes: z.string().trim().min(1).max(5000) }).strict();
+app.post('/api/v1/poles/:departmentId/:sectionId/followups', requireAuth, async (req, res) => {
+  const parsed = PoleFollowupSchema.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: 'pôle: membre et notes de suivi requis' });
+  try {
+    const ctx = (req as any).rbac as RbacContext;
+    const { members } = await poleContext(ctx, req.params.departmentId, req.params.sectionId);
+    const target = members.find((m: any) => m.id === parsed.data.memberId && !m.deletedAt);
+    if (!target || target.deptSections?.[req.params.departmentId] !== req.params.sectionId
+      || effectiveBranchFor(target, req.params.departmentId) !== effectiveBranchFor(ctx.member, req.params.departmentId)) {
+      throw new GuardError(403, 'pôle: suivi hors de votre pôle');
+    }
+    const report = ReportSchema.parse({
+      id: `rep_pole_${randomUUID()}`,
+      authorId: ctx.member.id,
+      authorName: `${ctx.member.firstName} ${ctx.member.lastName}`,
+      authorRole: 'Responsable de section',
+      targetBranch: effectiveBranchFor(ctx.member, req.params.departmentId),
+      date: new Date().toISOString().slice(0, 10),
+      reportType: 'rapport_suivi_coach',
+      departmentId: req.params.departmentId,
+      sectionId: req.params.sectionId,
+      confidential: true,
+      partagerAvecResponsableDept: true,
+      content: { memberId: target.id, notes: parsed.data.notes },
+    });
+    const reports = await readCollection('reports', true);
+    const body = [...reports.filter((r: any) => !r.deletedAt), report];
+    const { added } = await applyWrite('reports', body);
+    poke('reports');
+    return res.status(201).json(added.find((r: any) => r.id === report.id) ?? report);
   } catch (e) {
     if (e instanceof GuardError) return res.status(e.status).json({ error: e.message });
     throw e;
@@ -682,6 +814,7 @@ app.post('/api/v1/reports', requireAuth, async (req, res) => {
     const body = await deltaToWhole('reports', [report], []);
     await assertCanWrite('reports', (req as any).rbac, body);
     const { added } = await applyWrite('reports', body, undefined, await preservedIds('reports', (req as any).rbac));
+    poke('reports');
     return res.status(201).json(added.find((r: any) => String(r.id) === String(report.id)) ?? report);
   } catch (e) {
     if (e instanceof GuardError) return res.status(e.status).json({ error: e.message });
@@ -701,6 +834,7 @@ app.patch('/api/v1/reports/:id', requireAuth, async (req, res) => {
     const body = await deltaToWhole('reports', [merged], []);
     await assertCanWrite('reports', (req as any).rbac, body);
     const { added, changed } = await applyWrite('reports', body, undefined, await preservedIds('reports', (req as any).rbac));
+    poke('reports');
     return res.json([...added, ...changed].find((r: any) => String(r.id) === String(req.params.id)) ?? merged);
   } catch (e) {
     if (e instanceof GuardError) return res.status(e.status).json({ error: e.message });
@@ -716,6 +850,7 @@ app.delete('/api/v1/reports/:id', requireAuth, async (req, res) => {
     const body = await deltaToWhole('reports', [], [req.params.id]);
     await assertCanWrite('reports', (req as any).rbac, body);
     await applyWrite('reports', body, undefined, await preservedIds('reports', (req as any).rbac));
+    poke('reports');
     return res.status(204).end();
   } catch (e) {
     if (e instanceof GuardError) return res.status(e.status).json({ error: e.message });
@@ -737,6 +872,7 @@ async function afterCrudWrite(name: string, added: any[]): Promise<void> {
     await dispatch(added, await readCollection('members'), await getKv('settings'));
     poke();
   }
+  if (['members', 'reports', 'departments', 'activities'].includes(name)) poke(name);
 }
 
 function registerCrudEndpoints(name: string, Schema: { safeParse: (v: unknown) => any }, PatchSchema: { safeParse: (v: unknown) => any }): void {
@@ -775,6 +911,7 @@ function registerCrudEndpoints(name: string, Schema: { safeParse: (v: unknown) =
       const body = await deltaToWhole(name, [merged], []);
       await assertCanWrite(name, (req as any).rbac, body);
       const { added, changed } = await applyWrite(name, body, undefined, await preservedIds(name, (req as any).rbac));
+      await afterCrudWrite(name, added);
       return res.json([...added, ...changed].find((it: any) => String(it.id) === String(req.params.id)) ?? merged);
     } catch (e) {
       if (e instanceof GuardError) return res.status(e.status).json({ error: e.message });
@@ -790,6 +927,7 @@ function registerCrudEndpoints(name: string, Schema: { safeParse: (v: unknown) =
       const body = await deltaToWhole(name, [], [req.params.id]);
       await assertCanWrite(name, (req as any).rbac, body);
       await applyWrite(name, body, undefined, await preservedIds(name, (req as any).rbac));
+      await afterCrudWrite(name, []);
       return res.status(204).end();
     } catch (e) {
       if (e instanceof GuardError) return res.status(e.status).json({ error: e.message });
@@ -853,6 +991,7 @@ app.post('/api/v1/events/:id/close', requireAuth, async (req, res) => {
     const reportsBody = await deltaToWhole('reports', merged, []);
     await assertCanWrite('reports', (req as any).rbac, reportsBody);
     await applyWrite('reports', reportsBody, undefined, await preservedIds('reports', (req as any).rbac));
+    poke('reports');
 
     const closedEvent = { ...event, closed: true };
     const eventsBody = await deltaToWhole('events', [closedEvent], []);
@@ -929,6 +1068,7 @@ app.put('/api/v1/:name', requireAuth, async (req, res) => {
         await dispatch(added, await readCollection('members'), await getKv('settings'));
         poke(); // cloche/alertes en direct (§7)
       }
+      if (['members', 'reports', 'departments', 'activities'].includes(name)) poke(name);
       // Spec : "compte créé à l'enrôlement, le membre définit son mot de passe
       // via lien" — chaque membre ajouté reçoit une invitation d'activation.
       if (name === 'members' && added.length) {
@@ -982,6 +1122,7 @@ app.post('/api/v1/sync/batch', requireAuth, async (req, res) => {
         const { added: opAdded, conflicts: opConflicts } = await applyWrite(name, value, typeof asOf === 'string' ? asOf : undefined, await preservedIds(name, (req as any).rbac), true);
         conflicts.push(...opConflicts);
         if (name === 'notifications' && opAdded.length) poke();
+        if (['members', 'reports', 'departments', 'activities'].includes(name)) poke(name);
       } else if (KV_KEYS.has(name)) {
         await assertCanWrite(name, (req as any).rbac, []);
         await setKv(name, value);
@@ -1163,6 +1304,14 @@ app.get('/api/v1/uploads/sign', requireAuth, async (req, res) => {
   if (!key || !/^[a-f0-9]{40}(-t)?\.(jpg|jpeg|png|webp)$/.test(key)) {
     return res.status(400).json({ error: 'key invalide' });
   }
+  const memberId = (req as any).memberId as string;
+  const mine = recentUploads.get(key);
+  const justUploaded = !!mine && mine.by === memberId && Date.now() - mine.at < RECENT_UPLOAD_MS;
+  // Même règle que GET /uploads : une session ne peut signer que la photo d'un membre
+  // visible dans son périmètre (ou son propre téléversement encore non rattaché).
+  if (!justUploaded && !(await visibleAvatarKeys(memberId)).has(key)) {
+    return res.status(404).json({ error: 'introuvable' });
+  }
   if (!(await storage.exists(key))) return res.status(404).json({ error: 'introuvable' });
   const url = await storage.getSignedUrl(key);
   res.json({ url, expiresIn: SIGNED_URL_TTL_SEC });
@@ -1249,6 +1398,7 @@ app.use(express.static(DIST_DIR, {
     }
   },
 }));
+app.get(/^\/admin(?:\/|$)/i, (_req, res) => res.redirect(302, '/'));
 app.get(/^(?!\/api\/).*/, (_req, res) => {
   res.setHeader('Cache-Control', 'no-cache');
   res.sendFile(path.join(DIST_DIR, 'index.html'), (err) => {

@@ -147,7 +147,7 @@ export function clearAuthToken(): void {
 // même hors-ligne/serveur injoignable.
 export async function apiLogout(): Promise<void> {
   try {
-    await fetch(`${API_BASE}/auth/logout`, { credentials: 'include', method: 'POST' });
+    await fetch(`${API_BASE}/auth/logout`, { credentials: 'include', method: 'POST', keepalive: true });
   } catch {
     // ignoré — voir commentaire ci-dessus
   }
@@ -180,17 +180,23 @@ export function photoSrc(url?: string): string | undefined {
   return token ? `${absolute}?token=${encodeURIComponent(token)}` : absolute;
 }
 
-export async function apiBootstrap(): Promise<Record<string, unknown> | null> {
+export type BootstrapResult =
+  | { status: 'ok'; data: Record<string, unknown> }
+  | { status: 'unauthorized' }
+  | { status: 'unavailable' };
+
+export async function apiBootstrap(): Promise<BootstrapResult> {
   // Lecture auth-gated côté serveur : sans session plausible (ni token mémoire, ni flag
   // de login antérieur → pas de cookie attendu), 401 à coup sûr — inutile de faire
   // l'aller-retour réseau. App.tsx re-bootstrap de toute façon après login.
-  if (!isAuthed()) return null;
+  if (!isAuthed()) return { status: 'unauthorized' };
   try {
     const res = await fetch(`${API_BASE}/bootstrap`, {
       credentials: 'include', // cookie de session (T6.1) — seul credential après un reload
       headers: authHeaders(),
     });
-    if (!res.ok) return null;
+    if (res.status === 401 || res.status === 403) return { status: 'unauthorized' };
+    if (!res.ok) return { status: 'unavailable' };
     const data = await res.json();
     // L'état serveur devient la base des deltas à venir (avant le flush : les écritures
     // en file seront rejouées en whole-array et re-sèmeront ces collections au succès).
@@ -203,9 +209,9 @@ export async function apiBootstrap(): Promise<Record<string, unknown> | null> {
       for (const k of Object.keys(data)) if (!k.startsWith('_')) setSyncedAt(k, (data as any)._syncedAt);
     }
     void flushSyncQueue(); // serveur joignable → rejouer les écritures en file
-    return data;
+    return { status: 'ok', data };
   } catch {
-    return null;
+    return { status: 'unavailable' };
   }
 }
 
@@ -321,7 +327,7 @@ export async function apiFetchCollection(name: string): Promise<unknown[] | null
 // Flux temps réel (SSE, §7). EventSource reconnecte tout seul (retry serveur) et
 // survit aux coupures réseau. onPoke = « quelque chose a changé, re-sync ». Renvoie
 // une fonction de fermeture (à appeler au logout). No-op sans token/navigateur.
-export function openNotificationStream(onPoke: () => void): () => void {
+export function openNotificationStream(onPoke: (collection: string) => void): () => void {
   if (typeof window === 'undefined' || typeof EventSource === 'undefined') return () => {};
   // Après un reload, memoryToken est vide (jamais persisté) mais la session peut rester
   // valide via le cookie (T6.1, le serveur accepte les deux sur /stream) — on se fie donc
@@ -330,8 +336,10 @@ export function openNotificationStream(onPoke: () => void): () => void {
   if (!isAuthed()) return () => {};
   const token = getAuthToken();
   const url = token ? `${API_BASE}/stream?token=${encodeURIComponent(token)}` : `${API_BASE}/stream`;
-  const es = new EventSource(url);
-  es.addEventListener('notifications', () => onPoke());
+  const es = new EventSource(url, { withCredentials: true });
+  for (const collection of ['notifications', 'members', 'reports', 'departments', 'activities']) {
+    es.addEventListener(collection, () => onPoke(collection));
+  }
   return () => es.close();
 }
 
@@ -468,6 +476,48 @@ export async function apiDeleteMember(id: string): Promise<boolean> {
   } catch {
     return false;
   }
+}
+
+export interface PoleCandidate {
+  id: string;
+  firstName: string;
+  lastName: string;
+  level: string;
+  avatarUrl?: string;
+}
+
+async function poleRequest(path: string, init?: RequestInit): Promise<{ ok: boolean; data?: any; error?: string }> {
+  if (!isAuthed()) return { ok: false, error: 'Session expirée' };
+  try {
+    const res = await fetch(`${API_BASE}${path}`, {
+      ...init,
+      credentials: 'include',
+      headers: { ...(init?.body ? { 'Content-Type': 'application/json' } : {}), ...authHeaders(), ...(init?.headers ?? {}) },
+    });
+    const data = res.status === 204 ? undefined : await res.json().catch(() => undefined);
+    return res.ok ? { ok: true, data } : { ok: false, error: data?.error ?? 'Action refusée' };
+  } catch {
+    return { ok: false, error: 'Serveur indisponible' };
+  }
+}
+
+export async function apiPoleCandidates(departmentId: string, sectionId: string): Promise<PoleCandidate[]> {
+  const result = await poleRequest(`/poles/${encodeURIComponent(departmentId)}/${encodeURIComponent(sectionId)}/candidates`);
+  return result.ok && Array.isArray(result.data) ? result.data : [];
+}
+
+export function apiAssignPoleMember(departmentId: string, sectionId: string, memberId: string) {
+  return poleRequest(`/poles/${encodeURIComponent(departmentId)}/${encodeURIComponent(sectionId)}/members/${encodeURIComponent(memberId)}`, { method: 'POST' });
+}
+
+export function apiRemovePoleMember(departmentId: string, sectionId: string, memberId: string) {
+  return poleRequest(`/poles/${encodeURIComponent(departmentId)}/${encodeURIComponent(sectionId)}/members/${encodeURIComponent(memberId)}`, { method: 'DELETE' });
+}
+
+export function apiCreatePoleFollowup(departmentId: string, sectionId: string, memberId: string, notes: string) {
+  return poleRequest(`/poles/${encodeURIComponent(departmentId)}/${encodeURIComponent(sectionId)}/followups`, {
+    method: 'POST', body: JSON.stringify({ memberId, notes }),
+  });
 }
 
 export async function apiDeleteItem(collection: string, id: string): Promise<boolean> {

@@ -61,6 +61,7 @@ export const CertificationPatchSchema = CertificationSchema.partial().extend({ i
 export const IntegrationReportSchema = z.object({
   id: z.string().min(1),
   memberId: z.string().min(1),
+  authorId: z.string().optional(),
   authorName: z.string(),
   date: z.string(),
   status: z.enum(['Non suivi', 'En attente', 'En cours', 'À recontacter', 'Intégré', 'Non intégré']),

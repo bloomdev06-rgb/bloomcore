@@ -42,3 +42,14 @@ export async function idbSet(key: string, serialized: string): Promise<void> {
     tx.onerror = () => reject(tx.error);
   });
 }
+
+/** Efface toutes les données métier mises en cache sur ce navigateur. */
+export async function idbClearAll(): Promise<void> {
+  const conn = await db();
+  return new Promise((resolve, reject) => {
+    const tx = conn.transaction(STORE, 'readwrite');
+    tx.objectStore(STORE).clear();
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error);
+  });
+}

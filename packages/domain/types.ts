@@ -266,6 +266,7 @@ export interface Report {
   reportType: ReportType; // source de vérité : packages/shared/enums.ts (§7.3 activité, §8 suivi/observation)
   eventId?: string; // Optional links to cultes/events
   departmentId?: string; // P1.3 — rattache le rapport à un département (KPIs départementaux/ministère, via Department.ministryId)
+  sectionId?: string; // Pôle interne concerné ; requis pour les suivis créés par un Responsable de pôle.
   confidential: boolean;
   partagerAvecResponsableDept?: boolean; // §8.3 — lève le secret du rapport pastoral vers le Responsable
   // Validation par le capitaine Bloom Bus (rapport_bloom_bus_member) : false = rempli par le
@@ -319,10 +320,13 @@ export interface PermissionMatrix {
 export interface Delegation {
   id: string;
   from: string;
+  fromId?: string;
   to: string;
   toId?: string;
+  departmentId?: string;
   scope: string;
   right: string;
+  deletedAt?: string;
 }
 
 // §2.6 — matrice de permissions DYNAMIQUE : ajuste la capacité d'une CLASSE de membres

@@ -20,11 +20,12 @@ import {
   INITIAL_ADMINS,
 } from '../mockData';
 export { deriveTimeBasedNotifications } from './notificationRules';
-export { apiBootstrap, apiLogin, clearAuthToken, apiLogout, apiPut, apiFetchCollection, openNotificationStream, syncQueueLength, isSyncing, apiCreateMember, apiPatchMember, apiDeleteMember } from './api';
+export { apiBootstrap, apiLogin, clearAuthToken, apiLogout, apiPut, apiFetchCollection, openNotificationStream, syncQueueLength, isSyncing, apiCreateMember, apiPatchMember, apiDeleteMember, apiPoleCandidates, apiAssignPoleMember, apiRemovePoleMember, apiCreatePoleFollowup } from './api';
+export type { PoleCandidate } from './api';
 export { labelFor } from '../../packages/shared/migrate';
 export { canView, canViewAnyRole, hasCapability, resolveCapability } from './permissions';
 import { apiPut, hasServerSession } from './api';
-import { idbLoadAll, idbSet } from './idb';
+import { idbClearAll, idbLoadAll, idbSet } from './idb';
 
 // Collection/kv names the backend knows about (server/index.ts's
 // ARRAY_COLLECTIONS ∪ KV_KEYS) — keys outside this set (bc_loggedInMemberId,
@@ -97,6 +98,7 @@ export function load<T>(key: string, seed: T): T {
 // persistance qui tournent au montage poussent l'état local/seed AVANT d'avoir lu l'état
 // serveur, écrasant en LWW des données plus fraîches. App appelle enableSync() après bootstrap.
 let syncEnabled = false;
+let purgeInProgress = false;
 export function enableSync(): void { syncEnabled = true; }
 
 // Scale : un PUT whole-array par RAFALE de saisie, pas par frappe — debounce trailing
@@ -104,7 +106,27 @@ export function enableSync(): void { syncEnabled = true; }
 // fraîche) ; une rafale de N modifications = 1 seul envoi réseau.
 const syncTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
+/**
+ * Logout sécurisé sur poste partagé : empêche les écritures différées de repeupler le
+ * cache, puis efface le miroir, IndexedDB et toutes les clés BloomCore du navigateur.
+ */
+export async function purgeClientData(): Promise<void> {
+  purgeInProgress = true;
+  syncEnabled = false;
+  for (const timer of syncTimers.values()) clearTimeout(timer);
+  syncTimers.clear();
+  mirror.clear();
+  parseCache.clear();
+  try {
+    for (const key of Object.keys(localStorage)) {
+      if (key.startsWith('bc_')) localStorage.removeItem(key);
+    }
+  } catch { /* stockage indisponible : la purge IDB continue */ }
+  try { await idbClearAll(); } catch (e) { console.error('[logout] purge IndexedDB impossible', e); }
+}
+
 export function save<T>(key: string, value: T): void {
+  if (purgeInProgress) return;
   // QuotaExceededError (photos base64, logs qui grossissent) ne doit pas faire throw
   // dans un useEffect non gardé (crash en boucle, C2). L'écriture serveur suit quand même.
   try {

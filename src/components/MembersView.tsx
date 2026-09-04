@@ -25,7 +25,7 @@ import { Member, Branch, CommunityLevel, PastoralCursus, Report, AuditLog, Permi
 import { useDepartments, useBusLines, useMinistries, useAdmins } from "../data";
 import { resolveMemberRoles } from "../data/roles";
 import { isRed } from "../data/kpi";
-import { inMemberScope, canManageAccountOf } from "../data/scope";
+import { inMemberScopeForRoles, canManageAccountOf } from "../data/scope";
 import { importMembersFromCsv } from "../data/csvImport";
 import { toast } from "./ui/Toast";
 import ReportStatusBoxes from "./ReportStatusBoxes";
@@ -77,6 +77,7 @@ interface MembersViewProps {
   onAddReport?: (r: Report) => void;
   activeBranch: Branch;
   simulatedRole: string;
+  activeRoles: string[];
   operator?: Member;
   audits?: AuditLog[];
   permissionMatrix: PermissionMatrix;
@@ -95,6 +96,7 @@ export default function MembersView({
   onAddReport,
   activeBranch,
   simulatedRole,
+  activeRoles,
   operator,
   audits = [],
   permissionMatrix,
@@ -134,8 +136,9 @@ export default function MembersView({
   const isAdminAccount = (m: Member) => admins.some((a) => !(a as any).deletedAt && (a.id === `adm_${m.id}` || a.id === m.id));
   const canDeleteMember = (m: Member) => {
     if (!operator) return false;
-    const operatorRoles = [...resolveMemberRoles(operator, admins, ministries)];
-    const targetRoles = [...resolveMemberRoles(m, admins, ministries)];
+    const operatorRoles = [...resolveMemberRoles(operator, admins, ministries, INITIAL_DEPARTMENTS)]
+      .filter((role) => role !== 'Responsable de section');
+    const targetRoles = [...resolveMemberRoles(m, admins, ministries, INITIAL_DEPARTMENTS)];
     return canManageAccountOf(operator, operatorRoles, m, targetRoles, simulatedRole, INITIAL_BUS_LINES, INITIAL_DEPARTMENTS, ministries);
   };
 
@@ -181,7 +184,7 @@ export default function MembersView({
       const matchesSchoolLevel =
         filterSchoolLevel === "all" || m.schoolLevel === filterSchoolLevel;
       const matchesRed = !filterRed || isRed(m);
-      const matchesScope = !operator || inMemberScope(operator, m, simulatedRole, INITIAL_BUS_LINES, INITIAL_DEPARTMENTS, ministries);
+      const matchesScope = !operator || inMemberScopeForRoles(operator, m, activeRoles, INITIAL_BUS_LINES, INITIAL_DEPARTMENTS, ministries);
 
       return matchesSearch && matchesBranch && matchesLevel && matchesPastoralCursus && matchesDept && matchesFunction && matchesBaptism && matchesSchoolLevel && matchesRed && matchesScope;
     })
@@ -192,7 +195,7 @@ export default function MembersView({
       return nameA.localeCompare(nameB);
     }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [members, deferredSearch, activeBranch, filterLevel, filterPastoralCursus, filterDept, filterFunction, filterBaptism, filterSchoolLevel, filterRed, operator, simulatedRole, ministries]);
+    [members, deferredSearch, activeBranch, filterLevel, filterPastoralCursus, filterDept, filterFunction, filterBaptism, filterSchoolLevel, filterRed, operator, activeRoles, ministries]);
 
   const menCount = filteredMembers.filter((m) => m.gender === "H").length;
   const womenCount = filteredMembers.filter((m) => m.gender === "F").length;

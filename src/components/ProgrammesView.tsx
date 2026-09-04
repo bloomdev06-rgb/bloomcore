@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { Award, CheckCircle, Plus, Clock, Droplet, Search, ChevronLeft, X } from 'lucide-react';
 import { Member, Branch, AuditLog, PermissionMatrix, Delegation, FormDef, Report, Step, CapabilityOverride, SpecialAuthorization } from '../types';
 import { useBusLines, useDepartments, useMinistries, load, resolveCapability, labelFor } from '../data';
-import { inMemberScope } from '../data/scope';
+import { inMemberScopeForRoles } from '../data/scope';
 import { Avatar } from './ui/Avatar';
 import { Modal } from './ui/Modal';
 import { toast } from './ui/Toast';
@@ -53,7 +53,7 @@ export default function ProgrammesView({
   // au baptême depuis la base des membres OU des nouveaux (spec lot 4).
   const scopedMembers = members.filter(m =>
     (activeBranch === 'global' || m.branch === activeBranch) &&
-    (!operator || inMemberScope(operator, m, simulatedRole, busLines, departments, ministries))
+    (!operator || inMemberScopeForRoles(operator, m, activeRoles, busLines, departments, ministries))
   );
 
   // Candidat = inscrit au parcours (dept Baptême + étape courante), pas encore baptisé.

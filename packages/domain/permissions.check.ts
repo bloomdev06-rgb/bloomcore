@@ -82,4 +82,11 @@ assert.strictEqual(resolveCapability(matrix, 'n_importe_quoi', member(), 'Super 
 assert.strictEqual(canViewAnyRole({ view_events: { GDC: true } }, 'events', ['Responsable', 'GDC']), true, 'les droits de tous les rôles sont cumulés');
 assert.strictEqual(canViewAnyRole({ view_events: { GDC: true } }, 'events', ['Responsable']), false, 'un rôle sans droit ne voit pas l’onglet');
 
+// Une délégation n'est effective qu'avec des identifiants structurés ET dans le département
+// de la ressource ; les anciennes lignes texte ne donnent plus de droit global.
+const delegation = [{ id: 'd1', from: 'Resp', fromId: 'r1', to: 'Membre', toId: 'm1', departmentId: 'dep1', scope: 'Département 1', right: CAP }];
+assert.strictEqual(resolveCapability(matrix, CAP, member(), 'Leader', delegation), false, 'délégation sans contexte ressource refusée');
+assert.strictEqual(resolveCapability(matrix, CAP, member(), 'Leader', delegation, [], [], 'dep1'), true, 'délégation effective dans son département');
+assert.strictEqual(resolveCapability(matrix, CAP, member(), 'Leader', delegation, [], [], 'dep2'), false, 'délégation ne fuit pas vers un autre département');
+
 console.log('permissions.check OK');

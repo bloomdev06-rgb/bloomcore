@@ -5,6 +5,12 @@ import App from './App.tsx';
 import './index.css';
 import {hydrate} from './data';
 
+// `/admin` n'est pas une route fonctionnelle BloomCore. La neutraliser avant toute
+// hydratation évite même un bref chargement de données locales sur cette URL.
+if (/^\/admin(?:\/|$)/i.test(window.location.pathname)) {
+  window.location.replace('/');
+} else {
+
 // Apply persisted theme before first paint.
 if (localStorage.getItem('bc_theme') === 'dark') document.documentElement.classList.add('dark');
 
@@ -28,4 +34,5 @@ if (import.meta.env.PROD && 'serviceWorker' in navigator) {
   window.addEventListener('load', () => {
     navigator.serviceWorker.register('/sw.js').catch(() => { /* SW indispo (http nu) : app OK sans */ });
   });
+}
 }
