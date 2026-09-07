@@ -177,8 +177,12 @@ export default function DepartmentsView({ activeBranch, simulatedRole, members =
   const isBranchPastor = simulatedRole === 'Pasteur' && (!selectedDeptData?.branch || selectedDeptData.branch === operator?.branch);
   const isTutoredMinistry = simulatedRole === 'Ministre' && selectedMinistryData?.tuteurId === operator?.id;
   const isActualDeptResponsable = !!selectedDept && operator?.departments?.[selectedDept] === 'responsable';
+  const isActualDeptAdjoint = !!selectedDept && operator?.departments?.[selectedDept] === 'adjoint';
   // Les actions sont liées au département sélectionné, jamais au rôle aplati le plus haut.
   const canManageDeptMembers = isGlobalAuthority || isBranchPastor || isTutoredMinistry || isActualDeptResponsable;
+  // L'Adjoint peut créer une fiche dans le département où il est réellement nommé. Les autres
+  // actions (validation, promotions, fonctions, sections) restent au Responsable et au-dessus.
+  const canAddDeptMember = canManageDeptMembers || isActualDeptAdjoint;
   const canEditMemberDepartments = isGlobalAuthority || isBranchPastor || isTutoredMinistry;
 
   // Branche manquante d'un département scopé : présente si `branch` est défini et qu'aucune
@@ -763,7 +767,7 @@ export default function DepartmentsView({ activeBranch, simulatedRole, members =
                         placeholder="Rechercher un membre…"
                         className="border border-bc-border rounded-full px-3 py-1.5 text-xs bg-bc-canvas focus:outline-none focus:border-bc-green"
                       />
-                      {canManageDeptMembers && (
+                      {canAddDeptMember && (
                         <button
                           onClick={() => { setEditingMember(null); setShowMemberForm(true); }}
                           className="flex items-center gap-1.5 text-xs font-bold text-white bg-bc-green px-3 py-1.5 rounded-full active-scale whitespace-nowrap"

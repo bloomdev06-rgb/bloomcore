@@ -109,7 +109,7 @@ Ministère ── Départements (normal | spécial)
 - **Créables/modifiables** par les comptes Admin. À la création, on choisit le **type : normal**, ou **spécial** en **activant une fonction spéciale** parmi : `adn`, `portiers`, `integration`, `bloom_bus`, `gestion_cultes`, `parcours_etapes`. La fonction active les **comportements particuliers** du département.
 - **Par branche** : chaque département existe **dans chaque branche** (une instance en Bloom Church, une en Bloom Light) ; un département est donc rattaché à une **branche**.
 - **Hiérarchie identique partout** : Responsable (+ Adjoint optionnel) → Coach → Leader → Membre.
-- **Asymétrie Adjoint** : mêmes droits opérationnels, mais le Responsable accède à l'intégralité des données de l'Adjoint (pas l'inverse).
+- **Asymétrie Adjoint** : l'Adjoint peut enregistrer un membre dans chacun de ses départements réels, mais n'attribue que des niveaux, cursus et fonctions strictement inférieurs à son profil ; les rangs égaux ou supérieurs relèvent du Responsable ou de l'autorité supérieure. Le Responsable accède à l'intégralité des données de l'Adjoint (pas l'inverse).
 - **Multi-appartenance** : un membre peut appartenir à plusieurs départements (une fonction par département).
 
 ### 4.3 Règle générale des rapports

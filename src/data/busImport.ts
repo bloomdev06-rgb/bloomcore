@@ -2,14 +2,24 @@
 // une passe. Un bus n'a pas de champ responsable en base (BusLineSchema) : le lien vit
 // sur le Member (departments.dept_bloom_bus + bloomBusId), d'où les deux listes en sortie.
 // ponytail: petit parser dédié plutôt que factoriser avec csvImport.ts pour un 2e appelant.
-import { BloomBusEntity, Member, DeptFunction, BusRole } from '../types';
+import { BloomBusEntity, Member, DeptFunction, BusRole, ImportBusMemberState } from '../types';
 import { parseCsv } from './csvImport';
+import { normalizePhone } from './phone';
 
 const BUS_DEPT_ID = 'dept_bloom_bus';
 const BUS_FUNCTIONS: DeptFunction[] = ['responsable', 'capitaine', 'responsable_zone', 'responsable_commune'];
 // §27 — capitaine/responsable_zone/responsable_commune sont des fonctions du MODULE (busRole),
 // pas du département : le serveur rejette désormais ce vocabulaire dans `departments` (400).
 const TERRITORIAL: BusRole[] = ['capitaine', 'responsable_zone', 'responsable_commune'];
+
+export function importBusMemberState(member: Member, departmentId = BUS_DEPT_ID): ImportBusMemberState {
+  return {
+    bloomBusId: member.bloomBusId ?? null,
+    busRole: member.busRole ?? null,
+    busRoles: member.busRoles ? [...member.busRoles] : null,
+    busDepartmentFunction: member.departments?.[departmentId] ?? null,
+  };
+}
 
 const stripDiacritics = (s: string) => s.normalize('NFD').replace(/[̀-ͯ]/g, '');
 const norm = (s: string) => stripDiacritics((s ?? '').trim().toLowerCase());
@@ -22,6 +32,7 @@ function headerKey(h: string): string {
   if (['latitude', 'lat'].includes(n)) return 'centerLat';
   if (['longitude', 'lng', 'lon'].includes(n)) return 'centerLng';
   if (['responsabletelephone', 'telephone responsable', 'telephone', 'tel'].includes(n)) return 'responsablePhone';
+  if (['responsableemail', 'email responsable', 'email', 'mail'].includes(n)) return 'responsableEmail';
   if (['fonctionresponsable', 'fonction responsable', 'fonction'].includes(n)) return 'fonction';
   return n;
 }
@@ -45,7 +56,12 @@ export function importBusesFromCsv(
   const idx = (k: string) => keys.indexOf(k);
   const get = (row: string[], k: string) => { const i = idx(k); return i >= 0 ? (row[i] ?? '').trim() : ''; };
 
-  const membersByPhone = new Map(existingMembers.map(m => [m.phone, m] as const));
+  const membersByPhone = new Map(existingMembers
+    .filter((m) => normalizePhone(m.phone))
+    .map((m) => [normalizePhone(m.phone), m] as const));
+  const membersByEmail = new Map(existingMembers
+    .filter((m) => m.email?.trim())
+    .map((m) => [m.email.trim().toLowerCase(), m] as const));
   const stamp = now.getTime();
 
   for (let r = 1; r < rows.length; r++) {
@@ -57,9 +73,10 @@ export function importBusesFromCsv(
     const latRaw = get(row, 'centerLat');
     const lngRaw = get(row, 'centerLng');
     const responsablePhone = get(row, 'responsablePhone');
+    const responsableEmail = get(row, 'responsableEmail').toLowerCase();
 
-    if (!name || !commune || !zone || !latRaw || !lngRaw || !responsablePhone) {
-      result.errors.push({ line, reason: 'Nom, Commune, Zone, Latitude, Longitude et ResponsableTelephone obligatoires' });
+    if (!name || !commune || !zone || !latRaw || !lngRaw || (!responsablePhone && !responsableEmail)) {
+      result.errors.push({ line, reason: 'Nom, Commune, Zone, Latitude, Longitude et ResponsableTelephone ou ResponsableEmail obligatoires' });
       continue;
     }
     const centerLat = Number(latRaw);
@@ -68,9 +85,16 @@ export function importBusesFromCsv(
       result.errors.push({ line, reason: 'Latitude/Longitude invalides' });
       continue;
     }
-    const member = membersByPhone.get(responsablePhone);
+    const memberByPhone = responsablePhone ? membersByPhone.get(normalizePhone(responsablePhone)) : undefined;
+    const memberByEmail = responsableEmail ? membersByEmail.get(responsableEmail) : undefined;
+    if (memberByPhone && memberByEmail && memberByPhone.id !== memberByEmail.id) {
+      result.errors.push({ line, reason: 'ResponsableTelephone et ResponsableEmail correspondent à deux membres différents' });
+      continue;
+    }
+    const member = memberByPhone ?? memberByEmail;
     if (!member) {
-      result.errors.push({ line, reason: `Aucun membre existant avec ce téléphone (${responsablePhone})` });
+      const identifiant = [responsablePhone, responsableEmail].filter(Boolean).join(' / ');
+      result.errors.push({ line, reason: `Aucun membre existant avec ce téléphone ou cet email (${identifiant})` });
       continue;
     }
 

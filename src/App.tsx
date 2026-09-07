@@ -18,7 +18,8 @@ import {
   AppSettings,
   Branch,
   Department,
-  FormDef
+  FormDef,
+  ImportUndoResult
 } from './types';
 import { motion, AnimatePresence } from 'motion/react';
 
@@ -340,7 +341,7 @@ export default function App() {
     setNotifications(prev => prev.map(n => (n.read ? n : { ...n, read: true })));
   };
 
-  const handleAddMember = (m: Member) => {
+  const handleAddMember = (m: Member): Promise<boolean> => {
     // P4.15 (b) — affectation auto au Bloom Bus le plus proche (haversine), si pas déjà
     // rattaché. Exclut l'enregistrement direct Bloom Bus : là le bus est choisi explicitement
     // dans le formulaire (cascade Commune→Zone→Bus) ; ne pas le remplacer par le plus proche
@@ -363,18 +364,18 @@ export default function App() {
     // Un rejet Zod (ex. email manquant/invalide, téléphone déjà utilisé) laissait la fiche
     // dans l'état local avec un toast de succès, sans jamais atteindre le serveur — on annule
     // l'ajout optimiste et on affiche le message renvoyé par l'API.
-    void apiCreateMember(enriched).then((result) => {
+    const creationRequest = apiCreateMember(enriched).then((result) => {
       if (result && !result.ok) {
         setMembers(prev => prev.filter(x => x.id !== enriched.id));
         toast.error(result.error ?? "Échec de l'enregistrement — réessayez.");
-        return;
+        return false;
       }
 
       if (!result) {
         // Le mode hors-ligne conserve l'ajout local et le met en file via useSyncedSave,
         // mais il ne doit jamais produire un audit présenté comme une création confirmée.
         toast.error("Serveur BloomCore indisponible : création locale en attente de synchronisation.");
-        return;
+        return false;
       }
 
       // L'audit de création est écrit uniquement après confirmation HTTP du POST. Avant
@@ -389,6 +390,7 @@ export default function App() {
         details: `Création du profil de ${enriched.firstName} ${enriched.lastName} (${enriched.level}).`,
         branch: enriched.branch,
       });
+      return true;
     });
 
     if (enriched.level === 'nouveau') {
@@ -423,9 +425,10 @@ export default function App() {
         branch: enriched.branch,
       });
     }
+    return creationRequest;
   };
 
-  const handleUpdateMember = (m: Member) => {
+  const handleUpdateMember = (m: Member): Promise<boolean> => {
     // P1.2 — un seul point de diff pour toutes les vues qui appellent onUpdateMember
     // (validation de réception, promotion, changement d'affectation, transfert de
     // branche, baptême, drachme…) plutôt qu'un déclencheur dupliqué par vue.
@@ -456,7 +459,7 @@ export default function App() {
 
     setMembers(prev => prev.map(item => item.id === m.id ? m : item));
     // Phase 4 (T4.3) — push immédiat via PATCH (voir commentaire équivalent dans handleAddMember).
-    void apiPatchMember(m).catch(() => {});
+    const updateRequest = apiPatchMember(m).catch(() => false);
 
     // Log Audit — P4.16/P4.17 : le transfert de branche et la promotion méritent
     // leur propre actionType/previousValue/newValue plutôt que le générique
@@ -482,6 +485,15 @@ export default function App() {
       ...(isBranchTransfer && { previousValue: before!.branch, newValue: m.branch }),
     };
     handleAddAuditLog(log);
+    return updateRequest;
+  };
+
+  const handleImportUndone = (result: ImportUndoResult) => {
+    const deleted = new Set(result.deletedMemberIds);
+    const restored = new Map(result.restoredMembers.map(member => [member.id, member]));
+    setMembers(prev => prev
+      .filter(member => !deleted.has(member.id))
+      .map(member => restored.get(member.id) ?? member));
   };
 
   // Suppression de profil — un membre peut effacer son propre profil, un
@@ -696,6 +708,7 @@ export default function App() {
             onUpdateMember={handleUpdateMember}
             onAddMember={handleAddMember}
             onDeleteMember={handleDeleteMember}
+            onImportUndone={handleImportUndone}
             reports={reports}
             onAddReport={handleAddReport}
             activeBranch={activeBranch}
@@ -780,6 +793,7 @@ export default function App() {
             onUpdateMember={handleUpdateMember}
             onAddReport={handleAddReport}
             onAddMember={handleAddMember}
+            onImportUndone={handleImportUndone}
             activeBranch={activeBranch}
             simulatedRole={simulatedRole}
             forms={forms}

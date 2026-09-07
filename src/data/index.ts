@@ -20,7 +20,7 @@ import {
   INITIAL_ADMINS,
 } from '../mockData';
 export { deriveTimeBasedNotifications } from './notificationRules';
-export { apiBootstrap, apiLogin, clearAuthToken, apiLogout, apiPut, apiFetchCollection, openNotificationStream, syncQueueLength, isSyncing, apiCreateMember, apiPatchMember, apiDeleteMember, apiPoleCandidates, apiAssignPoleMember, apiRemovePoleMember, apiCreatePoleFollowup } from './api';
+export { apiBootstrap, apiLogin, clearAuthToken, apiLogout, apiPut, apiFetchCollection, openNotificationStream, syncQueueLength, isSyncing, apiCreateMember, apiPatchMember, apiDeleteMember, apiCreateItem, apiCreateImportBatch, apiListImportBatches, apiUndoImportBatch, apiPoleCandidates, apiAssignPoleMember, apiRemovePoleMember, apiCreatePoleFollowup } from './api';
 export type { PoleCandidate } from './api';
 export { labelFor } from '../../packages/shared/migrate';
 export { canView, canViewAnyRole, hasCapability, resolveCapability } from './permissions';

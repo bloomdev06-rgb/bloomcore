@@ -28,7 +28,8 @@ import { redisHealthy } from './redis.ts';
 import { getStorage, SIGNED_URL_TTL_SEC } from './storage.ts';
 import { z } from 'zod';
 import { effectiveBranchFor } from '../packages/domain/scope.ts';
-import type { Member } from '../packages/domain/types.ts';
+import type { ImportBatch, ImportBusMemberState, Member } from '../packages/domain/types.ts';
+import { canAccessImportBatch, importedBusHasRemainingMembers, restoreBusMemberState, sameBusMemberState, unchangedSinceImport } from './importBatches.ts';
 import { MemberSchema, MemberPatchSchema } from '../packages/schemas/member.ts';
 import { ReportSchema, ReportPatchSchema } from '../packages/schemas/report.ts';
 import {
@@ -1019,6 +1020,219 @@ registerCrudEndpoints('activities', ActivitySchema, ActivityPatchSchema);
 registerCrudEndpoints('projects', ProjectSchema, ProjectPatchSchema);
 registerCrudEndpoints('bus_lines', BusLineSchema, BusLinePatchSchema);
 registerCrudEndpoints('forms', FormSchema, FormPatchSchema);
+
+// Historique d'import volontairement stocké en KV : il est persistant dans SQLite comme
+// PostgreSQL sans ajouter une collection synchronisée au bootstrap (les snapshots d'annulation
+// ne doivent jamais être envoyés à tous les clients). Seules ces routes d'intention y accèdent.
+const BUS_ROLE_SCHEMA = z.enum(['capitaine', 'responsable_zone', 'responsable_commune']);
+const DEPARTMENT_FUNCTION_SCHEMA = z.enum([
+  'responsable', 'adjoint', 'tresorier', 'responsable_section', 'membre',
+  'capitaine', 'responsable_zone', 'responsable_commune',
+]);
+const IMPORT_BUS_STATE_SCHEMA = z.object({
+  bloomBusId: z.string().nullable(),
+  busRole: BUS_ROLE_SCHEMA.nullable(),
+  busRoles: z.array(BUS_ROLE_SCHEMA).nullable(),
+  busDepartmentFunction: DEPARTMENT_FUNCTION_SCHEMA.nullable(),
+}).strict();
+const CREATE_IMPORT_BATCH_SCHEMA = z.discriminatedUnion('kind', [
+  z.object({ kind: z.literal('members'), memberIds: z.array(z.string()).min(1).max(1000) }).strict(),
+  z.object({
+    kind: z.literal('bloom_bus'),
+    createdBusIds: z.array(z.string()).min(1).max(1000),
+    memberChanges: z.array(z.object({
+      memberId: z.string(), departmentId: z.string(), before: IMPORT_BUS_STATE_SCHEMA, after: IMPORT_BUS_STATE_SCHEMA,
+    }).strict()).max(1000),
+  }).strict(),
+]);
+
+const importBatches = async (): Promise<ImportBatch[]> => (await getKv<ImportBatch[]>('import_batches')) ?? [];
+const importOperatorName = (ctx: RbacContext) => `${ctx.member.firstName} ${ctx.member.lastName}`.trim();
+async function auditImport(ctx: RbacContext, actionType: string, details: string): Promise<void> {
+  await appendToCollection('audits', [{
+    id: `aud_import_${randomUUID()}`,
+    timestamp: new Date().toISOString(),
+    actionType,
+    operatorName: importOperatorName(ctx),
+    operatorId: ctx.member.id,
+    details,
+    branch: ctx.member.branch,
+  }]);
+}
+
+app.get('/api/v1/import-batches', requireAuth, async (req, res) => {
+  const ctx = (req as any).rbac as RbacContext;
+  const requestedKind = req.query.kind;
+  if (requestedKind !== undefined && requestedKind !== 'members' && requestedKind !== 'bloom_bus') {
+    return res.status(400).json({ error: 'kind invalide' });
+  }
+  const visible = (await importBatches())
+    .filter(batch => canAccessImportBatch(ctx, batch) && (!requestedKind || batch.kind === requestedKind))
+    .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  return res.json(visible);
+});
+
+app.post('/api/v1/import-batches', requireAuth, async (req, res) => {
+  const parsed = CREATE_IMPORT_BATCH_SCHEMA.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: parsed.error.issues.map(i => `${i.path.join('.')}: ${i.message}`).join('; ') });
+  const ctx = (req as any).rbac as RbacContext;
+  try {
+    const now = new Date().toISOString();
+    let batch: ImportBatch;
+    if (parsed.data.kind === 'members') {
+      const ids = [...new Set(parsed.data.memberIds)];
+      if (ids.some(id => !id.startsWith('mem_import_'))) throw new GuardError(400, 'Seuls les profils créés par import CSV peuvent entrer dans ce lot');
+      const members = await readCollection('members', true) as any[];
+      const versions: { memberId: string; updatedAt: string }[] = [];
+      for (const id of ids) {
+        const member = members.find(m => m.id === id && !m.deletedAt);
+        if (!member?.updatedAt) throw new GuardError(409, `Membre importé introuvable ou non synchronisé : ${id}`);
+        await assertCanDelete(ctx, member);
+        versions.push({ memberId: id, updatedAt: member.updatedAt });
+      }
+      batch = {
+        id: `imp_${randomUUID()}`, kind: 'members', status: 'active', createdAt: now,
+        createdById: ctx.member.id, createdByName: importOperatorName(ctx), branch: ctx.member.branch,
+        itemCount: versions.length, memberVersions: versions,
+      };
+    } else {
+      const ids = [...new Set(parsed.data.createdBusIds)];
+      if (ids.some(id => !id.startsWith('bus_import_'))) throw new GuardError(400, 'Seuls les Bloom Bus créés par import CSV peuvent entrer dans ce lot');
+      // Même autorité que le bouton d'administration territoriale, vérifiée côté serveur.
+      await assertCanWrite('bus_lines', ctx, await readCollection('bus_lines'));
+      const buses = await readCollection('bus_lines', true) as any[];
+      const busVersions = ids.map(busId => {
+        const bus = buses.find(bus => bus.id === busId && !bus.deletedAt);
+        if (!bus?.updatedAt) throw new GuardError(409, `Bloom Bus importé introuvable ou non synchronisé : ${busId}`);
+        return { busId, updatedAt: bus.updatedAt };
+      });
+      const members = await readCollection('members') as Member[];
+      const bloomBusDepartmentIds = new Set((await readCollection('departments') as any[])
+        .filter(department => department.specialFunction === 'bloom_bus')
+        .map(department => String(department.id)));
+      for (const change of parsed.data.memberChanges) {
+        if (!bloomBusDepartmentIds.has(change.departmentId)) {
+          throw new GuardError(400, `Département Bloom Bus invalide : ${change.departmentId}`);
+        }
+        const member = members.find(m => m.id === change.memberId);
+        if (!member || !(await filterReadable('members', ctx, [member])).length) {
+          throw new GuardError(403, `Membre hors de votre périmètre : ${change.memberId}`);
+        }
+        if (!sameBusMemberState(member, change.departmentId, change.after as ImportBusMemberState)) {
+          throw new GuardError(409, `Affectation non synchronisée : ${change.memberId}`);
+        }
+      }
+      batch = {
+        id: `imp_${randomUUID()}`, kind: 'bloom_bus', status: 'active', createdAt: now,
+        createdById: ctx.member.id, createdByName: importOperatorName(ctx), branch: ctx.member.branch,
+        itemCount: ids.length, busVersions,
+        memberChanges: parsed.data.memberChanges as ImportBatch['memberChanges'],
+      };
+    }
+    const history = await importBatches();
+    await setKv('import_batches', [batch, ...history].slice(0, 200));
+    await auditImport(ctx, 'IMPORT_BATCH_CREATED', `Lot ${batch.id} enregistré : ${batch.itemCount} ${batch.kind === 'members' ? 'membre(s)' : 'Bloom Bus'}.`);
+    return res.status(201).json(batch);
+  } catch (e) {
+    if (e instanceof GuardError) return res.status(e.status).json({ error: e.message });
+    throw e;
+  }
+});
+
+app.post('/api/v1/import-batches/:id/undo', requireAuth, async (req, res) => {
+  const ctx = (req as any).rbac as RbacContext;
+  const history = await importBatches();
+  const batchIndex = history.findIndex(batch => batch.id === req.params.id);
+  if (batchIndex < 0) return res.status(404).json({ error: 'Import introuvable' });
+  const batch = history[batchIndex];
+  if (batch.status !== 'active') return res.status(409).json({ error: 'Cet import a déjà été annulé ou traité partiellement' });
+  if (!canAccessImportBatch(ctx, batch)) return res.status(403).json({ error: 'Annulation réservée à l’auteur de l’import ou à un Admin' });
+
+  try {
+    const conflicts: string[] = [];
+    const deletedMemberIds: string[] = [];
+    const deletedBusIds: string[] = [];
+    let restoredMembers: Member[] = [];
+
+    if (batch.kind === 'members') {
+      const members = await readCollection('members', true) as any[];
+      for (const version of batch.memberVersions ?? []) {
+        const member = members.find(m => m.id === version.memberId && !m.deletedAt);
+        if (!member || !unchangedSinceImport(member, version.updatedAt)) {
+          conflicts.push(`${version.memberId}: profil modifié ou déjà supprimé`);
+          continue;
+        }
+        await assertCanDelete(ctx, member);
+        deletedMemberIds.push(version.memberId);
+      }
+      if (deletedMemberIds.length) {
+        const body = await deltaToWhole('members', [], deletedMemberIds);
+        await assertCanWrite('members', ctx, body);
+        await applyWrite('members', body, undefined, await preservedIds('members', ctx));
+        poke('members');
+      }
+    } else {
+      const currentMembers = await readCollection('members') as Member[];
+      const updates: Member[] = [];
+      for (const change of batch.memberChanges ?? []) {
+        const member = currentMembers.find(m => m.id === change.memberId);
+        if (!member || !sameBusMemberState(member, change.departmentId, change.after)) {
+          conflicts.push(`${change.memberId}: affectation Bloom Bus modifiée`);
+          continue;
+        }
+        updates.push(restoreBusMemberState(member, change.departmentId, change.before));
+      }
+      if (updates.length) {
+        const body = await deltaToWhole('members', updates, []);
+        await assertCanWrite('members', ctx, body);
+        await applyWrite('members', body, undefined, await preservedIds('members', ctx));
+        const updatedIds = new Set(updates.map(m => m.id));
+        restoredMembers = (await readCollection('members') as Member[]).filter(m => updatedIds.has(m.id));
+        poke('members');
+      }
+
+      const buses = await readCollection('bus_lines', true) as any[];
+      for (const version of batch.busVersions ?? []) {
+        const bus = buses.find(b => b.id === version.busId && !b.deletedAt);
+        if (!bus || !unchangedSinceImport(bus, version.updatedAt)) {
+          conflicts.push(`${version.busId}: Bloom Bus modifié ou déjà supprimé`);
+          continue;
+        }
+        // Ne jamais créer de rattachement orphelin : un membre ajouté au bus après l'import,
+        // ou une affectation devenue conflictuelle et donc non restaurée, conserve le bus.
+        if (importedBusHasRemainingMembers(version.busId, currentMembers, updates)) {
+          conflicts.push(`${version.busId}: conservé car des membres y sont encore rattachés`);
+          continue;
+        }
+        deletedBusIds.push(version.busId);
+      }
+      if (deletedBusIds.length) {
+        const body = await deltaToWhole('bus_lines', [], deletedBusIds);
+        await assertCanWrite('bus_lines', ctx, body);
+        await applyWrite('bus_lines', body, undefined, await preservedIds('bus_lines', ctx));
+      }
+    }
+
+    const undoneCount = batch.kind === 'members'
+      ? deletedMemberIds.length
+      : deletedBusIds.length;
+    const updatedBatch: ImportBatch = {
+      ...batch,
+      status: conflicts.length ? 'partial' : 'undone',
+      undoneAt: new Date().toISOString(),
+      undoneById: ctx.member.id,
+      undoneCount,
+      conflicts,
+    };
+    history[batchIndex] = updatedBatch;
+    await setKv('import_batches', history);
+    await auditImport(ctx, 'IMPORT_BATCH_UNDONE', `Lot ${batch.id} annulé : ${undoneCount}/${batch.itemCount}. ${conflicts.length} conflit(s).`);
+    return res.json({ batch: updatedBatch, deletedMemberIds, deletedBusIds, restoredMembers, conflicts });
+  } catch (e) {
+    if (e instanceof GuardError) return res.status(e.status).json({ error: e.message });
+    throw e;
+  }
+});
 
 app.get('/api/v1/:name', requireAuth, async (req, res) => {
   const { name } = req.params;

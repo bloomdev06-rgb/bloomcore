@@ -496,4 +496,34 @@ await assertCanWrite('bus_lines', ctxSA, [{ id: 'bus1', name: 'B1', commune: 'Co
   await assertCanWrite('members', ctxMinistre2, [{ ...byId('m4'), departments: { d1: 'adjoint' } }]);
 }
 
+// --- Adjoint : ajout dans ses départements, sans attribution égale ou supérieure ---
+{
+  setKv('permissions', { view_members: { Adjoint: true } });
+  const adjoint = baseMember({ id: 'm_adj', departments: { d1: 'adjoint' } });
+  const dept2 = { id: 'd2', name: 'D2', ministryId: 'min1', type: 'normal' };
+  await applyWrite('members', [adjoint]);
+  await applyWrite('departments', [{ id: 'd1', name: 'D1', ministryId: 'min1', type: 'normal' }, dept2]);
+  await applyWrite('ministries', ministries as any);
+  const ctxAdjoint = (await buildContext('m_adj'))!;
+  const stored = await readCollection('members');
+  const basicMember = baseMember({ id: 'm_adj_new', departments: { d1: 'membre' } });
+
+  await assertCanWrite('members', ctxAdjoint, [...stored, basicMember]);
+  await assert.rejects(
+    () => assertCanWrite('members', ctxAdjoint, [...stored, { ...basicMember, id: 'm_adj_peer', departments: { d1: 'adjoint' } }]),
+    (e: any) => e instanceof GuardError && e.status === 403 && String(e.message).includes('strictement supérieur'),
+    'un Adjoint ne peut pas créer un pair Adjoint',
+  );
+  await assert.rejects(
+    () => assertCanWrite('members', ctxAdjoint, [...stored, { ...basicMember, id: 'm_adj_pastor', pastoralCursus: 'assistant_pasteur' }]),
+    (e: any) => e instanceof GuardError && e.status === 403 && String(e.message).includes('strictement supérieur'),
+    'un Adjoint ne peut pas attribuer un cursus pastoral de rang Pasteur',
+  );
+  await assert.rejects(
+    () => assertCanWrite('members', ctxAdjoint, [...stored, { ...basicMember, id: 'm_adj_foreign', departments: { d1: 'membre', d2: 'membre' } }]),
+    (e: any) => e instanceof GuardError && e.status === 403 && String(e.message).includes('propres départements'),
+    'un Adjoint ne peut pas ajouter en même temps un département étranger à son périmètre',
+  );
+}
+
 console.log('rbac.check OK');

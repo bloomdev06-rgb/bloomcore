@@ -204,6 +204,49 @@ export interface BloomBusEntity {
   centerLng: number;
 }
 
+export type ImportBatchKind = 'members' | 'bloom_bus';
+export type ImportBatchStatus = 'active' | 'undone' | 'partial';
+
+// Etat minimal restaurable d'une affectation Bloom Bus. `null` signifie que le champ
+// n'existait pas avant l'import ; on évite de stocker le reste du profil et ses données PII.
+export interface ImportBusMemberState {
+  bloomBusId: string | null;
+  busRole: BusRole | null;
+  busRoles: BusRole[] | null;
+  busDepartmentFunction: DeptFunction | null;
+}
+
+export interface ImportBatch {
+  id: string;
+  kind: ImportBatchKind;
+  status: ImportBatchStatus;
+  createdAt: string;
+  createdById: string;
+  createdByName: string;
+  branch: Branch;
+  itemCount: number;
+  memberVersions?: { memberId: string; updatedAt: string }[];
+  busVersions?: { busId: string; updatedAt: string }[];
+  memberChanges?: {
+    memberId: string;
+    departmentId: string;
+    before: ImportBusMemberState;
+    after: ImportBusMemberState;
+  }[];
+  undoneAt?: string;
+  undoneById?: string;
+  undoneCount?: number;
+  conflicts?: string[];
+}
+
+export interface ImportUndoResult {
+  batch: ImportBatch;
+  deletedMemberIds: string[];
+  deletedBusIds: string[];
+  restoredMembers: Member[];
+  conflicts: string[];
+}
+
 export interface AuditLog {
   id: string;
   timestamp: string;

@@ -198,7 +198,11 @@ Responsable opérationnel d'**un seul département à la fois**. Gère son dépa
 - **Confidentialité** : voit les rapports de ses membres **sauf les rapports Bloom Bus (spirituels)** — accessibles seulement s'il est **Coach**, sinon **autorisation requise** (idem rapports pastoraux).
 
 ## 6.4 Adjoint
-**Mêmes droits opérationnels** que le Responsable, mais **asymétrie** : le Responsable accède à **tout ce que fait l'Adjoint** ; l'inverse est **interdit**.
+Peut **ajouter un membre** dans chacun des départements où il est réellement Adjoint. Il ne
+peut attribuer que des niveaux, cursus et fonctions de rang **strictement inférieur** au sien ;
+une fonction ou un cursus de rang égal ou supérieur dépend du Responsable ou de l'autorité
+supérieure compétente. L'asymétrie reste entière : le Responsable accède à **tout ce que fait
+l'Adjoint** ; l'inverse est **interdit**.
 
 ## 6.5 Limites
 Un seul département à la fois ; pas de section Administration ; soft-delete uniquement.

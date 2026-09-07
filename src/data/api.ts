@@ -3,6 +3,7 @@
 // ARCHITECTURE_TECHNIQUE.md §7's "PWA offline-first, localStorage cache"
 // intent: the app must keep working unmodified when the backend isn't running.
 import { toast } from '../components/ui/Toast';
+import type { ImportBatch, ImportBatchKind, ImportBusMemberState, ImportUndoResult } from '../types';
 
 // `VITE_API_BASE` explicite gagne toujours. Sinon : en dev, l'API tourne sur un port distinct
 // (4000) du serveur Vite (3000) → URL absolue ; en prod, le frontend est servi par l'API elle-même
@@ -531,6 +532,74 @@ export async function apiDeleteItem(collection: string, id: string): Promise<boo
     return res.ok;
   } catch {
     return false;
+  }
+}
+
+export async function apiCreateItem(collection: string, item: unknown): Promise<{ ok: boolean; error?: string }> {
+  if (!isAuthed()) return { ok: false, error: 'Session expirée' };
+  try {
+    const res = await fetch(`${API_BASE}/${collection}`, {
+      credentials: 'include',
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...authHeaders() },
+      body: JSON.stringify(item),
+    });
+    if (res.ok) return { ok: true };
+    const data = await res.json().catch(() => ({}));
+    return { ok: false, error: data.error ?? 'Import refusé' };
+  } catch {
+    return { ok: false, error: 'Serveur indisponible' };
+  }
+}
+
+type CreateImportBatchPayload =
+  | { kind: 'members'; memberIds: string[] }
+  | {
+      kind: 'bloom_bus';
+      createdBusIds: string[];
+      memberChanges: { memberId: string; departmentId: string; before: ImportBusMemberState; after: ImportBusMemberState }[];
+    };
+
+export async function apiCreateImportBatch(payload: CreateImportBatchPayload): Promise<{ ok: boolean; batch?: ImportBatch; error?: string }> {
+  if (!isAuthed()) return { ok: false, error: 'Session expirée' };
+  try {
+    const res = await fetch(`${API_BASE}/import-batches`, {
+      credentials: 'include', method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...authHeaders() },
+      body: JSON.stringify(payload),
+    });
+    const data = await res.json().catch(() => ({}));
+    return res.ok ? { ok: true, batch: data } : { ok: false, error: data.error ?? 'Historique non enregistré' };
+  } catch {
+    return { ok: false, error: 'Serveur indisponible' };
+  }
+}
+
+export async function apiListImportBatches(kind: ImportBatchKind): Promise<ImportBatch[] | null> {
+  if (!isAuthed()) return null;
+  try {
+    const res = await fetch(`${API_BASE}/import-batches?kind=${encodeURIComponent(kind)}`, {
+      credentials: 'include', headers: authHeaders(),
+    });
+    if (!res.ok) return null;
+    const data = await res.json();
+    return Array.isArray(data) ? data : null;
+  } catch {
+    return null;
+  }
+}
+
+export async function apiUndoImportBatch(id: string): Promise<{ ok: boolean; result?: ImportUndoResult; error?: string }> {
+  if (!isAuthed()) return { ok: false, error: 'Session expirée' };
+  try {
+    const res = await fetch(`${API_BASE}/import-batches/${encodeURIComponent(id)}/undo`, {
+      credentials: 'include', method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...authHeaders() },
+    });
+    const data = await res.json().catch(() => ({}));
+    return res.ok ? { ok: true, result: data } : { ok: false, error: data.error ?? 'Annulation refusée' };
+  } catch {
+    return { ok: false, error: 'Serveur indisponible' };
   }
 }
 

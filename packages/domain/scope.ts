@@ -100,7 +100,7 @@ export const ROLE_HOME_DEPT: Record<string, string> = {
 // occupy in the general org — not a separate ranking, just these positions in sequence.
 export const RANK_ORDER = [
   'Super Admin', 'Admin', 'Pasteur Principal', 'Pasteur', 'Ministre',
-  'Responsable', 'Adjoint',
+  'Responsable', 'Adjoint', 'Trésorier', 'Coach', 'Leader',
   'Responsable du Département Bloom Bus', 'Responsable de Commune',
   'Responsable de Zone', 'Responsable de section', 'Capitaine de Bus',
   'Membre', 'Nouveau',

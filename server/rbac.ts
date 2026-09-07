@@ -323,6 +323,21 @@ export async function assertCanWrite(name: string, ctx: RbacContext, incoming: a
         if (!afterInScope || !beforeInScope) {
           throw new GuardError(403, `members: ${target.id} hors de votre périmètre`);
         }
+        // Pour une création par un Adjoint sans autre profil supérieur, TOUTES les
+        // affectations demandées doivent être des départements où il est réellement Adjoint.
+        // Le test de portée ci-dessus fonctionne par union (au moins un périmètre correspondant)
+        // et ne suffit donc pas contre une charge utile mêlant un département autorisé et un
+        // second département étranger.
+        const isDepartmentAdjointOnly = roles.includes('Adjoint')
+          && !hasAny(roles, ['Responsable', 'Ministre', 'Pasteur', 'Pasteur Principal', 'Admin', 'Super Admin']);
+        if (!before && isDepartmentAdjointOnly) {
+          const outsideOwnDepartments = Object.keys((target as Member).departments ?? {}).some((departmentId) =>
+            member.departments?.[departmentId] !== 'adjoint'
+            || effectiveBranchFor(member, departmentId) !== effectiveBranchFor(target as Member, departmentId));
+          if (outsideOwnDepartments) {
+            throw new GuardError(403, `members: ${target.id} — un Adjoint ne peut affecter un membre qu'à ses propres départements`);
+          }
+        }
         // Un Responsable de pôle ne reçoit jamais un pouvoir d'édition de fiche par le
         // PATCH générique. Si aucun autre rôle réel ne couvre la cible, seules les routes
         // d'intention /poles peuvent modifier son affectation au pôle et créer un suivi.
@@ -367,22 +382,29 @@ export async function assertCanWrite(name: string, ctx: RbacContext, incoming: a
           }
         }
       }
-      // Pendant hiérarchique de C1 : promotion/rétrogradation d'un AUTRE membre (target.id ≠
-      // self, donc non bloqué par C1 ci-dessus). Un opérateur non full-scope ne peut modifier
-      // ces mêmes champs privilégiés que sur une cible de rang STRICTEMENT inférieur au sien
-      // (Ministre gère ses Responsables et leurs membres, pas un autre Ministre ; Responsable
-      // gère ses membres, pas un pair Responsable).
+      // Pendant hiérarchique de C1 : création/promotion/rétrogradation d'un AUTRE membre
+      // (target.id ≠ self, donc non bloqué par C1 ci-dessus). Un opérateur non full-scope ne
+      // peut créer ou modifier les champs structurants que pour une cible de rang STRICTEMENT
+      // inférieur au sien. La création doit être contrôlée sur le profil proposé : l'ancien
+      // `if (!stored) continue` permettait à un Adjoint/Responsable de créer directement un
+      // Responsable ou un Pasteur, en contournant exactement le plafond appliqué aux éditions.
       {
         const adminsForRank = await readCollection('admins') as AdminAccount[];
         for (const item of await touchedItems(name, incoming)) {
           if (String(item.id) === String(member.id)) continue;
           const stored = storedById.get(String(item.id));
-          if (!stored) continue; // création : pas de rang antérieur à comparer
+          if (!stored) {
+            const targetRolesAfter = resolveRoles(item as Member, adminsForRank, ministries, departments);
+            if (bestRank(roles) >= bestRank(targetRolesAfter)) {
+              throw new GuardError(403, `members: ${item.id} — seul un profil strictement supérieur peut attribuer ce niveau, ce cursus ou cette fonction`);
+            }
+            continue;
+          }
           const changed = ['departments', 'level', 'pastoralCursus'].some(
             (f) => canonical((item as any)[f]) !== canonical((stored as any)[f]),
           );
           if (!changed) continue;
-          const targetRolesBefore = resolveRoles(stored as Member, adminsForRank, ministries);
+          const targetRolesBefore = resolveRoles(stored as Member, adminsForRank, ministries, departments);
           if (bestRank(roles) >= bestRank(targetRolesBefore)) {
             throw new GuardError(403, `members: ${item.id} — rang égal ou supérieur au vôtre, modification refusée`);
           }

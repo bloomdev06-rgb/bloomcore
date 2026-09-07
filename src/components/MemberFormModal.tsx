@@ -6,7 +6,7 @@ import { Avatar } from "./ui/Avatar";
 import { PhotoLightbox } from "./ui/PhotoLightbox";
 import { Modal } from "./ui/Modal";
 import { toast } from "./ui/Toast";
-import { bloomBusRoleOf, COACH_AND_ABOVE } from "../data/scope";
+import { bloomBusRoleOf, COACH_AND_ABOVE, rankOf } from "../data/scope";
 import { labelFor } from "../data";
 import { roleForDeptFn, roleForLevel } from "../../packages/shared/migrate";
 import { nearestBusLines } from "../data/geo";
@@ -168,7 +168,7 @@ export default function MemberFormModal({
       setBaptismStatus(member.baptismStatus);
       setBaptismDate(member.baptismDate ?? "");
       setBaptismViaDepartment(member.baptismViaDepartment ?? false);
-      const firstDept = lockDepartmentId || Object.keys(member.departments)[0] || "dept_louange";
+      const firstDept = lockDepartmentId || Object.keys(member.departments)[0] || departments[0]?.id || "";
       setDeptName(firstDept);
       setDeptRole(asDeptRoleOption(member.departments[firstDept]));
       // Filet §27 — une fiche non encore migrée peut porter une fonction TERRITORIALE dans
@@ -210,7 +210,7 @@ export default function MemberFormModal({
       setBaptismStatus("non_baptise");
       setBaptismDate("");
       setBaptismViaDepartment(false);
-      setDeptName(lockDepartmentId || "dept_louange");
+      setDeptName(lockDepartmentId || departments[0]?.id || "");
       setDeptRole("membre");
       setDepts({});
       setDeptBranches({});
@@ -462,6 +462,10 @@ export default function MemberFormModal({
   if (level === "coach" || level === "leader") draftRoles.add(roleForLevel(level));
   if (["pasteur_titulaire", "pasteur_assistant", "assistant_pasteur"].includes(pastoralCursus)) draftRoles.add("Pasteur");
   const canAssignSecondaryBranch = COACH_AND_ABOVE.some((r) => draftRoles.has(r));
+  // Le client masque les choix qui dépassent le profil courant, mais le serveur refait le
+  // même contrôle sur les rôles réellement dérivés. Un Adjoint peut ainsi créer/affecter un
+  // membre dans son département sans pouvoir nommer un pair, un Responsable ou un Pasteur.
+  const canAssignRole = (targetRole: string) => rankOf(simulatedRole) < rankOf(targetRole);
 
   return (
     <>
@@ -796,10 +800,10 @@ export default function MemberFormModal({
                   onChange={(e) => setLevel(e.target.value as any)}
                   className="w-full border border-bc-border rounded-full px-2 py-1.5 text-xs bg-white"
                 >
-                  <option value="stagiaire">Stagiaire</option>
-                  <option value="boss">Boss</option>
-                  <option value="leader">Leader</option>
-                  <option value="coach">Coach</option>
+                  <option value="stagiaire" disabled={!canAssignRole("Membre")}>Stagiaire</option>
+                  <option value="boss" disabled={!canAssignRole("Membre")}>Boss</option>
+                  <option value="leader" disabled={!canAssignRole("Leader")}>Leader</option>
+                  <option value="coach" disabled={!canAssignRole("Coach")}>Coach</option>
                 </select>
               </div>
 
@@ -811,13 +815,13 @@ export default function MemberFormModal({
                   onChange={(e) => setPastoralCursus(e.target.value as any)}
                   className="w-full border border-bc-border rounded-full px-2 py-1.5 text-xs bg-white"
                 >
-                  <option value="aucun">Aucun</option>
-                  <option value="appele">Appelé</option>
-                  <option value="serviteur">Serviteur</option>
-                  <option value="gagneur_ame">Gagneur d'âme</option>
-                  <option value="assistant_pasteur">Assistant Pasteur</option>
-                  <option value="pasteur_assistant">Pasteur Assistant</option>
-                  <option value="pasteur_titulaire">Pasteur Titulaire</option>
+                  <option value="aucun" disabled={!canAssignRole("Membre")}>Aucun</option>
+                  <option value="appele" disabled={!canAssignRole("Membre")}>Appelé</option>
+                  <option value="serviteur" disabled={!canAssignRole("Membre")}>Serviteur</option>
+                  <option value="gagneur_ame" disabled={!canAssignRole("Membre")}>Gagneur d'âme</option>
+                  <option value="assistant_pasteur" disabled={!canAssignRole("Pasteur")}>Assistant Pasteur</option>
+                  <option value="pasteur_assistant" disabled={!canAssignRole("Pasteur")}>Pasteur Assistant</option>
+                  <option value="pasteur_titulaire" disabled={!canAssignRole("Pasteur")}>Pasteur Titulaire</option>
                 </select>
               </div>
 
@@ -880,7 +884,7 @@ export default function MemberFormModal({
                     className="w-full border border-bc-border rounded-full px-2 py-1.5 text-xs bg-white"
                   >
                     {DEPT_ROLE_OPTIONS.map((r) => (
-                      <option key={r} value={r}>{labelFor(r)}</option>
+                      <option key={r} value={r} disabled={!canAssignRole(roleForDeptFn(r))}>{labelFor(r)}</option>
                     ))}
                   </select>
                 </div>
@@ -910,7 +914,7 @@ export default function MemberFormModal({
                       className="w-full border border-bc-border rounded-full px-2 py-1.5 text-xs bg-white"
                     >
                       {DEPT_ROLE_OPTIONS.map((r) => (
-                        <option key={r} value={r}>{labelFor(r)}</option>
+                        <option key={r} value={r} disabled={!canAssignRole(roleForDeptFn(r))}>{labelFor(r)}</option>
                       ))}
                     </select>
                   </div>

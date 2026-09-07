@@ -21,7 +21,7 @@ import {
   Trash2
 } from "lucide-react";
 import { motion } from "motion/react";
-import { Member, Branch, CommunityLevel, PastoralCursus, Report, AuditLog, PermissionMatrix, FormDef } from "../types";
+import { Member, Branch, CommunityLevel, PastoralCursus, Report, AuditLog, PermissionMatrix, FormDef, ImportUndoResult } from "../types";
 import { useDepartments, useBusLines, useMinistries, useAdmins } from "../data";
 import { resolveMemberRoles } from "../data/roles";
 import { isRed } from "../data/kpi";
@@ -34,6 +34,8 @@ import MemberFormModal, { SCHOOL_LEVELS } from "./MemberFormModal";
 import { Avatar } from "./ui/Avatar";
 import { ConfirmDialog } from "./ui/ConfirmDialog";
 import { staggerParent, staggerItem } from "./ui/motion";
+import { ImportHistoryButton } from "./ImportHistoryButton";
+import { apiCreateImportBatch } from "../data/api";
 
 // Échelle de niveau communautaire teintée charte (au lieu de gris plat) : chaque
 // palier a sa couleur — Coach violet, Leader fushia, Boss céruléen, Stagiaire neutre.
@@ -71,8 +73,9 @@ const PAGE_SIZE = 60; // #13 — nb de fiches montées par page (bouton « Voir 
 interface MembersViewProps {
   members: Member[];
   onUpdateMember: (member: Member) => void;
-  onAddMember: (member: Member) => void;
+  onAddMember: (member: Member) => Promise<boolean>;
   onDeleteMember?: (id: string) => void | Promise<void>;
+  onImportUndone?: (result: ImportUndoResult) => void;
   reports?: Report[];
   onAddReport?: (r: Report) => void;
   activeBranch: Branch;
@@ -92,6 +95,7 @@ export default function MembersView({
   onUpdateMember,
   onAddMember,
   onDeleteMember,
+  onImportUndone,
   reports = [],
   onAddReport,
   activeBranch,
@@ -108,6 +112,14 @@ export default function MembersView({
   const INITIAL_BUS_LINES = useBusLines();
   const ministries = useMinistries();
   const admins = useAdmins();
+  const adjointCreationDepartments = useMemo(
+    () => simulatedRole === 'Adjoint'
+      ? INITIAL_DEPARTMENTS.filter((department) => operator?.departments?.[department.id] === 'adjoint')
+      : INITIAL_DEPARTMENTS,
+    [INITIAL_DEPARTMENTS, operator, simulatedRole],
+  );
+  const canAddMember = ["Pasteur Principal", "Pasteur", "Ministre", "Admin", "Responsable", "Super Admin"].includes(simulatedRole)
+    || (simulatedRole === 'Adjoint' && adjointCreationDepartments.length > 0);
   const [searchTerm, setSearchTerm] = useState("");
   const [filterLevel, setFilterLevel] = useState<CommunityLevel | "all">("all");
   const [filterPastoralCursus, setFilterPastoralCursus] = useState<PastoralCursus | "all">("all");
@@ -285,10 +297,27 @@ export default function MembersView({
       const text = await file.text();
       const branch = activeBranch === "church" || activeBranch === "light" ? activeBranch : "church";
       const { members: toAdd, errors, total } = importMembersFromCsv(text, members, INITIAL_BUS_LINES, branch);
-      toAdd.forEach((m) => onAddMember(m));
+      // Séquentiel : les endpoints ciblés reconstruisent puis fusionnent la collection ; deux
+      // créations concurrentes pourraient partir du même snapshot et s'invalider mutuellement.
+      const createdIds: string[] = [];
+      for (const member of toAdd) {
+        if (await onAddMember(member)) createdIds.push(member.id);
+      }
+      if (createdIds.length) {
+        const history = await apiCreateImportBatch({ kind: 'members', memberIds: createdIds });
+        if (!history.ok) {
+          toast.error(`Import effectué, mais il ne pourra pas être annulé : ${history.error}`);
+          return;
+        }
+      }
       if (total === 0) toast.error("Aucune ligne de données trouvée dans le CSV.");
-      else if (errors.length === 0) toast.success(`${toAdd.length} membre(s) importé(s).`);
-      else toast.success(`${toAdd.length} importé(s), ${errors.length} ignoré(s) (ex. l.${errors[0].line} : ${errors[0].reason}).`);
+      else if (createdIds.length === 0) toast.error(`Aucun membre importé : ${errors.length || toAdd.length} ligne(s) refusée(s).`);
+      else if (errors.length === 0 && createdIds.length === toAdd.length) toast.success(`${createdIds.length} membre(s) importé(s).`);
+      else {
+        const rejected = toAdd.length - createdIds.length;
+        const detail = errors[0] ? ` (ex. l.${errors[0].line} : ${errors[0].reason})` : '';
+        toast.success(`${createdIds.length} importé(s), ${errors.length + rejected} ignoré(s)${detail}.`);
+      }
     } catch {
       toast.error("Impossible de lire le fichier CSV.");
     }
@@ -488,12 +517,11 @@ export default function MembersView({
                 <Upload size={16} />
                 <span className="hidden sm:inline">Import CSV</span>
               </button>
+              {onImportUndone && <ImportHistoryButton kind="members" onUndone={onImportUndone} />}
             </>
           )}
 
-          {["Pasteur Principal", "Pasteur", "Ministre", "Admin", "Responsable", "Super Admin"].includes(
-            simulatedRole,
-          ) && (
+          {canAddMember && (
             <button
               id="member-add-new-btn"
               onClick={openAddForm}
@@ -937,7 +965,7 @@ export default function MembersView({
         onAdd={onAddMember}
         onUpdate={onUpdateMember}
         existingMembers={members}
-        departments={INITIAL_DEPARTMENTS}
+        departments={adjointCreationDepartments}
         busLines={INITIAL_BUS_LINES}
         activeBranch={activeBranch}
         simulatedRole={simulatedRole}

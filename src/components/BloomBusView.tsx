@@ -16,11 +16,11 @@ import {
   Upload,
 } from "lucide-react";
 import { LineChart, Line, XAxis, YAxis, Tooltip, Legend } from "recharts";
-import { Member, Branch, BloomBusEntity, Report, Event, FormDef, Department } from "../types";
+import { Member, Branch, BloomBusEntity, Report, Event, FormDef, Department, ImportBusMemberState, ImportUndoResult } from "../types";
 import { useBusLines, useDepartments, useMinistries, useAdmins, save, labelFor } from "../data";
 import { resolveMemberRoles } from "../data/roles";
-import { importBusesFromCsv } from "../data/busImport";
-import { apiDeleteItem } from "../data/api";
+import { importBusesFromCsv, importBusMemberState } from "../data/busImport";
+import { apiCreateImportBatch, apiCreateItem, apiDeleteItem } from "../data/api";
 import { useSyncedSave } from "../data/useSyncedSave";
 import { CULTE_SLOT_KEYS, culteSlotLabel } from "../data/events";
 import { isBusReportLocked } from "../data/reportLock";
@@ -45,6 +45,7 @@ import { MapContainer, TileLayer, Marker, useMapEvents } from "react-leaflet";
 import { parseGoogleMapsLink, isValidCoordinate } from "../data/geo";
 import { normalizePhone } from "../data/phone";
 import MemberFormModal from "./MemberFormModal";
+import { ImportHistoryButton } from "./ImportHistoryButton";
 
 // §Accueil-1.3/§5 — les 4 critères réellement saisis par le rapport de suivi Bloom Bus
 // (presenceCulte/presenceService sont des compteurs, pas une échelle 1-5 : exclus du smiley/courbe ici).
@@ -104,9 +105,10 @@ interface BloomBusViewProps {
   members: Member[];
   reports: Report[];
   events?: Event[];
-  onUpdateMember: (member: Member) => void;
+  onUpdateMember: (member: Member) => Promise<boolean>;
   onAddReport: (report: Report) => void;
-  onAddMember?: (member: Member) => void;
+  onAddMember?: (member: Member) => Promise<boolean>;
+  onImportUndone?: (result: ImportUndoResult) => void;
   activeBranch: Branch;
   simulatedRole: string;
   forms?: FormDef[];
@@ -120,6 +122,7 @@ export default function BloomBusView({
   onUpdateMember,
   onAddReport,
   onAddMember,
+  onImportUndone,
   activeBranch,
   simulatedRole,
   forms = [],
@@ -157,13 +160,58 @@ export default function BloomBusView({
       const text = await file.text();
       const { buses, memberPatches, errors } = importBusesFromCsv(text, members);
       if (buses.length === 0 && errors.length === 0) { toast.error("Aucune ligne de données trouvée dans le CSV."); return; }
-      setBusLines((prev) => [...prev, ...buses]);
-      memberPatches.forEach((m) => onUpdateMember(m));
-      if (errors.length === 0) toast.success(`${buses.length} bus importé(s).`);
-      else toast.success(`${buses.length} importé(s), ${errors.length} ignoré(s) (ex. l.${errors[0].line} : ${errors[0].reason}).`);
+      const createdBuses: BloomBusEntity[] = [];
+      const successfulPatches: Member[] = [];
+      for (let index = 0; index < buses.length; index++) {
+        const response = await apiCreateItem('bus_lines', buses[index]);
+        if (!response.ok) {
+          errors.push({ line: index + 2, reason: response.error ?? 'Création refusée' });
+          continue;
+        }
+        createdBuses.push(buses[index]);
+        successfulPatches.push(memberPatches[index]);
+      }
+      setBusLines((prev) => [...prev, ...createdBuses]);
+
+      // Une seule modification finale par membre : si la même personne apparaît sur plusieurs
+      // lignes, l'historique garde son état avant import et le dernier état effectivement choisi.
+      const finalPatches = new Map<string, Member>();
+      successfulPatches.forEach(member => finalPatches.set(member.id, member));
+      const memberChanges: { memberId: string; departmentId: string; before: ImportBusMemberState; after: ImportBusMemberState }[] = [];
+      for (const patch of finalPatches.values()) {
+        const before = members.find(member => member.id === patch.id);
+        if (!before || !(await onUpdateMember(patch))) continue;
+        memberChanges.push({
+          memberId: patch.id,
+          departmentId: 'dept_bloom_bus',
+          before: importBusMemberState(before),
+          after: importBusMemberState(patch),
+        });
+      }
+
+      if (createdBuses.length) {
+        const history = await apiCreateImportBatch({
+          kind: 'bloom_bus',
+          createdBusIds: createdBuses.map(bus => bus.id),
+          memberChanges,
+        });
+        if (!history.ok) {
+          toast.error(`Import effectué, mais il ne pourra pas être annulé : ${history.error}`);
+          return;
+        }
+      }
+      if (createdBuses.length === 0) toast.error(`Aucun Bloom Bus importé : ${errors.length} ligne(s) refusée(s).`);
+      else if (errors.length === 0) toast.success(`${createdBuses.length} bus importé(s).`);
+      else toast.success(`${createdBuses.length} importé(s), ${errors.length} ignoré(s) (ex. l.${errors[0].line} : ${errors[0].reason}).`);
     } catch {
       toast.error("Impossible de lire le fichier CSV.");
     }
+  };
+
+  const handleImportUndone = (result: ImportUndoResult) => {
+    const deleted = new Set(result.deletedBusIds);
+    setBusLines(prev => prev.filter(bus => !deleted.has(bus.id)));
+    onImportUndone?.(result);
   };
 
   const [deletingBus, setDeletingBus] = useState<BloomBusEntity | null>(null);
@@ -711,6 +759,7 @@ export default function BloomBusView({
               <button onClick={() => importBusInputRef.current?.click()} title="Importer CSV" className="p-1.5 rounded-full border border-bc-border text-bc-text hover:bg-bc-canvas active-scale">
                 <Upload size={14} />
               </button>
+              {onImportUndone && <ImportHistoryButton kind="bloom_bus" onUndone={handleImportUndone} compact />}
               <button onClick={() => setShowAddBus(true)} title="Ajouter un bus" className="p-1.5 rounded-full bg-bc-green text-white hover:opacity-90 active-scale">
                 <Plus size={14} />
               </button>
