@@ -17,7 +17,7 @@ import {
 } from "lucide-react";
 import { LineChart, Line, XAxis, YAxis, Tooltip, Legend } from "recharts";
 import { Member, Branch, BloomBusEntity, Report, Event, FormDef, Department, ImportBusMemberState, ImportUndoResult } from "../types";
-import { useBusLines, useDepartments, useMinistries, useAdmins, save, labelFor } from "../data";
+import { useBusLines, useMinistries, useAdmins, save, labelFor } from "../data";
 import { resolveMemberRoles } from "../data/roles";
 import { importBusesFromCsv, importBusMemberState } from "../data/busImport";
 import { apiCreateImportBatch, apiCreateItem, apiDeleteItem } from "../data/api";
@@ -103,6 +103,7 @@ function RatingRow({ label, value, onChange }: { label: string; value: number | 
 
 interface BloomBusViewProps {
   members: Member[];
+  departments: Department[];
   reports: Report[];
   events?: Event[];
   onUpdateMember: (member: Member) => Promise<boolean>;
@@ -117,6 +118,7 @@ interface BloomBusViewProps {
 
 export default function BloomBusView({
   members,
+  departments,
   reports,
   events = [],
   onUpdateMember,
@@ -241,7 +243,11 @@ export default function BloomBusView({
   // occupé DANS Bloom Bus (lu dans le département spécial, pas dans le rôle organisationnel
   // résolu qui peut le masquer) détermine la portée ; seule exception : les pasteurs
   // (accès complet, cf. ./data/scope).
-  const departments = useDepartments();
+  // App détient la copie serveur autoritative des départements. Ne pas relire ici via
+  // useDepartments() : après une connexion/purge, son cache peut être vide alors que le
+  // bootstrap a déjà rempli l'état d'App. Dans ce cas le responsable du département Bloom
+  // Bus était réduit à son rôle générique « Responsable » et perdait tous les contrôles du
+  // module (CRUD territorial et nominations).
   const bloomBusRole = operator ? bloomBusRoleOf(operator, departments) : undefined;
   const hasFullBloomBusAccess = operator ? fullBloomBusAccess(operator, simulatedRole, departments) : false;
   // Un rapport saisi par un Capitaine (ou au-dessus) est validé d'office ; saisi par un membre

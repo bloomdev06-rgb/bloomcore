@@ -36,6 +36,7 @@ import { ConfirmDialog } from "./ui/ConfirmDialog";
 import { staggerParent, staggerItem } from "./ui/motion";
 import { ImportHistoryButton } from "./ImportHistoryButton";
 import { apiCreateImportBatch } from "../data/api";
+import { compareMembersByLastName } from "../data/memberSort";
 
 // Échelle de niveau communautaire teintée charte (au lieu de gris plat) : chaque
 // palier a sa couleur — Coach violet, Leader fushia, Boss céruléen, Stagiaire neutre.
@@ -200,12 +201,7 @@ export default function MembersView({
 
       return matchesSearch && matchesBranch && matchesLevel && matchesPastoralCursus && matchesDept && matchesFunction && matchesBaptism && matchesSchoolLevel && matchesRed && matchesScope;
     })
-    .sort((a, b) => {
-      // Sort alphabetically by last name, then first name
-      const nameA = `${a.lastName} ${a.firstName}`.toLowerCase();
-      const nameB = `${b.lastName} ${b.firstName}`.toLowerCase();
-      return nameA.localeCompare(nameB);
-    }),
+    .sort(compareMembersByLastName),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [members, deferredSearch, activeBranch, filterLevel, filterPastoralCursus, filterDept, filterFunction, filterBaptism, filterSchoolLevel, filterRed, operator, activeRoles, ministries]);
 

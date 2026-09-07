@@ -788,6 +788,7 @@ export default function App() {
         return (
           <BloomBusView
             members={members}
+            departments={departments}
             reports={reports}
             events={events}
             onUpdateMember={handleUpdateMember}
