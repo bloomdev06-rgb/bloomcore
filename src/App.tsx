@@ -913,6 +913,7 @@ export default function App() {
         setSelectedDept={setSelectedDept}
         permissionMatrix={permissionMatrix}
         members={members}
+        departments={departments}
         operator={operator}
         onCreateDepartment={() => setShowCreateDept(true)}
         onLogout={handleLogout}

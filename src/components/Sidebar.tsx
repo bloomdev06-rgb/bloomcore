@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Branch, Member, PermissionMatrix } from '../types';
+import { Branch, Department, Member, PermissionMatrix } from '../types';
 import {
   LayoutDashboard, Users, Grid, LayoutList, Bus, Calendar,
   Activity, Heart, GraduationCap, Shield, UserCog, Settings,
@@ -8,7 +8,7 @@ import {
   UserCheck, ClipboardList, Plus, DoorOpen, LogOut, UsersRound
 } from 'lucide-react';
 import { useMediaQuery } from '../hooks/useMediaQuery';
-import { useDepartments, useMinistries, canViewAnyRole } from '../data';
+import { useMinistries, canViewAnyRole } from '../data';
 import { domainStyle } from '../data/domainColors';
 
 interface SidebarProps {
@@ -23,6 +23,7 @@ interface SidebarProps {
   setSelectedDept: (id: string | null) => void;
   permissionMatrix: PermissionMatrix;
   members: Member[];
+  departments: Department[];
   operator?: Member;
   // Ouvre le modal « Créer un département » (monté dans App) — bouton visible pasteurs/admins.
   onCreateDepartment?: () => void;
@@ -41,13 +42,16 @@ export default function Sidebar({
   setSelectedDept,
   permissionMatrix,
   members,
+  departments,
   operator,
   onCreateDepartment,
   onLogout
 }: SidebarProps) {
   const isChurch = activeBranch === 'church';
   const isDesktop = useMediaQuery('(min-width: 1024px)');
-  const departments = useDepartments();
+  // Source autoritative transmise par App après le bootstrap serveur. Une relecture via
+  // useDepartments() pouvait renvoyer un cache vide après reconnexion et masquer toute la
+  // liste, y compris pour un Super Admin.
   const ministries = useMinistries();
   // P4.5 — accordéon Ministère → Départements, au lieu de la liste plate.
   const [expandedMinistries, setExpandedMinistries] = useState<Set<string>>(new Set());
