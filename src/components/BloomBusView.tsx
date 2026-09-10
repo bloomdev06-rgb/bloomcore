@@ -14,6 +14,7 @@ import {
   CalendarDays,
   ClipboardList,
   Upload,
+  Crown,
 } from "lucide-react";
 import { LineChart, Line, XAxis, YAxis, Tooltip, Legend } from "recharts";
 import { Member, Branch, BloomBusEntity, Report, Event, FormDef, Department, ImportBusMemberState, ImportUndoResult } from "../types";
@@ -98,6 +99,19 @@ function RatingRow({ label, value, onChange }: { label: string; value: number | 
         ))}
       </div>
     </div>
+  );
+}
+
+function CaptainBadge({ className = "" }: { className?: string }) {
+  return (
+    <span
+      role="img"
+      aria-label="Capitaine de Bloom Bus"
+      title="Capitaine de Bloom Bus"
+      className={`pointer-events-none absolute z-10 flex h-5 w-5 items-center justify-center rounded-full bg-bc-cerulean text-white ring-2 ring-white shadow-sm ${className}`}
+    >
+      <Crown size={11} strokeWidth={2.5} aria-hidden="true" />
+    </span>
   );
 }
 
@@ -250,6 +264,7 @@ export default function BloomBusView({
   // module (CRUD territorial et nominations).
   const bloomBusRole = operator ? bloomBusRoleOf(operator, departments) : undefined;
   const hasFullBloomBusAccess = operator ? fullBloomBusAccess(operator, simulatedRole, departments) : false;
+  const isCaptain = (member: Member) => bloomBusRolesOf(member, departments).has("Capitaine de Bus");
   // Un rapport saisi par un Capitaine (ou au-dessus) est validé d'office ; saisi par un membre
   // pour lui-même → « en attente » de validation du capitaine.
   const operatorAutoValidates = FULL_SCOPE_ROLES.includes(simulatedRole)
@@ -941,7 +956,7 @@ export default function BloomBusView({
                     type="button"
                     onClick={() => setRoleAssignMemberId(m.id)}
                     title={`${m.firstName} ${m.lastName} — attribuer une fonction`}
-                    className="active-scale"
+                    className="relative active-scale"
                   >
                     <Avatar
                       src={m.avatarUrl}
@@ -949,6 +964,7 @@ export default function BloomBusView({
                       size="sm"
                       className="w-16 h-16 text-base bg-bc-green/15 text-bc-green border-2 border-white"
                     />
+                    {isCaptain(m) && <CaptainBadge className="-left-0.5 -top-0.5" />}
                   </button>
                 ))}
                 {busMembers.length > 6 && (
@@ -1351,12 +1367,15 @@ export default function BloomBusView({
                           disabled={!editable}
                           className="flex items-center gap-3 min-w-0 flex-1 text-left hover:opacity-80 transition-opacity disabled:cursor-default active-scale"
                         >
-                          <Avatar
-                            src={m.avatarUrl}
-                            initials={`${m.firstName[0]}${m.lastName[0]}`}
-                            size="sm"
-                            className="w-10 h-10 bg-white border border-bc-border text-bc-text text-xs shadow-sm shrink-0"
-                          />
+                          <span className="relative shrink-0">
+                            <Avatar
+                              src={m.avatarUrl}
+                              initials={`${m.firstName[0]}${m.lastName[0]}`}
+                              size="sm"
+                              className="w-10 h-10 bg-white border border-bc-border text-bc-text text-xs shadow-sm"
+                            />
+                            {isCaptain(m) && <CaptainBadge className="-right-1 -top-1" />}
+                          </span>
                           <div className="min-w-0 flex-1">
                             <p className="text-sm font-bold text-bc-text truncate">
                               {m.firstName} {m.lastName}
@@ -1707,12 +1726,15 @@ export default function BloomBusView({
         return (
           <Modal open={!!m} onClose={() => setRoleAssignMemberId(null)} title={`${m.firstName} ${m.lastName}`} maxWidth="max-w-sm">
             <div className="flex items-center gap-3">
-              <Avatar
-                src={m.avatarUrl}
-                initials={`${m.firstName[0]}${m.lastName[0]}`}
-                size="sm"
-                className="w-12 h-12 bg-bc-green/15 text-bc-green border border-bc-border shrink-0"
-              />
+              <span className="relative shrink-0">
+                <Avatar
+                  src={m.avatarUrl}
+                  initials={`${m.firstName[0]}${m.lastName[0]}`}
+                  size="sm"
+                  className="w-12 h-12 bg-bc-green/15 text-bc-green border border-bc-border"
+                />
+                {isCaptain(m) && <CaptainBadge className="-right-1 -top-1" />}
+              </span>
               <div className="min-w-0 flex-1">
                 <p className="text-xs text-bc-text-secondary mb-1">Fonction Bloom Bus</p>
                 {renderBusRoleSelect(m)}
