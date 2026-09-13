@@ -125,7 +125,7 @@ export async function purgeClientData(): Promise<void> {
   try { await idbClearAll(); } catch (e) { console.error('[logout] purge IndexedDB impossible', e); }
 }
 
-export function save<T>(key: string, value: T): void {
+export function save<T>(key: string, value: T, sync = true): void {
   if (purgeInProgress) return;
   // QuotaExceededError (photos base64, logs qui grossissent) ne doit pas faire throw
   // dans un useEffect non gardé (crash en boucle, C2). L'écriture serveur suit quand même.
@@ -144,7 +144,7 @@ export function save<T>(key: string, value: T): void {
     console.error(`[save] échec d'écriture "${key}" (quota ?)`, e);
   }
   const name = key.replace(/^bc_/, '');
-  if (syncEnabled && SYNCED_NAMES.has(name)) {
+  if (sync && syncEnabled && SYNCED_NAMES.has(name)) {
     clearTimeout(syncTimers.get(name));
     syncTimers.set(name, setTimeout(() => {
       syncTimers.delete(name);

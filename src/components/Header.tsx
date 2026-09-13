@@ -2,7 +2,9 @@ import React, { useEffect, useRef, useState } from 'react';
 import { Bell, Search, RefreshCw, Layers, CheckCircle, ShieldAlert, Heart, Calendar, Menu, X } from 'lucide-react';
 import { Branch, AppNotification, Member } from '../types';
 import { operatorDisplayName } from '../data/operator';
-import { MULTI_BRANCH_ROLES, GLOBAL_VIEW_ROLES } from '../data/scope';
+import { accessibleBranches } from '../../packages/domain/authorization';
+import { resolveMemberRoles } from '../data/roles';
+import { useAdmins, useDepartments, useMinistries } from '../data';
 import { ThemeToggle } from './ui/theme-toggle';
 import OfflineIndicator from './OfflineIndicator';
 import { Avatar } from './ui/Avatar';
@@ -52,8 +54,12 @@ export default function Header({
   const unreadNotifs = notifications.filter(n => !n.read);
   const isChurch = activeBranch === 'church';
   // Cloisonnement par branche — cf. src/data/scope.ts (PROFILS-INTERFACES).
-  const canSwitchBranch = MULTI_BRANCH_ROLES.includes(simulatedRole);
-  const canGlobalView = GLOBAL_VIEW_ROLES.includes(simulatedRole);
+  const admins = useAdmins();
+  const ministries = useMinistries();
+  const departments = useDepartments();
+  const allowedBranches = operator ? accessibleBranches(operator, resolveMemberRoles(operator, admins, ministries, departments)) : [];
+  const canSwitchBranch = allowedBranches.length > 1;
+  const canGlobalView = allowedBranches.includes('global');
   const operatorInitials = operator ? `${operator.firstName[0]}${operator.lastName[0]}` : 'AG';
   const operatorName = operatorDisplayName(operator);
 
@@ -102,7 +108,7 @@ export default function Header({
   });
 
   const handleBranchSwitch = (branch: Branch) => {
-    if (branch === activeBranch) return;
+    if (branch === activeBranch || !allowedBranches.includes(branch)) return;
     setIsSweepActive(true);
     setActiveBranch(branch);
     setTimeout(() => {

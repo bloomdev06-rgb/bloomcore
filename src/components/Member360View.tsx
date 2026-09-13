@@ -1,7 +1,12 @@
 import React, { useState, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { Member, Branch, Report, AuditLog, PermissionMatrix, Delegation, FormDef, CapabilityOverride, SpecialAuthorization } from '../types';
-import { useDepartments, useBusLines, useProjects, load, resolveCapability, labelFor } from '../data';
+import { useDepartments, useBusLines, useProjects, useAdmins, useMinistries, load, labelFor } from '../data';
+import { resolveMemberRoles } from '../data/roles';
+import { inMemberScopeForRoles, effectiveBranchFor } from '../data/scope';
+import { resolveTargetCapability } from '../../packages/domain/permissions';
+import { departmentAuthority } from '../../packages/domain/authorization';
+import { canReadScopedReport } from '../../packages/domain/reportScope';
 import { responsableIdsFor } from '../data/notificationRules';
 import { busSupervisorsOf, memberAssignmentsByBranch, bloomBusRoleOf } from '../data/scope';
 import { isRed } from '../data/kpi';
@@ -39,7 +44,7 @@ interface Member360ViewProps {
   member: Member;
   onClose: () => void;
   onEdit: (member: Member) => void;
-  onUpdate?: (member: Member) => void;
+  onUpdate?: (member: Member) => void | boolean | Promise<boolean | void>;
   reports?: Report[];
   onAddReport?: (r: Report) => void;
   simulatedRole: string;
@@ -50,16 +55,23 @@ interface Member360ViewProps {
   members?: Member[];
 }
 
-export default function Member360View({ member, onClose, onEdit, onUpdate, reports = [], onAddReport, simulatedRole, audits = [], operator, permissionMatrix, forms = [], members = [] }: Member360ViewProps) {
-  const canManage = ['Pasteur Principal', 'Pasteur', 'Ministre', 'Responsable', 'Coach', 'Admin', 'Super Admin'].includes(simulatedRole);
+export default function Member360View({ member, onClose, onEdit, onUpdate, reports: incomingReports = [], onAddReport, simulatedRole, audits = [], operator, permissionMatrix, forms = [], members = [] }: Member360ViewProps) {
+  const allDepartments = useDepartments();
+  const BUS_LINES = useBusLines();
+  const ministries = useMinistries();
+  const admins = useAdmins();
+  const heldRoles = operator ? [...resolveMemberRoles(operator, admins, ministries, allDepartments)] : [];
+  const scopedRoles = operator ? heldRoles.filter(role => inMemberScopeForRoles(operator, member, [role], BUS_LINES, allDepartments, ministries)) : [];
+  const reports = operator ? incomingReports.filter(r => canReadScopedReport(operator, heldRoles, r, members, allDepartments, ministries, BUS_LINES)) : [];
+  const canManage = scopedRoles.some(role => ['Pasteur Principal', 'Pasteur', 'Ministre', 'Responsable', 'Coach', 'Admin', 'Super Admin'].includes(role));
 
   // §6.2 — progression du niveau communautaire (nouveau→stagiaire→boss→leader→coach).
   const levelIdx = COMMUNITY_LEVELS.indexOf(member.level);
   const nextLevel = onUpdate && levelIdx >= 0 && levelIdx < COMMUNITY_LEVELS.length - 1 ? COMMUNITY_LEVELS[levelIdx + 1] : null;
-  const promoteLevel = () => {
+  const promoteLevel = async () => {
     if (!nextLevel) return;
     const updated = { ...member, level: nextLevel as Member['level'], ...(nextLevel === 'boss' ? { hasPassedToBossForm: true } : {}) };
-    onUpdate?.(updated);
+    if (await onUpdate?.(updated) === false) return;
     // §6.3 — le passage au niveau Boss lève la fiche membre complète (édition pré-remplie).
     if (nextLevel === 'boss') onEdit(updated);
   };
@@ -76,7 +88,7 @@ export default function Member360View({ member, onClose, onEdit, onUpdate, repor
   };
   // Même liste que l'icône d'édition de MembersView (MembersView.tsx:572,784) — la fiche 360
   // ouvre le même formulaire d'édition complet et doit être gardée à l'identique.
-  const canEditProfile = ['Pasteur Principal', 'Pasteur', 'Ministre', 'Admin', 'Responsable', 'Super Admin'].includes(simulatedRole);
+  const canEditProfile = scopedRoles.some(role => ['Pasteur Principal', 'Pasteur', 'Ministre', 'Admin', 'Responsable', 'Super Admin'].includes(role));
   const fullName = `${member.firstName} ${member.lastName}`;
   const memberReports = reports.filter(r => r.content?.memberId === member.id && r.reportType === 'rapport_suivi_coach');
   // P4.9(a) — AuditLog.details est du texte libre qui embarque déjà le nom complet (cf. handleAddMember/handleUpdateMember dans App.tsx).
@@ -99,15 +111,25 @@ export default function Member360View({ member, onClose, onEdit, onUpdate, repor
   const [showPhotoLightbox, setShowPhotoLightbox] = useState(false);
   const [showCoachReportModal, setShowCoachReportModal] = useState(false);
   const [coachReportNotes, setCoachReportNotes] = useState('');
+  const reportDepartments = operator ? allDepartments.filter(d => {
+    const authority = departmentAuthority(operator, heldRoles, d.id, effectiveBranchFor(member, d.id), allDepartments, ministries);
+    return !!member.departments?.[d.id] && !!authority && (authority !== 'Responsable de section'
+      || (!!operator.deptSections?.[d.id] && operator.deptSections[d.id] === member.deptSections?.[d.id]));
+  }) : [];
+  const [reportDepartmentId, setReportDepartmentId] = useState(reportDepartments[0]?.id ?? '');
+  const canWriteMentorReport = !!operator && (member.mentorId === operator.id || scopedRoles.some(r => ['Pasteur', 'Pasteur Principal', 'Admin', 'Super Admin'].includes(r)));
   const handleSaveCoachReport = (e: React.FormEvent) => {
     e.preventDefault();
     if (!operator || !coachReportNotes.trim()) return;
+    if (reportDepartmentId ? !reportDepartments.some(d => d.id === reportDepartmentId) : !canWriteMentorReport) return;
     onAddReport?.({
       id: `rep_coach_${Date.now()}`,
       authorId: operator.id,
       authorName: `${operator.firstName} ${operator.lastName}`,
       authorRole: simulatedRole,
-      targetBranch: member.branch,
+      departmentId: reportDepartmentId || undefined,
+      sectionId: reportDepartmentId && operator.departments?.[reportDepartmentId] === 'responsable_section' ? operator.deptSections?.[reportDepartmentId] : undefined,
+      targetBranch: reportDepartmentId ? effectiveBranchFor(member, reportDepartmentId) : member.branch,
       date: new Date().toISOString().split('T')[0],
       reportType: 'rapport_suivi_coach',
       confidential: true,
@@ -119,8 +141,6 @@ export default function Member360View({ member, onClose, onEdit, onUpdate, repor
   // Départements RÉELS (hook live). La variable s'appelait INITIAL_DEPARTMENTS, ce qui laissait
   // croire au jeu de démonstration codé en dur alors qu'elle contient les données courantes —
   // nom corrigé, l'ambiguïté avait déjà induit un diagnostic erroné.
-  const allDepartments = useDepartments();
-  const BUS_LINES = useBusLines();
   const busLine = BUS_LINES.find(b => b.id === member.bloomBusId);
   // §27 — fonction dans le MODULE Bloom Bus. bloomBusRoleOf est la source unique : elle couvre
   // le champ dédié (busRole), le pont « responsable du département = sommet du module » et les
@@ -146,8 +166,9 @@ export default function Member360View({ member, onClose, onEdit, onUpdate, repor
   const delegations = load('bc_delegations', [] as Delegation[]);
   const capOverrides = load('bc_capability_overrides', [] as CapabilityOverride[]);
   const specialAuths = load('bc_special_authorizations', [] as SpecialAuthorization[]);
-  const canSeeFinances = resolveCapability(permissionMatrix, 'consulter_situation_financiere', operator, simulatedRole, delegations, capOverrides, specialAuths);
-  const canSeeAttendance = resolveCapability(permissionMatrix, 'consulter_historique_presence', operator, simulatedRole, delegations, capOverrides, specialAuths);
+  const canSee = (cap: string) => !!operator && resolveTargetCapability(permissionMatrix, cap, operator, heldRoles, member, allDepartments, ministries, BUS_LINES, delegations, capOverrides, specialAuths);
+  const canSeeFinances = canSee('consulter_situation_financiere');
+  const canSeeAttendance = canSee('consulter_historique_presence');
   const healthData = [
     { subject: 'Spirituel', A: member.healthKPIs.spirituel, fullMark: 5 },
     { subject: 'Social', A: member.healthKPIs.social, fullMark: 5 },
@@ -771,6 +792,12 @@ export default function Member360View({ member, onClose, onEdit, onUpdate, repor
           maxWidth="max-w-lg"
         >
             <form onSubmit={handleSaveCoachReport} className="space-y-4">
+              <label className="block text-xs font-bold text-bc-text-secondary">Origine du suivi
+                <select value={reportDepartmentId} onChange={e => setReportDepartmentId(e.target.value)} className="w-full mt-2 border border-bc-border rounded-xl px-3 py-2 text-sm">
+                  {canWriteMentorReport && <option value="">Accompagnement pastoral / mentorat</option>}
+                  {reportDepartments.map(d => <option key={d.id} value={d.id}>{d.name} — {effectiveBranchFor(member, d.id)}</option>)}
+                </select>
+              </label>
               <div>
                 <label className="text-xs font-bold text-bc-text-secondary">Notes de suivi</label>
                 <textarea

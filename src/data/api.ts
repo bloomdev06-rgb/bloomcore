@@ -465,6 +465,18 @@ export async function apiPatchMember(member: { id: string }): Promise<boolean> {
   }
 }
 
+export async function apiNominatePastoral(id: string, pastoralCursus: string, previousCursus: string): Promise<{ member?: import('../types').Member; error?: string }> {
+  if (!isAuthed()) return { error: 'Connexion requise pour une nomination pastorale.' };
+  try {
+    const response = await fetch(`${API_BASE}/members/${encodeURIComponent(id)}/pastoral-cursus`, {
+      credentials: 'include', method: 'PATCH', headers: { 'Content-Type': 'application/json', ...authHeaders() },
+      body: JSON.stringify({ pastoralCursus, previousCursus }),
+    });
+    const body = await response.json();
+    return response.ok ? { member: body } : { error: body.error ?? 'Nomination refusée.' };
+  } catch { return { error: 'Enregistrement impossible. Vérifiez votre connexion.' }; }
+}
+
 export async function apiDeleteMember(id: string): Promise<boolean> {
   if (!isAuthed()) return false;
   try {
@@ -550,6 +562,18 @@ export async function apiCreateItem(collection: string, item: unknown): Promise<
   } catch {
     return { ok: false, error: 'Serveur indisponible' };
   }
+}
+
+export async function apiSetBusBranch(id: string, branch: 'church' | 'light'): Promise<{ ok: boolean; error?: string }> {
+  if (!isAuthed()) return { ok: false, error: 'Session expirée' };
+  try {
+    const res = await fetch(`${API_BASE}/bus_lines/${encodeURIComponent(id)}`, {
+      credentials: 'include', method: 'PATCH', headers: { 'Content-Type': 'application/json', ...authHeaders() },
+      body: JSON.stringify({ branch }),
+    });
+    const data = await res.json().catch(() => ({}));
+    return res.ok ? { ok: true } : { ok: false, error: data.error ?? 'Branche refusée' };
+  } catch { return { ok: false, error: 'Serveur indisponible' }; }
 }
 
 type CreateImportBatchPayload =

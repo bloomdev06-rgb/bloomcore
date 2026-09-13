@@ -34,7 +34,6 @@ export function parseCsv(text: string): string[][] {
 }
 
 const LEVELS: CommunityLevel[] = ['nouveau', 'stagiaire', 'boss', 'leader', 'coach'];
-const CURSUS: PastoralCursus[] = ['aucun', 'appele', 'serviteur', 'gagneur_ame', 'assistant_pasteur', 'pasteur_assistant', 'pasteur_titulaire'];
 const DEPT_FUNCTIONS: DeptFunction[] = ['responsable', 'adjoint', 'tresorier', 'responsable_section', 'membre', 'capitaine', 'responsable_zone', 'responsable_commune'];
 // §27 — capitaine/responsable_zone/responsable_commune sont des fonctions du MODULE Bloom Bus
 // (busRole), pas du département : le serveur rejette désormais ce vocabulaire dans `departments`.
@@ -126,6 +125,10 @@ export function importMembersFromCsv(
 
     const levelRaw = norm(get(row, 'level')) as CommunityLevel;
     const cursusRaw = norm(get(row, 'pastoralCursus')) as PastoralCursus;
+    if (cursusRaw && cursusRaw !== 'aucun') {
+      result.errors.push({ line, reason: 'Le cursus pastoral se nomme uniquement dans l’onglet Cursus pastoral. Importez le profil avec « aucun ».' });
+      continue;
+    }
     const branchRaw = norm(get(row, 'branch'));
     const genderRaw = norm(get(row, 'gender'));
 
@@ -150,7 +153,7 @@ export function importMembersFromCsv(
       entryDate: now.toISOString().split('T')[0],
       branch: branchRaw === 'light' ? 'light' : branchRaw === 'church' ? 'church' : defaultBranch,
       level: LEVELS.includes(levelRaw) ? levelRaw : 'stagiaire',
-      pastoralCursus: CURSUS.includes(cursusRaw) ? cursusRaw : 'aucun',
+      pastoralCursus: 'aucun',
       ...(departmentId === BUS_DEPT_ID && TERRITORIAL.includes(deptFunction as BusRole)
         ? { departments: {}, busRole: deptFunction as BusRole }
         : { departments: { [departmentId]: deptFunction } }),

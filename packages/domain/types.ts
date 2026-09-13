@@ -197,6 +197,8 @@ export interface AppSettings {
 
 export interface BloomBusEntity {
   id: string;
+  // Required for new writes; absent only on historical buses awaiting regularization.
+  branch?: 'church' | 'light';
   name: string;
   commune: string;
   zone: string;

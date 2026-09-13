@@ -182,7 +182,7 @@ const seesSuivi = async (ctx: any, items: any[]) => (await filterReadable('repor
 // Coach dont le membre suivi lui est explicitement confié (mentorId) → voit
 assert.ok(await seesSuivi(ctxCoach, [suivi]), 'Coach voit le suivi de son membre (§240)');
 // Responsable non-Coach sans autorisation → ne voit pas
-assert.ok(!(await seesSuivi(ctxResp, [suivi])), 'Responsable non-Coach ne voit pas le suivi sans autorisation');
+assert.ok(await seesSuivi(ctxResp, [suivi]), 'Responsable voit le suivi produit dans son département et sa branche');
 // corps pastoral → voit (règle de confidentialité existante préservée)
 assert.ok(await seesSuivi(ctxMinistre, [suivi]), 'corps pastoral voit les rapports confidentiels');
 // exception nominative : SpecialAuthorization à m4 → ouvre le suivi de son périmètre
@@ -192,7 +192,7 @@ assert.ok(await seesSuivi(ctxResp, [suivi]), 'SpecialAuthorization ouvre le suiv
 assert.ok(!(await filterReadable('reports', ctxResp, [suiviM5])).some((r: any) => r.id === 'rep_suivi5'), 'autorisation bornée au périmètre (sujet hors scope invisible)');
 // une autorisation portant sur une AUTRE capacité ne donne pas accès (remplace la précédente)
 await applyWrite('special_authorizations', [{ id: 'sa_other', memberId: 'm4', capability: 'autre_chose', branchId: 'church', grantedById: 'm3', createdAt: '2026-01-01' }]);
-assert.ok(!(await seesSuivi(ctxResp, [suivi])), 'autorisation d\'une autre capacité ne donne pas accès');
+assert.ok(await seesSuivi(ctxResp, [suivi]), 'le droit départemental existe indépendamment d’une exception nominative');
 
 // S4 — émission de notification vers autrui réservée à l'encadrement.
 await assert.rejects(
@@ -347,8 +347,8 @@ assert.deepEqual(
     { id: 'dept_bloom_bus', name: 'Bloom Bus', ministryId: 'min1', type: 'normal', specialFunction: 'bloom_bus' },
   ]);
   await applyWrite('bus_lines', [
-    { id: 'bus1', name: 'B1', commune: 'Cocody', zone: 'Est' },
-    { id: 'bus2', name: 'B2', commune: 'Yopougon', zone: 'Ouest' },
+    { id: 'bus1', name: 'B1', commune: 'Cocody', zone: 'Est', branch: 'church' },
+    { id: 'bus2', name: 'B2', commune: 'Yopougon', zone: 'Ouest', branch: 'church' },
   ] as any);
   await applyWrite('members', [
     superAdmin, pasteur, ministre,
@@ -511,17 +511,17 @@ await assertCanWrite('bus_lines', ctxSA, [{ id: 'bus1', name: 'B1', commune: 'Co
   await assertCanWrite('members', ctxAdjoint, [...stored, basicMember]);
   await assert.rejects(
     () => assertCanWrite('members', ctxAdjoint, [...stored, { ...basicMember, id: 'm_adj_peer', departments: { d1: 'adjoint' } }]),
-    (e: any) => e instanceof GuardError && e.status === 403 && String(e.message).includes('strictement supérieur'),
+    (e: any) => e instanceof GuardError && e.status === 403 && String(e.message).includes('autorité départementale'),
     'un Adjoint ne peut pas créer un pair Adjoint',
   );
   await assert.rejects(
     () => assertCanWrite('members', ctxAdjoint, [...stored, { ...basicMember, id: 'm_adj_pastor', pastoralCursus: 'assistant_pasteur' }]),
-    (e: any) => e instanceof GuardError && e.status === 403 && String(e.message).includes('strictement supérieur'),
+    (e: any) => e instanceof GuardError && e.status === 403 && String(e.message).includes('Cursus pastoral'),
     'un Adjoint ne peut pas attribuer un cursus pastoral de rang Pasteur',
   );
   await assert.rejects(
     () => assertCanWrite('members', ctxAdjoint, [...stored, { ...basicMember, id: 'm_adj_foreign', departments: { d1: 'membre', d2: 'membre' } }]),
-    (e: any) => e instanceof GuardError && e.status === 403 && String(e.message).includes('propres départements'),
+    (e: any) => e instanceof GuardError && e.status === 403 && String(e.message).includes('autorité départementale'),
     'un Adjoint ne peut pas ajouter en même temps un département étranger à son périmètre',
   );
 }

@@ -7,7 +7,9 @@ import { PhotoLightbox } from "./ui/PhotoLightbox";
 import { Modal } from "./ui/Modal";
 import { toast } from "./ui/Toast";
 import { bloomBusRoleOf, COACH_AND_ABOVE, rankOf } from "../data/scope";
-import { labelFor } from "../data";
+import { labelFor, useAdmins, useMinistries } from "../data";
+import { resolveMemberRoles } from '../data/roles';
+import { departmentAuthority, canAssignDepartmentFunction } from '../../packages/domain/authorization';
 import { roleForDeptFn, roleForLevel } from "../../packages/shared/migrate";
 import { nearestBusLines } from "../data/geo";
 import { normalizePhone } from "../data/phone";
@@ -52,7 +54,7 @@ interface MemberFormModalProps {
   onClose: () => void;
   member: Member | null; // null = création
   onAdd: (member: Member) => void;
-  onUpdate: (member: Member) => void;
+  onUpdate: (member: Member) => void | boolean | Promise<boolean | void>;
   existingMembers: Member[];
   departments: Department[];
   busLines: BloomBusEntity[];
@@ -139,6 +141,9 @@ export default function MemberFormModal({
   const [pendingDeptBranch, setPendingDeptBranch] = useState<Branch>("church");
   const [busZone, setBusZone] = useState("");
   const [selectedBloomBusId, setSelectedBloomBusId] = useState("");
+  const ministries = useMinistries();
+  const admins = useAdmins();
+  const operatorRoles = operator ? [...resolveMemberRoles(operator, admins, ministries, departments)] : [];
 
   // Re-hydrate à chaque ouverture — remplace openAddForm()/openEditForm().
   useEffect(() => {
@@ -289,7 +294,7 @@ export default function MemberFormModal({
     // Ne pré-remplit que si le GPS n'est pas déjà réel (saisi/géolocalisé/membre existant) —
     // sinon changer de commune écraserait silencieusement la position réelle du membre.
     if (gpsIsManual) return;
-    const busLine = busLines.find((line) => line.commune.toLowerCase() === val.toLowerCase());
+    const busLine = busLines.find((line) => line.branch === memberBranch && line.commune.toLowerCase() === val.toLowerCase());
     if (busLine) {
       setLat(busLine.centerLat.toString());
       setLng(busLine.centerLng.toString());
@@ -321,21 +326,25 @@ export default function MemberFormModal({
 
   // Sélection en cascade Commune → Zone → Bloom Bus, dérivée des lignes de bus réelles.
   const busZonesForCommune = Array.from(
-    new Set(busLines.filter((b) => b.commune.toLowerCase() === commune.toLowerCase()).map((b) => b.zone)),
+    new Set(busLines.filter((b) => b.branch === memberBranch && b.commune.toLowerCase() === commune.toLowerCase()).map((b) => b.zone)),
   ).sort();
   const busesForZone = busLines.filter(
-    (b) => b.commune.toLowerCase() === commune.toLowerCase() && b.zone === busZone,
+    (b) => b.branch === memberBranch && b.commune.toLowerCase() === commune.toLowerCase() && b.zone === busZone,
   );
 
   // Alternatives par distance réelle — seulement si une vraie position GPS est disponible.
   const parsedLatVal = parseFloat(lat);
   const parsedLngVal = parseFloat(lng);
   const nearbyBuses = gpsIsManual && Number.isFinite(parsedLatVal) && Number.isFinite(parsedLngVal)
-    ? nearestBusLines({ lat: parsedLatVal, lng: parsedLngVal }, busLines).slice(0, 3)
+    ? nearestBusLines({ lat: parsedLatVal, lng: parsedLngVal }, busLines.filter(b => b.branch === memberBranch)).slice(0, 3)
     : [];
 
-  const handleSave = (e: React.FormEvent) => {
+  const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (selectedBloomBusId && busLines.find(b => b.id === selectedBloomBusId)?.branch !== memberBranch
+      && (!member || member.bloomBusId !== selectedBloomBusId || member.branch !== memberBranch)) {
+      toast.error('Choisissez un Bloom Bus de la même branche que le membre.'); return;
+    }
 
     if (!firstName || !lastName || !phone) {
       toast.error("Veuillez remplir les champs obligatoires (Prénom, Nom, Téléphone).");
@@ -383,7 +392,7 @@ export default function MemberFormModal({
     }
 
     if (isEditing && member) {
-      onUpdate({
+      const saved = await onUpdate({
         ...member,
         avatarUrl: avatarUrl || undefined,
         firstName,
@@ -411,6 +420,7 @@ export default function MemberFormModal({
         deptBranches: Object.keys(finalDeptBranches).length ? finalDeptBranches : undefined,
         hasPassedToBossForm: true,
       });
+      if (saved === false) return;
     } else {
       onAdd({
         id: `mem_custom_${Date.now()}`,
@@ -465,7 +475,9 @@ export default function MemberFormModal({
   // Le client masque les choix qui dépassent le profil courant, mais le serveur refait le
   // même contrôle sur les rôles réellement dérivés. Un Adjoint peut ainsi créer/affecter un
   // membre dans son département sans pouvoir nommer un pair, un Responsable ou un Pasteur.
-  const canAssignRole = (targetRole: string) => rankOf(simulatedRole) < rankOf(targetRole);
+  const canAssignRole = (targetRole: string) => operatorRoles.some(role => rankOf(role) < rankOf(targetRole));
+  const canAssignInDepartment = (id: string, role: string, branch: Branch) => !!operator && operator.id !== member?.id
+    && canAssignDepartmentFunction(departmentAuthority(operator, operatorRoles, id, branch, departments, ministries), role);
 
   return (
     <>
@@ -809,20 +821,8 @@ export default function MemberFormModal({
 
               <div>
                 <label className="block text-[10px] font-bold text-bc-text-secondary mb-1">2. {membreLabel('f13', 'Cursus Pastoral')}</label>
-                <select
-                  id="form-pastoral-cursus"
-                  value={pastoralCursus}
-                  onChange={(e) => setPastoralCursus(e.target.value as any)}
-                  className="w-full border border-bc-border rounded-full px-2 py-1.5 text-xs bg-white"
-                >
-                  <option value="aucun" disabled={!canAssignRole("Membre")}>Aucun</option>
-                  <option value="appele" disabled={!canAssignRole("Membre")}>Appelé</option>
-                  <option value="serviteur" disabled={!canAssignRole("Membre")}>Serviteur</option>
-                  <option value="gagneur_ame" disabled={!canAssignRole("Membre")}>Gagneur d'âme</option>
-                  <option value="assistant_pasteur" disabled={!canAssignRole("Pasteur")}>Assistant Pasteur</option>
-                  <option value="pasteur_assistant" disabled={!canAssignRole("Pasteur")}>Pasteur Assistant</option>
-                  <option value="pasteur_titulaire" disabled={!canAssignRole("Pasteur")}>Pasteur Titulaire</option>
-                </select>
+                <p id="form-pastoral-cursus" className="text-xs py-1.5">{labelFor(pastoralCursus)}</p>
+                <p className="text-[10px] text-bc-text-secondary">Modification uniquement dans l’onglet Cursus pastoral.</p>
               </div>
 
               <div>
@@ -884,7 +884,7 @@ export default function MemberFormModal({
                     className="w-full border border-bc-border rounded-full px-2 py-1.5 text-xs bg-white"
                   >
                     {DEPT_ROLE_OPTIONS.map((r) => (
-                      <option key={r} value={r} disabled={!canAssignRole(roleForDeptFn(r))}>{labelFor(r)}</option>
+                      <option key={r} value={r} disabled={!canAssignInDepartment(lockDepartmentId!, roleForDeptFn(r), deptBranches[lockDepartmentId!] ?? memberBranch)}>{labelFor(r)}</option>
                     ))}
                   </select>
                 </div>
@@ -901,7 +901,7 @@ export default function MemberFormModal({
                       className="w-full border border-bc-border rounded-full px-2 py-1.5 text-xs bg-white"
                     >
                       {departments.map((d) => (
-                        <option key={d.id} value={d.id}>{d.name}</option>
+                        <option key={d.id} value={d.id} disabled={!canAssignInDepartment(d.id, 'Membre', pendingDeptBranch)}>{d.name}</option>
                       ))}
                     </select>
                   </div>
@@ -914,7 +914,7 @@ export default function MemberFormModal({
                       className="w-full border border-bc-border rounded-full px-2 py-1.5 text-xs bg-white"
                     >
                       {DEPT_ROLE_OPTIONS.map((r) => (
-                        <option key={r} value={r} disabled={!canAssignRole(roleForDeptFn(r))}>{labelFor(r)}</option>
+                        <option key={r} value={r} disabled={!canAssignInDepartment(deptName, roleForDeptFn(r), pendingDeptBranch)}>{labelFor(r)}</option>
                       ))}
                     </select>
                   </div>

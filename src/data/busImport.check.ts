@@ -21,6 +21,7 @@ const byPhone = run('Bus Téléphone,Cocody,Zone 1,5.35,-3.99,0701020304,,capita
 assert.equal(byPhone.errors.length, 0, 'le téléphone local doit retrouver le membre stocké avec +225');
 assert.equal(byPhone.memberPatches[0]?.id, 'm_phone');
 assert.equal(byPhone.memberPatches[0]?.busRole, 'capitaine');
+assert.equal(byPhone.buses[0]?.branch, 'church', 'branche déduite du capitaine');
 
 const byEmail = run('Bus Email,Cocody,Zone 1,5.35,-3.99,, captain@example.org ,capitaine');
 assert.equal(byEmail.errors.length, 0, 'l’email doit être insensible à la casse et aux espaces');
@@ -35,4 +36,8 @@ const missing = run('Bus Inconnu,Cocody,Zone 1,5.35,-3.99,,absent@example.org,ca
 assert.equal(missing.buses.length, 0);
 assert.match(missing.errors[0]?.reason ?? '', /aucun membre existant/i);
 
+const branchConflict = importBusesFromCsv(`${header},Branche\nBus,Cocody,Zone 1,5.35,-3.99,0701020304,,capitaine,light`, members);
+assert.equal(branchConflict.buses.length, 0, 'colonne Branche contradictoire refusée');
+const otherView = importBusesFromCsv(`${header}\nBus,Cocody,Zone 1,5.35,-3.99,0701020304,,capitaine`, members, new Date(), 'light');
+assert.equal(otherView.buses.length, 0, 'import dans la mauvaise vue refusé');
 console.log('busImport.check OK');

@@ -30,6 +30,7 @@ import { importMembersFromCsv } from "../data/csvImport";
 import { toast } from "./ui/Toast";
 import ReportStatusBoxes from "./ReportStatusBoxes";
 import Member360View from "./Member360View";
+import { memberInBranch } from '../../packages/domain/authorization';
 import MemberFormModal, { SCHOOL_LEVELS } from "./MemberFormModal";
 import { Avatar } from "./ui/Avatar";
 import { ConfirmDialog } from "./ui/ConfirmDialog";
@@ -73,7 +74,7 @@ const PAGE_SIZE = 60; // #13 — nb de fiches montées par page (bouton « Voir 
 
 interface MembersViewProps {
   members: Member[];
-  onUpdateMember: (member: Member) => void;
+  onUpdateMember: (member: Member) => void | boolean | Promise<boolean | void>;
   onAddMember: (member: Member) => Promise<boolean>;
   onDeleteMember?: (id: string) => void | Promise<void>;
   onImportUndone?: (result: ImportUndoResult) => void;
@@ -154,6 +155,9 @@ export default function MembersView({
     const targetRoles = [...resolveMemberRoles(m, admins, ministries, INITIAL_DEPARTMENTS)];
     return canManageAccountOf(operator, operatorRoles, m, targetRoles, simulatedRole, INITIAL_BUS_LINES, INITIAL_DEPARTMENTS, ministries);
   };
+  const canEditMember = (m: Member) => !!operator && activeRoles.some(role =>
+    ['Pasteur Principal', 'Pasteur', 'Ministre', 'Admin', 'Responsable', 'Super Admin'].includes(role)
+    && inMemberScopeForRoles(operator, m, [role], INITIAL_BUS_LINES, INITIAL_DEPARTMENTS, ministries));
 
   // Potential duplicates by phone (the spec's "dédoublonnage" signal).
   const seenPhones = new Set<string>();
@@ -184,7 +188,7 @@ export default function MembersView({
         (m.email && m.email.toLowerCase().includes(deferredSearch.toLowerCase()));
 
       // La branche est pilotée par le commutateur global Church/Light/Global du Header.
-      const matchesBranch = activeBranch === "global" || m.branch === activeBranch;
+      const matchesBranch = memberInBranch(m, activeBranch);
       const matchesLevel = filterLevel === "all" || m.level === filterLevel;
       const matchesPastoralCursus = filterPastoralCursus === "all" || m.pastoralCursus === filterPastoralCursus;
 
@@ -652,14 +656,7 @@ export default function MembersView({
                     </div>
 
                     {/* Edit action */}
-                    {[
-                      "Pasteur Principal",
-                      "Pasteur",
-                      "Ministre",
-                      "Admin",
-                      "Responsable",
-                      "Super Admin",
-                    ].includes(simulatedRole) && (
+                    {canEditMember(member) && (
                       <button
                         id={`edit-member-btn-${member.id}`}
                         onClick={(e) => {
@@ -881,14 +878,7 @@ export default function MembersView({
                         </span>
                       </td>
                       <td className="px-4 py-3 text-right">
-                        {[
-                          "Pasteur Principal",
-                          "Pasteur",
-                          "Ministre",
-                          "Admin",
-                          "Responsable",
-                          "Super Admin",
-                        ].includes(simulatedRole) && (
+                        {canEditMember(member) && (
                           <button
                             onClick={(e) => {
                               e.stopPropagation();
@@ -942,7 +932,7 @@ export default function MembersView({
           reports={reports}
           audits={audits}
           onAddReport={onAddReport}
-          onUpdate={(m) => { onUpdateMember(m); setSelectedMember(m); }}
+          onUpdate={async (m) => { const saved = await onUpdateMember(m); if (saved === false) return false; setSelectedMember(m); return true; }}
           onEdit={(m) => {
             setShowMember360(false);
             openEditForm(m);
@@ -955,6 +945,7 @@ export default function MembersView({
       )}
 
       <MemberFormModal
+        operator={operator}
         open={showFormModal}
         onClose={() => setShowFormModal(false)}
         member={formMember}

@@ -8,7 +8,10 @@ import {
   pendingFollowUps, periodRange, projectProgress, Period, PeriodInput, weeklyActiveCounts, weeklyBaptismCounts,
   weeklyGrowthSeries, weeklyMoissonCounts, weeklyOjCounts,
 } from '../data/kpi';
-import { ROLE_HOME_DEPT } from '../data/scope';
+import { ROLE_HOME_DEPT, effectiveBranchFor } from '../data/scope';
+import { departmentAuthority } from '../../packages/domain/authorization';
+import { resolveMemberRoles } from '../data/roles';
+import { useAdmins } from '../data';
 import { linkMissingBranch } from '../data/departmentFamily';
 import { motion } from 'motion/react';
 import { AreaChart, Area, XAxis, Tooltip, ResponsiveContainer } from 'recharts';
@@ -37,7 +40,7 @@ interface DepartmentsViewProps {
   forms?: FormDef[];
   departments: Department[];
   onUpdateDepartments: React.Dispatch<React.SetStateAction<Department[]>>;
-  onUpdateMember?: (m: Member) => void;
+  onUpdateMember?: (m: Member) => void | boolean | Promise<void | boolean>;
   onAddMember?: (m: Member) => void;
   busLines?: BloomBusEntity[];
   onAddReport?: (r: Report) => void;
@@ -173,11 +176,14 @@ export default function DepartmentsView({ activeBranch, simulatedRole, members =
   const selectedDeptData = departments.find(d => d.id === selectedDept);
   const selectedMinistryData = INITIAL_MINISTRIES.find(m => m.id === selectedDeptData?.ministryId);
   const sf = specialFn(selectedDeptData);
-  const isGlobalAuthority = ['Pasteur Principal', 'Admin', 'Super Admin'].includes(simulatedRole);
-  const isBranchPastor = simulatedRole === 'Pasteur' && (!selectedDeptData?.branch || selectedDeptData.branch === operator?.branch);
-  const isTutoredMinistry = simulatedRole === 'Ministre' && selectedMinistryData?.tuteurId === operator?.id;
-  const isActualDeptResponsable = !!selectedDept && operator?.departments?.[selectedDept] === 'responsable';
-  const isActualDeptAdjoint = !!selectedDept && operator?.departments?.[selectedDept] === 'adjoint';
+  const admins = useAdmins();
+  const authority = operator && selectedDept ? departmentAuthority(operator,
+    resolveMemberRoles(operator, admins, INITIAL_MINISTRIES, departments), selectedDept, activeBranch, departments, INITIAL_MINISTRIES) : undefined;
+  const isGlobalAuthority = ['Pasteur Principal', 'Admin', 'Super Admin'].includes(authority ?? '');
+  const isBranchPastor = authority === 'Pasteur';
+  const isTutoredMinistry = authority === 'Ministre';
+  const isActualDeptResponsable = authority === 'Responsable';
+  const isActualDeptAdjoint = authority === 'Adjoint';
   // Les actions sont liées au département sélectionné, jamais au rôle aplati le plus haut.
   const canManageDeptMembers = isGlobalAuthority || isBranchPastor || isTutoredMinistry || isActualDeptResponsable;
   // L'Adjoint peut créer une fiche dans le département où il est réellement nommé. Les autres
@@ -203,7 +209,7 @@ export default function DepartmentsView({ activeBranch, simulatedRole, members =
   const deptMembersAll = members.filter(m =>
     selectedDept
     && Object.keys(m.departments).includes(selectedDept)
-    && (activeBranch === 'global' || m.branch === activeBranch),
+    && (activeBranch === 'global' || effectiveBranchFor(m, selectedDept) === activeBranch),
   );
   // Une auto-inscription pending reste visible uniquement dans « Réceptions à valider »;
   // elle ne doit pas être comptée dans le roster actif ni dans les statistiques du département.
@@ -1237,7 +1243,11 @@ export default function DepartmentsView({ activeBranch, simulatedRole, members =
           member={show360Member}
           onClose={() => setShow360Member(null)}
           onEdit={(m) => { setShow360Member(null); setEditingMember(m); setShowMemberForm(true); }}
-          onUpdate={(m) => { onUpdateMember?.(m); setShow360Member(m); }}
+          onUpdate={async (m) => {
+            const saved = await onUpdateMember?.(m);
+            if (saved === false) return false;
+            setShow360Member(m);
+          }}
           reports={reports}
           onAddReport={onAddReport}
           simulatedRole={simulatedRole}
@@ -1250,6 +1260,7 @@ export default function DepartmentsView({ activeBranch, simulatedRole, members =
       )}
 
       <MemberFormModal
+        operator={operator}
         open={showMemberForm}
         onClose={() => setShowMemberForm(false)}
         member={editingMember}

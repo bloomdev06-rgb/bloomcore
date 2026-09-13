@@ -135,6 +135,7 @@ export const ProjectPatchSchema = ProjectSchema.partial().extend({ id: z.string(
 // -- bus_lines (packages/domain/types.ts: BloomBusEntity) --
 export const BusLineSchema = z.object({
   id: z.string().min(1),
+  branch: z.enum(['church', 'light']).optional(),
   name: z.string(),
   commune: z.string(),
   zone: z.string(),

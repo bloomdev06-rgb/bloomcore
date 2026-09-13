@@ -1,7 +1,9 @@
 import React, { useState, useDeferredValue } from 'react';
-import { Branch, Member, PastoralCursus, Report } from '../types';
+import { Branch, Member, PastoralCursus, Report, Department, Ministry, BloomBusEntity } from '../types';
 import { Heart, User, ArrowUpCircle, FileText, Share2, Search, PenLine, LayoutList, Network, X } from 'lucide-react';
-import { useBusLines, useDepartments, useMinistries, labelFor } from '../data';
+import { labelFor } from '../data';
+import { apiNominatePastoral } from '../data/api';
+import { canNominatePastoral, memberInBranch, PASTORAL_ORDER } from '../../packages/domain/authorization';
 import { inMemberScopeForRoles } from '../data/scope';
 import { motion } from 'motion/react';
 import { staggerParent, staggerItem } from './ui/motion';
@@ -14,27 +16,31 @@ interface CursusViewProps {
   activeRoles: string[];
   members: Member[];
   onUpdateMember: (m: Member) => void;
+  onPastoralSaved: (m: Member) => void;
+  departments: Department[];
+  ministries: Ministry[];
+  busLines: BloomBusEntity[];
   onAddReport?: (r: Report) => void;
   operator?: Member;
 }
 
 // Pastoral ladder, entry ('Aucun') excluded from the org chart.
-const CURSUS_ORDER: PastoralCursus[] = ['aucun', 'appele', 'serviteur', 'gagneur_ame', 'assistant_pasteur', 'pasteur_assistant', 'pasteur_titulaire'];
+const CURSUS_ORDER = PASTORAL_ORDER;
 const nextCursus = (c: PastoralCursus): PastoralCursus => CURSUS_ORDER[Math.min(CURSUS_ORDER.indexOf(c) + 1, CURSUS_ORDER.length - 1)];
-const isTop = (c: PastoralCursus) => CURSUS_ORDER.indexOf(c) === CURSUS_ORDER.length - 1;
 
 
-export default function CursusView({ activeBranch, simulatedRole, activeRoles, members = [], onUpdateMember, onAddReport, operator }: CursusViewProps) {
-  const busLines = useBusLines();
-  const departments = useDepartments();
-  const ministries = useMinistries();
+export default function CursusView({ activeBranch, simulatedRole, activeRoles, members = [], onUpdateMember, onPastoralSaved, departments, ministries, busLines, onAddReport, operator }: CursusViewProps) {
   const [filterLevel, setFilterLevel] = useState<PastoralCursus | 'all'>('all');
   const [searchTerm, setSearchTerm] = useState('');
   const [viewMode, setViewMode] = useState<'list' | 'tree'>('list');
   const [promoting, setPromoting] = useState<Member | null>(null);
 
   // Spec (Onglet 8) : promotions validées uniquement par le Pasteur Principal.
-  const canManage = simulatedRole === 'Pasteur Principal';
+  const canManage = activeRoles.some(r => ['Super Admin', 'Admin', 'Pasteur Principal'].includes(r));
+  const [newCursus, setNewCursus] = useState<PastoralCursus>('aucun');
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState('');
+  const openNomination = (m: Member) => { setPromoting(m); setNewCursus(m.pastoralCursus); setSaveError(''); };
 
   // §8.2 — mon mentor (niveau directement supérieur) et rédaction d'un rapport pastoral
   // confidentiel sur un filleul confié (mentorId === moi).
@@ -63,16 +69,16 @@ export default function CursusView({ activeBranch, simulatedRole, activeRoles, m
 
   // Branche de la personne connectée — la liste ne montre qu'elle ; l'organigramme
   // montre les 2 branches et met celle-ci en avant.
-  const operatorBranch: Branch = operator?.branch ?? (activeBranch === 'global' ? 'church' : activeBranch);
+  const operatorBranch: Branch = activeBranch;
 
   // Même cloisonnement que MembersView (scope.ts) : un Coach/Responsable ne voit que
   // le cursus des membres de son propre département, pas de tout le branch.
   const cursusBase = members.filter(m =>
     m.pastoralCursus &&
-    m.pastoralCursus !== 'aucun' &&
+    (canManage || m.pastoralCursus !== 'aucun') &&
     (!operator || inMemberScopeForRoles(operator, m, activeRoles, busLines, departments, ministries))
   );
-  const cursusMembers = cursusBase.filter(m => m.branch === operatorBranch);
+  const cursusMembers = cursusBase.filter(m => memberInBranch(m, operatorBranch));
 
   // ponytail: recherche différée → frappe instantanée, le filtrage tourne sur la valeur différée.
   const deferredSearch = useDeferredValue(searchTerm);
@@ -91,18 +97,22 @@ export default function CursusView({ activeBranch, simulatedRole, activeRoles, m
   const maleCount = statsMembers.filter(m => m.gender === 'H').length;
   const femaleCount = statsMembers.filter(m => m.gender === 'F').length;
 
-  const confirmPromotion = () => {
-    if (!promoting) return;
-    onUpdateMember({ ...promoting, pastoralCursus: nextCursus(promoting.pastoralCursus) });
+  const confirmPromotion = async () => {
+    if (!promoting || saving || !operator || !canNominatePastoral(operator, activeRoles, promoting)) return;
+    setSaving(true); setSaveError('');
+    const result = await apiNominatePastoral(promoting.id, newCursus, promoting.pastoralCursus);
+    setSaving(false);
+    if (!result.member) { setSaveError(result.error ?? 'Enregistrement refusé.'); return; }
+    onPastoralSaved(result.member);
     setPromoting(null);
   };
 
   const PromoteBtn = ({ m }: { m: Member }) =>
-    canManage && !isTop(m.pastoralCursus) ? (
+    operator && canNominatePastoral(operator, activeRoles, m) ? (
       <button
-        onClick={(e) => { e.stopPropagation(); setPromoting(m); }}
+        onClick={(e) => { e.stopPropagation(); openNomination(m); }}
         className="p-2 text-bc-text-secondary hover:text-bc-green transition-colors active-scale"
-        title={`Promouvoir → ${labelFor(nextCursus(m.pastoralCursus))}`}
+        title="Modifier le cursus pastoral"
       >
         <ArrowUpCircle size={18} />
       </button>
@@ -219,9 +229,9 @@ export default function CursusView({ activeBranch, simulatedRole, activeRoles, m
                                     {m.branch === 'church' ? 'Bloom Church' : 'Bloom Light'}{mentor ? ` · Mentor : ${mentor.firstName} ${mentor.lastName}` : ''}
                                   </span>
                                 </div>
-                                {canManage && !isTop(m.pastoralCursus) && (
+                                {operator && canNominatePastoral(operator, activeRoles, m) && (
                                   <button
-                                    onClick={() => setPromoting(m)}
+                                    onClick={() => openNomination(m)}
                                     className="p-1 text-bc-text-secondary hover:text-bc-green transition-colors active-scale"
                                     title={`Promouvoir → ${labelFor(nextCursus(m.pastoralCursus))}`}
                                   >
@@ -338,16 +348,19 @@ export default function CursusView({ activeBranch, simulatedRole, activeRoles, m
       {promoting && (
         <Modal open={!!promoting} onClose={() => setPromoting(null)} title="Promotion pastorale" icon={<ArrowUpCircle size={20} className="text-bc-green" />} maxWidth="max-w-md">
           <p className="text-sm text-bc-text-secondary mb-5">
-            Promouvoir <span className="font-bold text-bc-text">{promoting.firstName} {promoting.lastName}</span> dans le cursus pastoral ?
+            Modifier le cursus pastoral de <span className="font-bold text-bc-text">{promoting.firstName} {promoting.lastName}</span>.
           </p>
           <div className="flex items-center justify-center gap-3 mb-6">
             <span className="text-xs font-bold px-3 py-1.5 rounded-full bg-bc-canvas text-bc-text-secondary">{labelFor(promoting.pastoralCursus)}</span>
             <ArrowUpCircle size={16} className="text-bc-green rotate-90" />
-            <span className="text-xs font-bold px-3 py-1.5 rounded-full bg-bc-green text-white">{labelFor(nextCursus(promoting.pastoralCursus))}</span>
+            <select aria-label="Nouveau niveau pastoral" value={newCursus} disabled={saving} onChange={e => setNewCursus(e.target.value as PastoralCursus)} className="border border-bc-border rounded-xl p-2 text-sm">
+              {CURSUS_ORDER.map(level => <option key={level} value={level}>{labelFor(level)}</option>)}
+            </select>
           </div>
+          {saveError && <p role="alert" className="text-sm text-red-700 mb-3">{saveError}</p>}
           <div className="flex gap-3 justify-end pt-3 border-t border-bc-border">
             <button onClick={() => setPromoting(null)} className="px-4 py-2 border border-bc-border text-bc-text-secondary rounded-full text-xs hover:bg-bc-canvas active-scale">Annuler</button>
-            <button onClick={confirmPromotion} className="px-5 py-2 bg-bc-green text-white rounded-full text-xs font-ui font-bold hover:opacity-90 active-scale">Confirmer la promotion</button>
+            <button onClick={confirmPromotion} disabled={saving || newCursus === promoting.pastoralCursus} className="px-5 py-2 bg-bc-green text-white rounded-full text-xs font-ui font-bold hover:opacity-90 active-scale disabled:opacity-40">{saving ? 'Enregistrement…' : 'Confirmer le changement'}</button>
           </div>
         </Modal>
       )}

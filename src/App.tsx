@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useMemo, lazy, Suspense } from 'react';
 import { load, save, seeds, seedOrEmpty, useDepartments, useMinistries, useBusLines, useAdmins, deriveTimeBasedNotifications, apiBootstrap, apiPut, clearAuthToken, apiLogout, purgeClientData, enableSync, canViewAnyRole, openNotificationStream, apiFetchCollection, labelFor, apiCreateMember, apiPatchMember, apiDeleteMember } from './data';
 import { hasServerSession } from './data/api';
+import { accessibleBranches } from '../packages/domain/authorization';
 import { reportName } from './data/reportNames';
 import { resolveMemberRole, resolveMemberRoles } from './data/roles';
 import { isLegacySeedEventId } from './data/events';
@@ -188,6 +189,10 @@ export default function App() {
         return;
       }
       const data = result.data;
+      // Update read-through caches without echoing a server read back through sync.
+      for (const name of ['departments', 'ministries', 'admins', 'bus_lines', 'capability_overrides', 'special_authorizations']) {
+        if (data[name]) save(`bc_${name}`, data[name], false);
+      }
       // Normalise departments (C3) : un membre serveur sans ce champ ferait crasher
       // Object.keys(m.departments) dans Members/Departments/scope.
       if (data.members) {
@@ -217,7 +222,7 @@ export default function App() {
       // les données serveur via load(). ponytail: une vue déjà ouverte garde son état
       // jusqu'au prochain montage, acceptable en offline-first.
       for (const name of ['delegations', 'ministries', 'certifications', 'admins', 'activities', 'integration_reports', 'projects', 'bus_lines']) {
-        if (data[name]) save(`bc_${name}`, data[name]);
+        if (data[name]) save(`bc_${name}`, data[name], false);
       }
       setBootstrapState('ready');
       // Sync serveur activée seulement après avoir lu l'état serveur (B2) : évite que les
@@ -234,6 +239,7 @@ export default function App() {
     const refresh = (collection: string) => {
       void apiFetchCollection(collection).then((list) => {
         if (!list) return;
+        save(`bc_${collection}`, list, false);
         if (collection === 'notifications') setNotifications(list as AppNotification[]);
         if (collection === 'members') setMembers((list as Member[]).map(m => ({ ...m, departments: m.departments ?? {} })));
         if (collection === 'reports') setReports(list as Report[]);
@@ -294,7 +300,7 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [members, settings]);
 
-  const departmentOptions = useDepartments();
+  const departmentOptions = departments;
   // Modal « Créer un département » — ouvert depuis la sidebar (pasteurs/admins).
   const [showCreateDept, setShowCreateDept] = useState(false);
 
@@ -307,8 +313,7 @@ export default function App() {
     if (op) setSimulatedRole(import.meta.env.DEV && op.testRole
       ? op.testRole
       : resolveMemberRole(op, adminAccounts, ministrySeeds, departments));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [loggedInMemberId, members]);
+  }, [loggedInMemberId, members, adminAccounts, ministrySeeds, departments]);
 
   // P1.2 — un seul constructeur de notification, mêmes conventions que AuditLog.
   // ID unique même en boucle synchrone (B8) : Date.now() seul collisionne quand
@@ -428,7 +433,11 @@ export default function App() {
     return creationRequest;
   };
 
-  const handleUpdateMember = (m: Member): Promise<boolean> => {
+  const handleUpdateMember = async (m: Member): Promise<boolean> => {
+    if (hasServerSession() && !(await apiPatchMember(m))) {
+      toast.error('Modification non enregistrée : autorisation refusée ou serveur indisponible.');
+      return false;
+    }
     // P1.2 — un seul point de diff pour toutes les vues qui appellent onUpdateMember
     // (validation de réception, promotion, changement d'affectation, transfert de
     // branche, baptême, drachme…) plutôt qu'un déclencheur dupliqué par vue.
@@ -459,7 +468,7 @@ export default function App() {
 
     setMembers(prev => prev.map(item => item.id === m.id ? m : item));
     // Phase 4 (T4.3) — push immédiat via PATCH (voir commentaire équivalent dans handleAddMember).
-    const updateRequest = apiPatchMember(m).catch(() => false);
+    const updateRequest = Promise.resolve(true);
 
     // Log Audit — P4.16/P4.17 : le transfert de branche et la promotion méritent
     // leur propre actionType/previousValue/newValue plutôt que le générique
@@ -671,7 +680,7 @@ export default function App() {
   // le commutateur — règle du cahier, inchangée. Miroir UI du garde-fou Header.
   useEffect(() => {
     if (!operator) return;
-    if (!activeRoles.some(role => MULTI_BRANCH_ROLES.includes(role)) && operator.branch && activeBranch !== operator.branch) {
+    if (!accessibleBranches(operator, activeRoles).includes(activeBranch)) {
       setActiveBranch(operator.branch);
     } else if (!activeRoles.some(role => GLOBAL_VIEW_ROLES.includes(role)) && activeBranch === 'global') {
       setActiveBranch(operator.branch ?? 'church');
@@ -831,6 +840,10 @@ export default function App() {
       case 'cursus':
         return (
           <CursusView
+            departments={departments}
+            ministries={ministrySeeds}
+            busLines={busLines}
+            onPastoralSaved={m => setMembers(prev => prev.map(item => item.id === m.id ? m : item))}
             activeBranch={activeBranch}
             simulatedRole={simulatedRole}
             activeRoles={activeRoles}

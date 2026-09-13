@@ -4,6 +4,7 @@
 import { getCollection, appendToCollection, mergeCollection } from './datastore.ts';
 import { parseReportPayload } from '../packages/shared/schemas/report.ts';
 import { canonicalize } from '../packages/shared/migrate.ts';
+import { isBusBranch } from '../packages/domain/busBranch.ts';
 
 export class GuardError extends Error {
   status: number;
@@ -168,6 +169,49 @@ export async function applyWrite(
       if (old && canonical(old) === canonical(it)) continue; // inchangé → jamais re-validé
       const check = parseReportPayload(it.reportType, it.content);
       if (!check.ok) throw new GuardError(400, `reports[${it.id}] ${it.reportType} — ${check.error}`);
+    }
+  }
+
+  // Data invariant, including Admin and sync writes: a bus and its occupants share
+  // one branch. Unrelated edits of legacy profiles do not rewrite their affiliation.
+  if (name === 'members') {
+    const buses = new Map((await readCollection('bus_lines')).map(b => [b.id, b]));
+    const finalMembers = new Map(stored.map(m => [m.id, m]));
+    for (const m of toWrite) finalMembers.set(m.id, m);
+    for (const it of toWrite) {
+      if (it.deletedAt || !it.bloomBusId) continue;
+      const old = storedById.get(String(it.id));
+      if (old && !old.deletedAt && old.bloomBusId === it.bloomBusId && old.branch === it.branch
+        && canonical(old.busRole) === canonical(it.busRole) && canonical(old.busRoles) === canonical(it.busRoles)) continue;
+      const bus = buses.get(it.bloomBusId);
+      if (!bus || !isBusBranch(bus.branch) || bus.branch !== it.branch
+        || [...finalMembers.values()].some(m => !m.deletedAt && m.bloomBusId === bus.id && m.branch !== bus.branch)) {
+        throw new GuardError(409, 'members: le Bloom Bus doit être identifié et appartenir à la même branche que le membre');
+      }
+    }
+  }
+  if (name === 'bus_lines') {
+    const members = await readCollection('members');
+    for (const bus of toWrite) {
+      if (bus.deletedAt) continue;
+      if (!isBusBranch(bus.branch)) throw new GuardError(400, 'bus_lines: choisir Church ou Light avant de sauvegarder');
+      if (members.some(m => m.bloomBusId === bus.id && m.branch !== bus.branch)) {
+        throw new GuardError(409, 'bus_lines: des membres rattachés appartiennent à une autre branche ; régularisez leurs affectations avant ce changement');
+      }
+    }
+  }
+
+  if (name === 'reports') {
+    const buses = new Map((await readCollection('bus_lines')).map(b => [b.id, b]));
+    const members = new Map((await readCollection('members')).map(m => [m.id, m]));
+    for (const report of toWrite) {
+      if (report.deletedAt || !String(report.reportType).startsWith('rapport_bloom_bus')) continue;
+      const subject = members.get(report.content?.memberId);
+      const bus = buses.get(report.content?.busId ?? subject?.bloomBusId);
+      if (!bus || !isBusBranch(bus.branch) || report.targetBranch !== bus.branch
+        || (subject && (subject.branch !== bus.branch || subject.bloomBusId !== bus.id))) {
+        throw new GuardError(409, 'reports: le rapport Bloom Bus doit concerner un bus et des membres de la même branche');
+      }
     }
   }
 

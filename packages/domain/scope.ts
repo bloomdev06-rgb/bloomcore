@@ -25,39 +25,29 @@ export function dashboardScope(
   departments: Department[],
   ministries: Ministry[],
 ): DashboardScope {
-  const ownMinistries = role === 'Ministre' ? ministries.filter(m => m.tuteurId === operator?.id) : [];
-  const ownMinistry = ownMinistries[0];
-  // Les affectations RÉELLES du membre priment. ROLE_HOME_DEPT est une table codée en dur,
-  // héritée du mode démonstration (« Simuler profil » faisait semblant d'appartenir à un
-  // département correspondant au rôle choisi) : elle était testée EN PREMIER et écrasait donc
-  // les vraies données. Un responsable du Département Bloom Bus reconnu « Coach » se voyait
-  // ainsi annoncer « votre département (Bloom Praise) » — ROLE_HOME_DEPT.Coach = dept_louange —
-  // et son tableau de bord était calculé sur ce département auquel il n'appartient pas, d'où
-  // des compteurs tous à zéro. Elle ne sert plus que de dernier recours, pour les profils de
-  // test qui n'ont aucun département.
-  const homeDeptId = Object.entries(operator?.departments ?? {}).find(([, fn]) => fn === 'responsable')?.[0]
-    || Object.keys(operator?.departments ?? {})[0]
-    || ROLE_HOME_DEPT[role];
-  const assignedDeptIds = Object.keys(operator?.departments ?? {});
-  const deptIds: string[] | null =
-    role === 'Ministre' ? departments.filter(d => ownMinistries.some(m => m.id === d.ministryId)).map(d => d.id)
-    : ['Responsable', 'Coach', 'Leader'].includes(role) ? (assignedDeptIds.length ? assignedDeptIds : homeDeptId ? [homeDeptId] : [])
-    : null; // Pasteur/Pasteur Principal/Admin/Super Admin → toute l'église.
-
-  if (deptIds === null) return { members, reports, deptIds: null, label: 'Global' };
-
-  const deptSet = new Set(deptIds);
-  const scopedMembers = members.filter(m => Object.keys(m.departments).some(id => deptSet.has(id)));
-  const memberIdSet = new Set(scopedMembers.map(m => m.id));
-  const scopedReports = reports.filter(r =>
-    (r.departmentId && deptSet.has(r.departmentId)) ||
-    (r.content?.memberId && memberIdSet.has(r.content.memberId)));
-  const label = ownMinistries.length > 1 ? 'Mes ministères'
-    : ownMinistry ? ownMinistry.name // les noms de ministère contiennent déjà « Ministère … »
-    : deptIds.length > 1 ? 'Mes départements'
-    : deptIds.length ? `Département ${departments.find(d => d.id === deptIds[0])?.name ?? ''}`
-    : 'Ma portée';
-  return { members: scopedMembers, reports: scopedReports, deptIds, label };
+  if (!operator) return { members: [], reports: [], deptIds: [], label: 'Ma portée' };
+  if (CROSS_BRANCH_ROLES.includes(role)) return { members, reports, deptIds: null, label: 'Global' };
+  const ownMinistries = ministries.filter(m => m.tuteurId === operator.id);
+  const deptIds = departments.filter(d => ['responsable', 'adjoint', 'responsable_section'].includes(operator.departments?.[d.id] ?? '')
+    || (ownMinistries.some(m => m.id === d.ministryId) && (!d.branch || d.branch === operator.branch))).map(d => d.id);
+  const scopedRoles = [...new Set([role, ...Object.values(operator.departments ?? {}).map(roleForDeptFn),
+    ...(ownMinistries.length ? ['Ministre'] : []), ...(operator.level === 'coach' ? ['Coach'] : operator.level === 'leader' ? ['Leader'] : [])])];
+  const scopedMembers = members.filter(m => inMemberScopeForRoles(operator, m, scopedRoles, [], departments, ministries));
+  const scopedReports = reports.filter(r => {
+    if (role === 'Pasteur' && r.targetBranch === operator.branch) return true;
+    if (r.departmentId) {
+      const id = r.departmentId;
+      if (!deptIds.includes(id)) return false;
+      const fn = operator.departments?.[id];
+      if (fn === 'responsable_section' && r.sectionId !== operator.deptSections?.[id]) return false;
+      return r.targetBranch === effectiveBranchFor(operator, id);
+    }
+    return r.targetBranch === operator.branch && (r.authorId === operator.id
+      || members.some(m => m.id === r.content?.memberId && m.mentorId === operator.id));
+  });
+  const label = role === 'Pasteur' ? 'Ma branche' : ownMinistries.length ? 'Mes ministères et départements'
+    : deptIds.length > 1 ? 'Mes départements' : deptIds.length ? 'Département ' + (departments.find(d => d.id === deptIds[0])?.name ?? '') : 'Mon accompagnement';
+  return { members: scopedMembers, reports: scopedReports, deptIds: role === 'Pasteur' ? null : deptIds, label };
 }
 
 // Autorité structurelle dans la branche pour le Pasteur, mais portée inter-branches
@@ -132,7 +122,8 @@ export function canManageAccountOf(
 ): boolean {
   if (target.id === operator.id) return false;
   if (!inMemberScopeForRoles(operator, target, operatorRoles, busLines, departments, ministries)) return false;
-  return bestRank(operatorRoles) < bestRank(targetRoles);
+  const scopedRoles = operatorRoles.filter(role => inMemberScopeForRoles(operator, target, [role], busLines, departments, ministries));
+  return bestRank(scopedRoles) < bestRank(targetRoles);
 }
 
 /**
@@ -166,30 +157,25 @@ export function inMemberScope(
   if (role === 'Pasteur') return operator.branch === target.branch;
 
   if (role === 'Ministre') {
-    if (operator.branch !== target.branch) return false;
     const ownMinistryIds = ministries.filter(m => m.tuteurId === operator.id).map(m => m.id);
     const targetDeptIds = Object.keys(target.departments);
-    return departments.some(d => targetDeptIds.includes(d.id) && ownMinistryIds.includes(d.ministryId));
+    return departments.some(d => targetDeptIds.includes(d.id) && ownMinistryIds.includes(d.ministryId)
+      && effectiveBranchFor(target, d.id) === operator.branch && (!d.branch || d.branch === operator.branch));
   }
 
-  if (role === 'Capitaine de Bus') {
-    return !!operator.bloomBusId && operator.bloomBusId === target.bloomBusId;
-  }
-
-  if (role === 'Responsable de Zone') {
-    const operatorZone = busLines.find(b => b.id === operator.bloomBusId)?.zone;
-    const targetZone = busLines.find(b => b.id === target.bloomBusId)?.zone;
-    return !!operatorZone && operatorZone === targetZone;
-  }
-
-  if (role === 'Responsable de Commune') {
-    const operatorCommune = busLines.find(b => b.id === operator.bloomBusId)?.commune ?? operator.gps?.commune;
-    const targetCommune = busLines.find(b => b.id === target.bloomBusId)?.commune ?? target.gps?.commune;
-    return !!operatorCommune && operatorCommune === targetCommune;
+  if (['Capitaine de Bus', 'Responsable de Zone', 'Responsable de Commune'].includes(role)) {
+    const targetBus = busLines.find(b => b.id === target.bloomBusId);
+    if (!targetBus && role === 'Responsable de Commune') {
+      const commune = busLines.find(b => b.id === operator.bloomBusId)?.commune ?? operator.gps?.commune;
+      return target.branch === operator.branch && !!commune && commune === target.gps?.commune;
+    }
+    return target.branch === operator.branch && !!targetBus && busInScope(operator, targetBus, role, busLines, departments);
   }
 
   const supervisorFunction = DEPARTMENT_SUPERVISOR_FUNCTION[role];
   if (supervisorFunction) {
+    const targetBus = busLines.find(b => b.id === target.bloomBusId);
+    if (role === 'Responsable' && targetBus && fullBloomBusAccess(operator, 'Responsable', departments, target.branch)) return true;
     const operatorDeptIds = Object.entries(operator.departments ?? {})
       .filter(([, fn]) => fn === supervisorFunction)
       .map(([id]) => id);
@@ -293,16 +279,19 @@ export function bloomBusRolesOf(operator: Member, departments: Department[]): Se
   return roles;
 }
 
-// Le rôle le plus haut pilote le périmètre et les droits ; bloomBusRolesOf conserve toutes
-// les fonctions pour les listes hiérarchiques et l'affichage.
+// Libellé principal pour l'affichage uniquement : les autorisations doivent conserver
+// chaque fonction avec son propre périmètre.
 export function bloomBusRoleOf(operator: Member, departments: Department[]): string | undefined {
   const roles = bloomBusRolesOf(operator, departments);
   return BUS_ROLE_LADDER.find((role) => roles.has(role));
 }
 
-export function fullBloomBusAccess(operator: Member, role: string, departments: Department[]): boolean {
-  if (FULL_SCOPE_ROLES.includes(role)) return true;
-  return bloomBusRoleOf(operator, departments) === 'Responsable';
+export function fullBloomBusAccess(operator: Member, role: string, departments: Department[], branch = operator.branch): boolean {
+  if (CROSS_BRANCH_ROLES.includes(role)) return true;
+  if (role === 'Pasteur' && branch === operator.branch) return true;
+  return departments.some(d => d.specialFunction === 'bloom_bus'
+    && operator.departments?.[d.id] === 'responsable'
+    && (!d.branch || d.branch === branch) && effectiveBranchFor(operator, d.id) === branch);
 }
 
 export function busInScope(
@@ -312,17 +301,14 @@ export function busInScope(
   busLines: BloomBusEntity[],
   departments: Department[] = [],
 ): boolean {
-  if (fullBloomBusAccess(operator, role, departments)) return true;
-
-  const bbRole = bloomBusRoleOf(operator, departments);
-  if (bbRole === 'Responsable de Zone') {
-    const operatorZone = busLines.find(b => b.id === operator.bloomBusId)?.zone;
-    return !!operatorZone && operatorZone === bus.zone;
-  }
-  if (bbRole === 'Responsable de Commune') {
-    const operatorCommune = busLines.find(b => b.id === operator.bloomBusId)?.commune ?? operator.gps?.commune;
-    return !!operatorCommune && operatorCommune === bus.commune;
-  }
+  if (fullBloomBusAccess(operator, role, departments, bus.branch)) return true;
+  const ownBus = busLines.find(b => b.id === operator.bloomBusId);
+  if ((bus.branch && bus.branch !== operator.branch) || (ownBus?.branch && bus.branch && ownBus.branch !== bus.branch)) return false;
+  const held = bloomBusRolesOf(operator, departments);
+  const commune = ownBus?.commune ?? operator.gps?.commune;
+  if (held.has('Responsable de Commune') && !!commune && commune === bus.commune) return true;
+  if (held.has('Responsable de Zone') && !!ownBus?.zone && ownBus.zone === bus.zone
+    && !!commune && commune === bus.commune) return true;
   // Capitaine de Bus, Membre, ou aucune fonction Bloom Bus déclarée mais un bus rattaché
   // (bloomBusId) : cantonné à son propre bus. Pas de bus rattaché → aucun accès (fail-closed,
   // contrairement à inMemberScope — l'accès à Bloom Bus doit être explicite).
@@ -331,72 +317,31 @@ export function busInScope(
 
 // Inverse de directReportsOf : le·s superviseur·s territoriaux directs d'UN membre donné
 // (pas de l'opérateur courant). Même chaîne Capitaine → Zone → Commune → Responsable.
-export function busSupervisorsOf(
-  target: Member,
-  members: Member[],
-  busLines: BloomBusEntity[],
-  departments: Department[],
-): Member[] {
-  const bbRole = bloomBusRoleOf(target, departments);
-  const bus = busLines.find((b) => b.id === target.bloomBusId);
-  if ((!bbRole || bbRole === 'Membre' || bbRole === 'Capitaine de Bus') && bus) {
-    return members.filter((m) => bloomBusRoleOf(m, departments) === 'Responsable de Zone'
-      && busLines.find((b) => b.id === m.bloomBusId)?.zone === bus.zone);
-  }
-  if (bbRole === 'Responsable de Zone' && bus) {
-    return members.filter((m) => bloomBusRoleOf(m, departments) === 'Responsable de Commune'
-      && (busLines.find((b) => b.id === m.bloomBusId)?.commune ?? m.gps?.commune) === bus.commune);
-  }
-  if (bbRole === 'Responsable de Commune') {
-    return members.filter((m) => bloomBusRoleOf(m, departments) === 'Responsable');
-  }
-  return [];
+export function busSupervisorsOf(target: Member, members: Member[], busLines: BloomBusEntity[], departments: Department[]): Member[] {
+  return members.filter(m => m.id !== target.id && directReportsOf(m, 'Membre', members, busLines, departments).some(t => t.id === target.id));
 }
 
-// Hiérarchie de remplissage de rapport (spec "semaines/saisie hiérarchique") — qui peut
-// remplir le rapport de qui, à chaque palier Bloom Bus. Même primitive bloomBusRoleOf que
-// busInScope, mais relation de subordination directe (pas de cloisonnement en lecture).
-export function directReportsOf(
-  operator: Member,
-  role: string,
-  members: Member[],
-  busLines: BloomBusEntity[],
-  departments: Department[],
-): Member[] {
-  const bbRole = bloomBusRoleOf(operator, departments);
-
-  if (FULL_SCOPE_ROLES.includes(role)) {
-    return members.filter((m) => bloomBusRoleOf(m, departments) === 'Responsable');
-  }
-  if (bbRole === 'Responsable') {
-    return members.filter((m) => bloomBusRoleOf(m, departments) === 'Responsable de Commune');
-  }
-  if (bbRole === 'Responsable de Commune') {
-    const operatorCommune = busLines.find((b) => b.id === operator.bloomBusId)?.commune ?? operator.gps?.commune;
-    return members.filter((m) => {
-      if (bloomBusRoleOf(m, departments) !== 'Responsable de Zone') return false;
-      const mCommune = busLines.find((b) => b.id === m.bloomBusId)?.commune ?? m.gps?.commune;
-      return !!operatorCommune && operatorCommune === mCommune;
-    });
-  }
-  if (bbRole === 'Responsable de Zone') {
-    const operatorZone = busLines.find((b) => b.id === operator.bloomBusId)?.zone;
-    return members.filter((m) => {
-      if (bloomBusRoleOf(m, departments) !== 'Capitaine de Bus') return false;
-      const mZone = busLines.find((b) => b.id === m.bloomBusId)?.zone;
-      return !!operatorZone && operatorZone === mZone;
-    });
-  }
-  if (bbRole === 'Capitaine de Bus') {
-    return operator.bloomBusId
-      ? members.filter((m) => {
-          if (m.id === operator.id || m.bloomBusId !== operator.bloomBusId) return false;
-          const mRole = bloomBusRoleOf(m, departments);
-          return !mRole || mRole === 'Membre';
-        })
-      : [];
-  }
-  return [];
+export function directReportsOf(operator: Member, role: string, members: Member[], busLines: BloomBusEntity[], departments: Department[]): Member[] {
+  const held = bloomBusRolesOf(operator, departments);
+  const ownBus = busLines.find(b => b.id === operator.bloomBusId);
+  return members.filter(target => {
+    if (target.id === operator.id) return false;
+    const targetRoles = bloomBusRolesOf(target, departments);
+    if (CROSS_BRANCH_ROLES.includes(role)) return targetRoles.has('Responsable');
+    if (role === 'Pasteur' && operator.branch === target.branch && targetRoles.has('Responsable')) return true;
+    if (held.has('Responsable') && fullBloomBusAccess(operator, 'Responsable', departments, target.branch)
+      && targetRoles.has('Responsable de Commune')) return true;
+    if (target.branch !== operator.branch) return false;
+    const bus = busLines.find(b => b.id === target.bloomBusId);
+    const commune = ownBus?.commune ?? operator.gps?.commune;
+    const targetCommune = bus?.commune ?? target.gps?.commune;
+    if (held.has('Responsable de Commune') && targetRoles.has('Responsable de Zone')
+      && !!commune && commune === targetCommune) return true;
+    if (held.has('Responsable de Zone') && targetRoles.has('Capitaine de Bus')
+      && !!ownBus?.zone && ownBus.zone === bus?.zone && !!commune && commune === targetCommune) return true;
+    return held.has('Capitaine de Bus') && !!operator.bloomBusId && operator.bloomBusId === target.bloomBusId
+      && targetRoles.size === 0;
+  });
 }
 
 // Enregistrement direct d'un membre par un responsable hiérarchique Bloom Bus (hors
@@ -421,15 +366,10 @@ export function canFillReportFor(
   members: Member[],
   busLines: BloomBusEntity[],
   departments: Department[],
+  ministries: Ministry[] = [],
 ): boolean {
   if (target.id === operator.id) return true;
-  if (directReportsOf(operator, role, members, busLines, departments).some((m) => m.id === target.id)) return true;
-  const bbRole = bloomBusRoleOf(operator, departments);
-  const isManager = FULL_SCOPE_ROLES.includes(role)
-    || ['Capitaine de Bus', 'Responsable de Zone', 'Responsable de Commune', 'Responsable'].includes(bbRole ?? '');
-  if (!isManager) return false;
-  const bus = busLines.find((b) => b.id === target.bloomBusId);
-  return !!bus && busInScope(operator, bus, role, busLines, departments);
+  return canAssignBusRole(operator, [role], target, 'Membre', busLines, departments, ministries);
 }
 
 // --- Attribution des fonctions Bloom Bus (§27) ---------------------------------------------
@@ -469,24 +409,33 @@ export function canAssignBusRole(
   if (!BUS_ROLE_LADDER.includes(targetRole as typeof BUS_ROLE_LADDER[number])) return false;
 
   // Décision (d) : Pasteurs et Admin passent partout, comme sur le reste de l'application.
-  if (operatorRoles.some(r => FULL_SCOPE_ROLES.includes(r))) return true;
+  if (operatorRoles.some(r => CROSS_BRANCH_ROLES.includes(r))) return true;
+  const targetBus = busLines.find(b => b.id === target.bloomBusId);
+  const branch = targetBus?.branch ?? target.branch;
+  if (operatorRoles.includes('Pasteur') && operator.branch === branch) return true;
 
   // …et le Ministre de tutelle DU ministère qui porte le département Bloom Bus — pas
   // n'importe quel ministre, sinon un ministre d'un autre périmètre nommerait ici. Boucle sur
   // TOUTES les instances (church + light), même correctif dual-branche que bloomBusRoleOf.
   const busDepts = departments.filter(d => d.specialFunction === 'bloom_bus');
-  if (busDepts.some(d => ministries.some(m => m.id === d.ministryId && m.tuteurId === operator.id))) return true;
+  if (branch === operator.branch && busDepts.some(d => (!d.branch || d.branch === branch)
+    && ministries.some(m => m.id === d.ministryId && m.tuteurId === operator.id))) return true;
 
-  const opRole = bloomBusRoleOf(operator, departments);
-  if (!opRole) return false; // aucune fonction Bloom Bus → ne nomme personne
-  if (busRankOf(opRole) >= busRankOf(targetRole)) return false; // (c) strictement en dessous
-
-  // Le responsable du département couvre tout le module ; en dessous, le périmètre
-  // territorial s'applique au bus du membre visé.
-  if (opRole === 'Responsable') return true;
-  const targetBus = busLines.find(b => b.id === target.bloomBusId);
-  if (!targetBus) return false; // membre sans bus → hors de toute zone/commune
-  return busInScope(operator, targetBus, opRole, busLines, departments);
+  if (busRankOf('Responsable') < busRankOf(targetRole)
+    && fullBloomBusAccess(operator, 'Responsable', departments, branch)) return true;
+  if (!targetBus || branch !== operator.branch) return false;
+  const ownBus = busLines.find(b => b.id === operator.bloomBusId);
+  if (ownBus?.branch && ownBus.branch !== branch) return false;
+  const commune = ownBus?.commune ?? operator.gps?.commune;
+  // Ne jamais combiner le rang d'un département dans une autre branche avec
+  // le territoire d'une fonction inférieure dans la branche courante.
+  return [...bloomBusRolesOf(operator, departments)].some(role => {
+    if (busRankOf(role) >= busRankOf(targetRole)) return false;
+    if (role === 'Responsable de Commune') return !!commune && commune === targetBus.commune;
+    if (role === 'Responsable de Zone') return !!commune && commune === targetBus.commune
+      && !!ownBus?.zone && ownBus.zone === targetBus.zone;
+    return role === 'Capitaine de Bus' && operator.bloomBusId === targetBus.id;
+  });
 }
 
 // --- Affectations d'un membre, regroupées par branche (§26) ---------------------------------

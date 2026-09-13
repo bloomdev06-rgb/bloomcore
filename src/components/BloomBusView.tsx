@@ -20,8 +20,9 @@ import { LineChart, Line, XAxis, YAxis, Tooltip, Legend } from "recharts";
 import { Member, Branch, BloomBusEntity, Report, Event, FormDef, Department, ImportBusMemberState, ImportUndoResult } from "../types";
 import { useBusLines, useMinistries, useAdmins, save, labelFor } from "../data";
 import { resolveMemberRoles } from "../data/roles";
+import { departmentAuthority } from "../../packages/domain/authorization";
 import { importBusesFromCsv, importBusMemberState } from "../data/busImport";
-import { apiCreateImportBatch, apiCreateItem, apiDeleteItem } from "../data/api";
+import { apiCreateImportBatch, apiCreateItem, apiDeleteItem, apiSetBusBranch } from "../data/api";
 import { useSyncedSave } from "../data/useSyncedSave";
 import { CULTE_SLOT_KEYS, culteSlotLabel } from "../data/events";
 import { isBusReportLocked } from "../data/reportLock";
@@ -174,7 +175,7 @@ export default function BloomBusView({
     if (!file) return;
     try {
       const text = await file.text();
-      const { buses, memberPatches, errors } = importBusesFromCsv(text, members);
+      const { buses, memberPatches, errors } = importBusesFromCsv(text, members, new Date(), activeBranch);
       if (buses.length === 0 && errors.length === 0) { toast.error("Aucune ligne de données trouvée dans le CSV."); return; }
       const createdBuses: BloomBusEntity[] = [];
       const successfulPatches: Member[] = [];
@@ -248,7 +249,8 @@ export default function BloomBusView({
   const [deletingZone, setDeletingZone] = useState<{ commune: string; zone: string; buses: BloomBusEntity[] } | null>(null);
   const [reassignTarget, setReassignTarget] = useState<string>("");
   const reassignZone = (fromCommune: string, fromZone: string, toCommune: string, toZone: string) => {
-    setBusLines((prev) => prev.map((b) => (b.commune === fromCommune && b.zone === fromZone ? { ...b, commune: toCommune, zone: toZone } : b)));
+    if (activeBranch === 'global') { toast.error('Sélectionnez Church ou Light pour modifier une zone.'); return; }
+    setBusLines((prev) => prev.map((b) => (b.branch === activeBranch && b.commune === fromCommune && b.zone === fromZone ? { ...b, commune: toCommune, zone: toZone } : b)));
     if (selectedLevel.type === "zone" && selectedLevel.id === fromZone && selectedLevel.commune === fromCommune) setSelectedLevel({ type: "root" });
   };
 
@@ -263,14 +265,37 @@ export default function BloomBusView({
   // Bus était réduit à son rôle générique « Responsable » et perdait tous les contrôles du
   // module (CRUD territorial et nominations).
   const bloomBusRole = operator ? bloomBusRoleOf(operator, departments) : undefined;
-  const hasFullBloomBusAccess = operator ? fullBloomBusAccess(operator, simulatedRole, departments) : false;
+  const ministriesForBus = useMinistries();
+  const adminsForBus = useAdmins();
+  const operatorRolesForBus = operator ? [...resolveMemberRoles(operator, adminsForBus, ministriesForBus, departments)] : [];
+  const hasFullBloomBusAccess = !!operator && (operatorRolesForBus.some(role => fullBloomBusAccess(operator, role, departments, activeBranch))
+    || departments.some(d => d.specialFunction === 'bloom_bus'
+      && departmentAuthority(operator, operatorRolesForBus, d.id, activeBranch, departments, ministriesForBus) === 'Ministre'));
+  const canRegularizeBranches = operatorRolesForBus.some(role => ['Admin', 'Super Admin', 'Pasteur Principal'].includes(role));
+  const unresolvedBuses = canRegularizeBranches ? busLines.filter(b => !b.branch || members.some(m => m.bloomBusId === b.id && m.branch !== b.branch)) : [];
+  const [savingBranchId, setSavingBranchId] = useState<string | null>(null);
+  const regularizeBranch = async (bus: BloomBusEntity, branch: 'church' | 'light') => {
+    if (savingBranchId) return;
+    if (members.some(m => m.bloomBusId === bus.id && m.branch !== branch)) {
+      toast.error('Réaffectez d’abord les membres de l’autre branche vers un bus de leur branche.'); return;
+    }
+    setSavingBranchId(bus.id);
+    try {
+      const result = await apiSetBusBranch(bus.id, branch);
+      if (!result.ok) { toast.error(result.error ?? 'Branche refusée'); return; }
+      setBusLines(prev => prev.map(b => b.id === bus.id ? { ...b, branch } : b));
+      toast.success('Branche du Bloom Bus enregistrée.');
+    } finally { setSavingBranchId(null); }
+  };
   const isCaptain = (member: Member) => bloomBusRolesOf(member, departments).has("Capitaine de Bus");
   // Un rapport saisi par un Capitaine (ou au-dessus) est validé d'office ; saisi par un membre
   // pour lui-même → « en attente » de validation du capitaine.
   const operatorAutoValidates = FULL_SCOPE_ROLES.includes(simulatedRole)
     || ["Capitaine de Bus", "Responsable de Zone", "Responsable de Commune", "Responsable"].includes(bloomBusRole ?? "");
   const visibleBusLines = operator
-    ? busLines.filter((b) => busInScope(operator, b, simulatedRole, busLines, departments))
+    ? busLines.filter((b) => (activeBranch === 'global' || b.branch === activeBranch)
+      && (hasFullBloomBusAccess || operatorRolesForBus.some(role => busInScope(operator,
+        { ...b, branch: b.branch ?? (activeBranch === 'global' ? undefined : activeBranch) }, role, busLines, departments))))
     : busLines;
 
   const ownBus = operator ? busLines.find((b) => b.id === operator.bloomBusId) : undefined;
@@ -449,9 +474,6 @@ export default function BloomBusView({
   // fiche membre les affiche en lecture seule. Les options sont ouvertes une par une par
   // canAssignBusRole (rang strictement supérieur ET membre dans le périmètre) — la même
   // fonction que le garde serveur, pour que l'écran ne propose rien que le serveur refuserait.
-  const ministriesForBus = useMinistries();
-  const adminsForBus = useAdmins();
-  const operatorRolesForBus = operator ? [...resolveMemberRoles(operator, adminsForBus, ministriesForBus)] : [];
   const BUS_ROLE_CHOICES: { value: string; role: string }[] = [
     { value: "", role: "Membre" },
     { value: "capitaine", role: "Capitaine de Bus" },
@@ -627,7 +649,11 @@ export default function BloomBusView({
     if (!targetMemberId || !operator) return;
     const targetMember = members.find((m) => m.id === targetMemberId);
     if (!targetMember) return;
-    if (!canFillReportFor(operator, targetMember, simulatedRole, members, busLines, departments)) return;
+    const reportBus = busLines.find(b => b.id === targetMember.bloomBusId);
+    if (!reportBus?.branch || reportBus.branch !== targetMember.branch) {
+      toast.error('Régularisez la branche du Bloom Bus avant de saisir ce rapport.'); return;
+    }
+    if (!operatorRolesForBus.some(role => canFillReportFor(operator, targetMember, role, members, busLines, departments, ministriesForBus))) return;
     // Re-check défensif — le bouton "Enregistrer" est déjà désactivé tant que ces champs manquent.
     if (!selectedWeek || sprVal == null || socVal == null || finVal == null || phyVal == null || !culte) return;
     // Verrou 24h : rempli et/ou validé → plus modifiable 24h après (le serveur refuse aussi).
@@ -655,7 +681,7 @@ export default function BloomBusView({
       authorId: operator.id,
       authorName: `${operator.firstName} ${operator.lastName}`,
       authorRole: simulatedRole,
-      targetBranch: activeBranch,
+      targetBranch: reportBus.branch,
       date: new Date().toISOString().split("T")[0],
       weekOf: selectedWeek,
       reportType: "rapport_bloom_bus_member",
@@ -721,12 +747,14 @@ export default function BloomBusView({
   const handleSaveLifeReport = (e: React.FormEvent) => {
     e.preventDefault();
     if (selectedLevel.type !== "bus" || !operator) return; // rapport de vie = par bus uniquement
+    const reportBus = busLines.find(b => b.id === selectedLevel.id);
+    if (!reportBus?.branch) { toast.error('Régularisez la branche du Bloom Bus avant de saisir ce rapport.'); return; }
     onAddReport({
       id: `rep_bus_life_${Date.now()}`,
       authorId: operator.id,
       authorName: `${operator.firstName} ${operator.lastName}`,
       authorRole: simulatedRole,
-      targetBranch: activeBranch,
+      targetBranch: reportBus.branch,
       date: new Date().toISOString().split("T")[0],
       reportType: "rapport_bloom_bus_life",
       confidential: false,
@@ -787,6 +815,21 @@ export default function BloomBusView({
             </div>
           )}
         </div>
+        {unresolvedBuses.length > 0 && (
+          <section className="mb-3 p-3 border border-bc-border rounded-xl text-sm" aria-label="Branches Bloom Bus à régulariser">
+            <p className="font-bold">Branches à régulariser ({unresolvedBuses.length})</p>
+            <p className="text-xs text-bc-text-secondary my-2">Un bus, une branche. En cas de membres Church et Light mélangés, corrigez leurs rattachements avant de choisir.</p>
+            {unresolvedBuses.map(bus => (
+              <label key={bus.id} className="block mt-2">{bus.name}
+                <select aria-label={`Branche de ${bus.name}`} value="" disabled={savingBranchId !== null}
+                  onChange={e => { if (e.target.value) void regularizeBranch(bus, e.target.value as 'church' | 'light'); }}
+                  className="w-full border border-bc-border rounded-lg p-2 bg-white">
+                  <option value="">Choisir une branche</option><option value="church">Bloom Church</option><option value="light">Bloom Light</option>
+                </select>
+              </label>
+            ))}
+          </section>
+        )}
         {hasFullBloomBusAccess && (
           <button
             onClick={() => setSelectedLevel({ type: "root" })}
@@ -1355,7 +1398,7 @@ export default function BloomBusView({
                   </div>
                 ) : (
                   rosterMembers.map((m) => {
-                    const editable = !!operator && canFillReportFor(operator, m, simulatedRole, members, busLines, departments);
+                    const editable = !!operator && operatorRolesForBus.some(role => canFillReportFor(operator, m, role, members, busLines, departments, ministriesForBus));
                     return (
                       <div
                         key={m.id}
@@ -1693,9 +1736,12 @@ export default function BloomBusView({
 
       {showAddBus && (
         <AddBusModal
-          busLines={busLines}
+          busLines={visibleBusLines}
+          activeBranch={activeBranch}
           onClose={() => setShowAddBus(false)}
-          onAdd={(bus) => {
+          onAdd={async (bus) => {
+            const result = await apiCreateItem('bus_lines', bus);
+            if (!result.ok) { toast.error(result.error ?? 'Création refusée'); return; }
             setBusLines((prev) => [...prev, bus]);
             setShowAddBus(false);
           }}
@@ -1752,8 +1798,8 @@ export default function BloomBusView({
           activeBuses={activeBuses}
           defaultBusId={selectedLevel.type === "bus" ? selectedLevel.id : activeBuses[0]?.id}
           onClose={() => setShowAttachExisting(false)}
-          onAttach={(m, busId) => {
-            onUpdateMember({ ...m, bloomBusId: busId });
+          onAttach={async (m, busId) => {
+            if (!(await onUpdateMember({ ...m, bloomBusId: busId }))) return;
             setShowAttachExisting(false);
             toast.success(`${m.firstName} ${m.lastName} rattaché(e) au bus.`);
           }}
@@ -1838,7 +1884,7 @@ function AttachExistingMemberModal({
   activeBuses: BloomBusEntity[];
   defaultBusId?: string;
   onClose: () => void;
-  onAttach: (member: Member, busId: string) => void;
+  onAttach: (member: Member, busId: string) => void | Promise<void>;
 }) {
   const [query, setQuery] = useState("");
   const [busId, setBusId] = useState(defaultBusId ?? "");
@@ -1849,6 +1895,7 @@ function AttachExistingMemberModal({
     ? []
     : members
         .filter((m) => {
+          if (!busId || m.branch !== activeBuses.find(b => b.id === busId)?.branch) return false;
           const fullName = `${m.firstName} ${m.lastName}`.toLowerCase();
           const matchesName = fullName.includes(normalizedQuery);
           const matchesPhone = normalizedQueryPhone.length >= 4 && normalizePhone(String(m.phone)).includes(normalizedQueryPhone);
@@ -1951,12 +1998,14 @@ function LocationPicker({ lat, lng, onPick }: { lat: number; lng: number; onPick
   );
 }
 
-function AddBusModal({ busLines, onClose, onAdd }: { busLines: BloomBusEntity[]; onClose: () => void; onAdd: (b: BloomBusEntity) => void }) {
+function AddBusModal({ busLines, activeBranch, onClose, onAdd }: { busLines: BloomBusEntity[]; activeBranch: Branch; onClose: () => void; onAdd: (b: BloomBusEntity) => void | Promise<void> }) {
+  const [branch, setBranch] = useState<'church' | 'light' | ''>(activeBranch === 'global' ? '' : activeBranch);
+  const [saving, setSaving] = useState(false);
   // Chaque bus porte sa propre paire commune+zone (pas d'entité Zone séparée avec une
   // commune parente unique) : une zone n'est donc pas exclusive à une seule commune,
   // toutes deux sont de simples listes de valeurs déjà utilisées dans l'app.
-  const communes = Array.from(new Set(busLines.map((b) => b.commune))).sort();
-  const zones = Array.from(new Set(busLines.map((b) => b.zone))).sort();
+  const communes = Array.from(new Set(busLines.filter(b => b.branch === branch).map((b) => b.commune))).sort();
+  const zones = Array.from(new Set(busLines.filter(b => b.branch === branch).map((b) => b.zone))).sort();
 
   const [name, setName] = useState("");
   const [commune, setCommune] = useState(communes[0] ?? NEW_OPTION);
@@ -2002,21 +2051,31 @@ function AddBusModal({ busLines, onClose, onAdd }: { busLines: BloomBusEntity[];
     setMapKey((k) => k + 1); // recentre la carte sur le point importé, sans perturber le clic/glisser
   };
 
-  const submit = () => {
+  const submit = async () => {
+    if (saving) return;
+    if (!branch) { toast.error('Choisissez la branche du Bloom Bus.'); return; }
     if (!name.trim() || !effectiveCommune || !effectiveZone || !coordsValid) return;
-    onAdd({
+    setSaving(true);
+    try { await onAdd({
       id: `bus_${Date.now()}`,
+      branch,
       name: name.trim(),
       commune: effectiveCommune,
       zone: effectiveZone,
       centerLat: parsedLat,
       centerLng: parsedLng,
-    });
+    }); } catch { toast.error('Impossible de créer le Bloom Bus.'); } finally { setSaving(false); }
   };
 
   return (
     <Modal open={true} onClose={onClose} title="Ajouter un bus" maxWidth="max-w-md">
         <div className="space-y-3">
+          <label className="block text-sm">Branche
+            <select aria-label="Branche du Bloom Bus" value={branch} disabled={activeBranch !== 'global' || saving}
+              onChange={e => setBranch(e.target.value as 'church' | 'light' | '')} className="w-full border border-bc-border rounded-xl px-3 py-2">
+              <option value="">Choisir une branche</option><option value="church">Bloom Church</option><option value="light">Bloom Light</option>
+            </select>
+          </label>
           <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Nom du bus" className="w-full border border-bc-border rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-bc-green" />
 
           <div>
@@ -2083,7 +2142,7 @@ function AddBusModal({ busLines, onClose, onAdd }: { busLines: BloomBusEntity[];
             </p>
           )}
         </div>
-        <button onClick={submit} disabled={!name.trim() || !effectiveCommune || !effectiveZone || !coordsValid} className="w-full mt-5 bg-bc-green text-white rounded-full py-2.5 text-sm font-bold hover:opacity-90 disabled:opacity-40 active-scale">
+        <button onClick={submit} disabled={saving || !branch || !name.trim() || !effectiveCommune || !effectiveZone || !coordsValid} className="w-full mt-5 bg-bc-green text-white rounded-full py-2.5 text-sm font-bold hover:opacity-90 disabled:opacity-40 active-scale">
           Ajouter le bus
         </button>
     </Modal>

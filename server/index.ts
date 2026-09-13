@@ -16,6 +16,7 @@ import { getCollection, setCollection, appendToCollection, getKv, setKv, getCred
 import { hashPassword, verifyPassword, signToken, verifyToken, createOneTimeToken, consumeOneTimeToken, upsertCredentials, requireSecret, usingInsecureSecret, resolveBindHost, TOKEN_TTL_MS } from './auth.ts';
 import { ensureSeeded } from './seed.ts';
 import { runBusRoleMigration } from './migrateBusRoles.ts';
+import { runBusBranchMigration } from './migrateBusBranches.ts';
 import { runActionsProphetiquesMigration } from './migrateActionsProphetiques.ts';
 import { runBootMigration } from './bootMigrate.ts';
 import { applyWrite, readCollection, deltaToWhole, GuardError } from './guards.ts';
@@ -48,6 +49,7 @@ await ensureSeeded();
 // no-op à tous les démarrages suivants. Sans elle, un membre ne peut pas cumuler une fonction
 // du département et une fonction du module — les deux occuperaient le même emplacement.
 await runBusRoleMigration();
+await runBusBranchMigration();
 await runActionsProphetiquesMigration();
 
 const app = express();
@@ -380,7 +382,7 @@ app.post('/api/v1/auth/register', async (req, res) => {
   // pas de coordonnée fixe par défaut si la commune ne matche aucun bus existant, plutôt qu'une
   // fausse position partagée par tous les inscrits.
   const busLine = (await readCollection('bus_lines')).find(
-    (b: any) => String(b.commune).toLowerCase() === input.commune.toLowerCase(),
+    (b: any) => b.branch === input.branch && String(b.commune).toLowerCase() === input.commune.toLowerCase(),
   );
   const gps = busLine ? { lat: busLine.centerLat, lng: busLine.centerLng, commune: input.commune } : undefined;
 
@@ -624,6 +626,38 @@ app.post('/api/v1/members', requireAuth, async (req, res) => {
     // identique au comportement du PUT whole-array (voir plus bas dans ce fichier).
     for (const m of added) await issueAuthLink(m, 'activate');
     return res.status(201).json(added.find((m: any) => String(m.id) === String(member.id)) ?? member);
+  } catch (e) {
+    if (e instanceof GuardError) return res.status(e.status).json({ error: e.message });
+    throw e;
+  }
+});
+
+app.patch('/api/v1/members/:id/pastoral-cursus', requireAuth, async (req, res) => {
+  const parsed = z.object({ pastoralCursus: MemberSchema.shape.pastoralCursus,
+    previousCursus: MemberSchema.shape.pastoralCursus }).strict().safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: 'Niveau pastoral invalide' });
+  const ctx = (req as any).rbac as RbacContext;
+  try {
+    // Check authority before revealing whether a target exists or its cursus changed.
+    if (!['Super Admin', 'Admin', 'Pasteur Principal'].some(role => ctx.roles.includes(role)) || ctx.member.id === req.params.id) {
+      throw new GuardError(403, 'Nomination pastorale réservée aux autorités habilitées, sans auto-nomination');
+    }
+    const stored = (await readCollection('members')).find((m: Member) => m.id === req.params.id);
+    if (!stored) return res.status(404).json({ error: 'Membre introuvable' });
+    if (stored.pastoralCursus !== parsed.data.previousCursus) return res.status(409).json({ error: 'Le cursus a changé. Actualisez avant de recommencer.' });
+    // The dedicated intent is server-owned, never accepted as a member/sync field.
+    const body = await deltaToWhole('members', [{ ...stored, pastoralCursus: parsed.data.pastoralCursus }], []);
+    await assertCanWrite('members', ctx, body, { pastoralNomination: true });
+    const { changed } = await applyWrite('members', body, undefined, await preservedIds('members', ctx));
+    const result = changed.find(m => m.id === stored.id) ?? stored;
+    if (stored.pastoralCursus !== result.pastoralCursus) {
+      await appendToCollection('audits', [{ id: `aud_cursus_${randomUUID()}`, timestamp: new Date().toISOString(),
+        actionType: 'MEMBER_PROMOTED', operatorId: ctx.member.id,
+        operatorName: `${ctx.member.firstName} ${ctx.member.lastName}`, branch: stored.branch,
+        details: 'Modification du cursus pastoral', previousValue: stored.pastoralCursus, newValue: result.pastoralCursus }]);
+      poke('audits'); poke('members');
+    }
+    return res.json(result);
   } catch (e) {
     if (e instanceof GuardError) return res.status(e.status).json({ error: e.message });
     throw e;

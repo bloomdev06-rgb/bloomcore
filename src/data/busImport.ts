@@ -5,6 +5,7 @@
 import { BloomBusEntity, Member, DeptFunction, BusRole, ImportBusMemberState } from '../types';
 import { parseCsv } from './csvImport';
 import { normalizePhone } from './phone';
+import { isBusBranch } from '../../packages/domain/busBranch';
 
 const BUS_DEPT_ID = 'dept_bloom_bus';
 const BUS_FUNCTIONS: DeptFunction[] = ['responsable', 'capitaine', 'responsable_zone', 'responsable_commune'];
@@ -29,6 +30,7 @@ function headerKey(h: string): string {
   if (['nom', 'name'].includes(n)) return 'name';
   if (['commune', 'ville'].includes(n)) return 'commune';
   if (['zone'].includes(n)) return 'zone';
+  if (['branche', 'branch'].includes(n)) return 'branch';
   if (['latitude', 'lat'].includes(n)) return 'centerLat';
   if (['longitude', 'lng', 'lon'].includes(n)) return 'centerLng';
   if (['responsabletelephone', 'telephone responsable', 'telephone', 'tel'].includes(n)) return 'responsablePhone';
@@ -47,6 +49,7 @@ export function importBusesFromCsv(
   text: string,
   existingMembers: Member[],
   now: Date = new Date(),
+  activeBranch?: 'church' | 'light' | 'global',
 ): BusImportResult {
   const rows = parseCsv(text);
   const result: BusImportResult = { buses: [], memberPatches: [], errors: [] };
@@ -98,12 +101,19 @@ export function importBusesFromCsv(
       continue;
     }
 
+    const requestedBranch = norm(get(row, 'branch'));
+    if (!isBusBranch(member.branch) || (requestedBranch && requestedBranch !== member.branch)
+      || (activeBranch && activeBranch !== 'global' && activeBranch !== member.branch)) {
+      result.errors.push({ line, reason: 'La branche du bus, du responsable et de la vue sélectionnée doit être identique (church ou light)' });
+      continue;
+    }
+
     const fonctionRaw = norm(get(row, 'fonction')) as DeptFunction;
     const fonction = BUS_FUNCTIONS.includes(fonctionRaw) ? fonctionRaw : 'responsable';
 
     const busId = `bus_import_${stamp}_${r}`;
 
-    result.buses.push({ id: busId, name, commune, zone, centerLat, centerLng });
+    result.buses.push({ id: busId, name, commune, zone, centerLat, centerLng, branch: member.branch });
     result.memberPatches.push(
       TERRITORIAL.includes(fonction as BusRole)
         ? { ...member, bloomBusId: busId, busRole: fonction as BusRole }

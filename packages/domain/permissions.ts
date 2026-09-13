@@ -1,4 +1,28 @@
 import { PermissionMatrix, Delegation, Member, CapabilityOverride, SpecialAuthorization } from './types.ts';
+import type { Department, Ministry, BloomBusEntity } from './types.ts';
+import { effectiveBranchFor, inMemberScopeForRoles, CROSS_BRANCH_ROLES } from './scope.ts';
+import { departmentAuthority } from './authorization.ts';
+
+export function resolveTargetCapability(matrix: PermissionMatrix, capability: string, operator: Member,
+  roles: Iterable<string>, target: Member, departments: Department[], ministries: Ministry[], buses: BloomBusEntity[],
+  delegations: Delegation[] = [], overrides: CapabilityOverride[] = [], specialAuths: SpecialAuthorization[] = []): boolean {
+  const held = [...roles];
+  if (held.some(r => CROSS_BRANCH_ROLES.includes(r)) || (held.includes('Pasteur') && operator.branch === target.branch)) return true;
+  for (const id of Object.keys(target.departments ?? {})) {
+    const branch = effectiveBranchFor(target, id);
+    const authority = departmentAuthority(operator, held, id, branch, departments, ministries);
+    const delegated = delegations.some(d => !d.deletedAt && d.toId === operator.id && d.departmentId === id && d.right === capability)
+      && effectiveBranchFor(operator, id) === branch;
+    if (authority || delegated) {
+      const localOperator = { ...operator, branch, departments: { [id]: operator.departments?.[id] } } as Member;
+      if (resolveCapability(matrix, capability, localOperator, authority ?? 'Membre', delegations, overrides, specialAuths, id)) return true;
+    }
+  }
+  // Non-department pathways keep their own scope (mentor, own profile, territory).
+  return held.filter(r => !['Responsable', 'Adjoint', 'Ministre', 'Responsable de section'].includes(r))
+    .some(role => inMemberScopeForRoles(operator, target, [role], buses, departments, ministries)
+      && resolveCapability(matrix, capability, operator, role, [], overrides.filter(o => o.subjectType !== 'function'), specialAuths));
+}
 
 // Garde-fou : le Super Admin voit toujours tout (impossible de s'auto-verrouiller).
 // Source unique — Sidebar.tsx (filtrage du nav) et App.tsx (re-validation au changement

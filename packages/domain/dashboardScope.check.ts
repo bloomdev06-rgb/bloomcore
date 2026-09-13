@@ -35,29 +35,28 @@ assert.deepEqual(
 );
 assert.equal(scope.label, 'Département Département Bloom Bus');
 
-// Membre sans fonction « responsable » : on retient sa première affectation réelle,
-// toujours pas la table.
+// L'appartenance seule ne donne aucune synthèse départementale.
 const simpleMembre = membre({ dept_bloom_bus: 'membre' });
 assert.deepEqual(
   dashboardScope(simpleMembre, 'Coach', [simpleMembre], [], DEPTS, []).deptIds,
-  ['dept_bloom_bus'],
+  [],
 );
 
 // Plusieurs affectations réelles restent actives simultanément : le tableau de bord
 // agrège l'union au lieu de réduire le membre à un seul département.
-const double = membre({ dept_tech: 'membre', dept_bloom_bus: 'responsable' });
+const double = membre({ dept_tech: 'responsable', dept_bloom_bus: 'responsable' });
 assert.deepEqual(
   dashboardScope(double, 'Coach', [double], [], DEPTS, []).deptIds,
-  ['dept_tech', 'dept_bloom_bus'],
+  ['dept_bloom_bus', 'dept_tech'],
 );
 assert.equal(dashboardScope(double, 'Coach', [double], [], DEPTS, []).label, 'Mes départements');
 
-// Aucun département : la table reste le dernier recours, pour les profils de test.
+// Aucun département : aucun périmètre ne doit être inventé depuis la démonstration.
 const sansDept = membre({});
 assert.deepEqual(
   dashboardScope(sansDept, 'Coach', [sansDept], [], DEPTS, []).deptIds,
-  ['dept_louange'],
-  'sans aucune affectation, le repli de démonstration reste utile',
+  [],
+  'sans affectation, aucun département ne doit être inventé',
 );
 
 // Le staff garde une portée globale, la table ne s'y applique pas.

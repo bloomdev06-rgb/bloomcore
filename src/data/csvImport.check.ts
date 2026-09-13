@@ -28,11 +28,11 @@ const busLines: BloomBusEntity[] = [
 const now = new Date('2026-07-21T00:00:00Z');
 const csv = [
   'nom,prenom,telephone,email,departement,branche,niveau,cursus,bapteme,sexe,commune',
-  'Traoré,Awa,0700000002,awa@x.ci,dept_test,light,boss,serviteur,baptise,F,Cocody',       // ok, accents/enum, commune matchée -> gps
+  'Traoré,Awa,0700000002,awa@x.ci,dept_test,light,boss,aucun,baptise,F,Cocody',       // ok, accents/enum, commune matchée -> gps
   'Koné,,0700000003,kone@x.ci,dept_test,church,,,,,',                                      // rejet: prénom manquant
   'Doe,John,0700000001,doe@x.ci,dept_test,church,,,,,',                                    // rejet: doublon existant
   'Doe,Jane,0700000002,jane@x.ci,dept_test,church,,,,,',                                   // rejet: doublon dans le lot
-  'Yao,Kofi,0700000004,kofi@x.ci,dept_test,inconnu,xxx,yyy,zzz,,Abidjan',                  // ok mais enums invalides -> défauts, commune non matchée -> gps undefined
+  'Yao,Kofi,0700000004,kofi@x.ci,dept_test,inconnu,xxx,,zzz,,Abidjan',                  // ok mais enums invalides -> défauts, commune non matchée -> gps undefined
 ].join('\n');
 
 const res = importMembersFromCsv(csv, existing, busLines, 'church', now);
@@ -42,7 +42,7 @@ assert(res.errors.length === 3, `3 rejets (got ${res.errors.length})`);
 
 const awa = res.members[0];
 assert(awa.firstName === 'Awa' && awa.lastName === 'Traoré', 'accents préservés');
-assert(awa.branch === 'light' && awa.level === 'boss' && awa.pastoralCursus === 'serviteur', 'enums valides mappés');
+assert(awa.branch === 'light' && awa.level === 'boss' && awa.pastoralCursus === 'aucun', 'enums valides, cursus non attribué à l’import');
 assert(awa.baptismStatus === 'baptise' && awa.gender === 'F', 'baptême + sexe mappés');
 assert(awa.entryDate === '2026-07-21', 'entryDate = now injecté');
 assert(awa.gps?.lat === 5.36 && awa.gps?.lng === -3.99, 'commune matchée -> gps du bus (pas un point fixe)');
@@ -60,4 +60,6 @@ assert(res.errors.some(e => e.line === 3 && /obligatoire/i.test(e.reason)), 'lig
 assert(res.errors.some(e => e.line === 4 && /déjà présent/i.test(e.reason)), 'ligne 4 = doublon existant');
 assert(res.errors.some(e => e.line === 5 && /déjà présent/i.test(e.reason)), 'ligne 5 = doublon lot');
 
+const nomination = importMembersFromCsv('nom,prenom,telephone,email,departement,cursus\nTest,Fixture,0000000000,test@example.invalid,dept_test,serviteur', [], []);
+assert(nomination.members.length === 0 && nomination.errors.some(e => e.reason.includes('Cursus pastoral')), 'nomination pastorale refusée à l’import');
 console.log('csvImport.check OK');

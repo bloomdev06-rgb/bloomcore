@@ -3,13 +3,16 @@
 // du frontend (permissions.ts, scope.ts) pour que client et serveur ne puissent
 // pas diverger sur la sémantique des capacités et du scope.
 import { Member, Ministry, PermissionMatrix, Delegation, AdminAccount, Department, BloomBusEntity, SpecialAuthorization, CapabilityOverride } from '../packages/domain/types.ts';
-import { resolveCapability } from '../packages/domain/permissions.ts';
-import { inMemberScopeForRoles, canFillReportFor, busInScope, fullBloomBusAccess, bloomBusRoleOf, MULTI_BRANCH_ROLES, COACH_AND_ABOVE, canManageAccountOf, bestRank, canAssignBusRole, FULL_SCOPE_ROLES, effectiveBranchFor } from '../packages/domain/scope.ts';
+import { resolveCapability, resolveTargetCapability } from '../packages/domain/permissions.ts';
+import { inMemberScopeForRoles, canFillReportFor, fullBloomBusAccess, MULTI_BRANCH_ROLES, COACH_AND_ABOVE, canManageAccountOf, bestRank, canAssignBusRole, effectiveBranchFor } from '../packages/domain/scope.ts';
 import { isBusReportLocked } from '../packages/domain/reportLock.ts';
 import { getKv } from './datastore.ts';
 import { GuardError, readCollection, canonical } from './guards.ts';
 import { roleForDeptFn, roleForLevel } from '../packages/shared/migrate.ts';
 import { departmentToolRoles, memberCanReadProject } from '../packages/domain/access.ts';
+import { accessibleBranches, departmentAuthority, canAssignDepartmentFunction, canNominatePastoral } from '../packages/domain/authorization.ts';
+import { canReadScopedReport } from '../packages/domain/reportScope.ts';
+import { isBusBranch } from '../packages/domain/busBranch.ts';
 
 // M5 : valeurs de cursus snake_case §3 (comparées à member.pastoralCursus migré). Le
 // vocabulaire de RÔLES (FULL_SCOPE_ROLES, STAFF_ROLES…) reste stable — on remappe les
@@ -26,17 +29,6 @@ const ABOVE_MEMBER_ROLES = [
 // §240/§5 — capacité qu'une SpecialAuthorization doit porter pour qu'un non-Coach voie les
 // rapports de suivi des membres de son périmètre (exception nominative Ministre/Pasteur).
 const CAP_VOIR_SUIVI_MEMBRE = 'consulter_rapports_suivi_membre';
-
-const SCOPE_ROLE_ORDER: [string, string][] = [
-  ['Ministre', 'Ministre'],
-  ['Capitaine de Bus', 'Capitaine de Bus'],
-  ['Responsable de Zone', 'Responsable de Zone'],
-  ['Responsable de Commune', 'Responsable de Commune'],
-  ['Responsable', 'Responsable'],
-  ['Adjoint', 'Adjoint'],
-  ['Coach', 'Coach'],
-  ['Leader', 'Leader'],
-];
 
 export function resolveRoles(member: Member, admins: AdminAccount[], ministries: Ministry[], departments: Department[] = []): string[] {
   const roles = new Set<string>();
@@ -118,11 +110,22 @@ async function hasCapAnyRole(ctx: RbacContext, capability: string, resourceDepar
 // §13.2 — champs de santé confidentiels de la fiche membre, gardés par capacité (miroir exact
 // de Member360View). Un opérateur qui ne détient pas la capacité ne les voit ni ne les écrit
 // (masquage lecture + repinçage écriture). Retourne la liste des champs healthKPIs à protéger.
-async function protectedHealthFields(ctx: RbacContext): Promise<string[]> {
-  const blocked: string[] = [];
-  if (!(await hasCapAnyRole(ctx, 'consulter_situation_financiere'))) blocked.push('financier');
-  if (!(await hasCapAnyRole(ctx, 'consulter_historique_presence'))) blocked.push('presenceCulte', 'presenceService');
-  return blocked;
+async function targetCapabilityPolicy(ctx: RbacContext): Promise<(target: Member, capability: string) => boolean> {
+  const matrix = (await getKv('permissions') ?? {}) as PermissionMatrix;
+  const [departments, ministries, buses, delegations, overrides, auths] = await Promise.all([
+    readCollection('departments'), readCollection('ministries'), readCollection('bus_lines'),
+    readCollection('delegations'), readCollection('capability_overrides'), readCollection('special_authorizations'),
+  ]);
+  return (target, cap) => resolveTargetCapability(matrix, cap, ctx.member, ctx.roles, target, departments, ministries, buses, delegations, overrides, auths);
+}
+
+async function healthFieldPolicy(ctx: RbacContext): Promise<(target: Member) => string[]> {
+  const can = await targetCapabilityPolicy(ctx);
+  return target => {
+    const allowed = (cap: string) => can(target, cap);
+    return [...(!allowed('consulter_situation_financiere') ? ['financier'] : []),
+      ...(!allowed('consulter_historique_presence') ? ['presenceCulte', 'presenceService'] : [])];
+  };
 }
 
 // Items ajoutés ou modifiés par rapport au stocké (le scoping ne s'applique
@@ -163,7 +166,7 @@ async function removedItems(name: string, incoming: any[], ctx: RbacContext): Pr
 }
 
 // Porte d'écriture par collection + scoping par item. Lève GuardError(403/400).
-export async function assertCanWrite(name: string, ctx: RbacContext, incoming: any[]): Promise<void> {
+export async function assertCanWrite(name: string, ctx: RbacContext, incoming: any[], options: { pastoralNomination?: boolean } = {}): Promise<void> {
   const { roles, member } = ctx;
 
   switch (name) {
@@ -239,6 +242,26 @@ export async function assertCanWrite(name: string, ctx: RbacContext, incoming: a
     }
 
     case 'members': {
+      const existingMembers = new Map((await readCollection(name, true)).map((m: Member) => [m.id, m]));
+      for (const item of await touchedItems(name, incoming)) {
+        const before = existingMembers.get(item.id);
+        if (before && item.id === member.id && !hasAny(roles, CROSS_BRANCH_ROLES)
+          && ['departments', 'deptBranches', 'deptSections', 'branch', 'mentorId', 'level', 'bloomBusId', 'busRole', 'busRoles'].some(f => canonical((before as any)[f]) !== canonical(item[f]))) {
+          throw new GuardError(403, 'members: auto-modification des affectations interdite');
+        }
+        if ((before?.pastoralCursus ?? 'aucun') !== (item.pastoralCursus ?? 'aucun')) {
+          if (!options.pastoralNomination || !before || !canNominatePastoral(member, roles, before)) {
+            throw new GuardError(403, 'members: nomination exclusivement depuis le Cursus pastoral par une autorité habilitée');
+          }
+          const admins = await readCollection('admins') as AdminAccount[];
+          const ministries = await readCollection('ministries') as Ministry[];
+          const departments = await readCollection('departments') as Department[];
+          if (bestRank(roles) >= bestRank(resolveRoles(before, admins, ministries, departments))
+            || bestRank(roles) >= bestRank(resolveRoles(item, admins, ministries, departments))) {
+            throw new GuardError(403, 'members: nomination pastorale réservée à un profil strictement supérieur');
+          }
+        }
+      }
       const baptismToolOnly = roles.includes('Baptême') && !hasAny(roles, ABOVE_MEMBER_ROLES);
       if (!baptismToolOnly && !(await hasCapAnyRole(ctx, 'view_members'))) throw new GuardError(403, 'members: capacité view_members requise');
       if (baptismToolOnly) {
@@ -258,6 +281,9 @@ export async function assertCanWrite(name: string, ctx: RbacContext, incoming: a
           const beforeDepts = before.departments ?? {};
           const afterDepts = item.departments ?? {};
           for (const departmentId of new Set([...Object.keys(beforeDepts), ...Object.keys(afterDepts)])) {
+            if (canonical(beforeDepts[departmentId]) !== canonical(afterDepts[departmentId]) && afterDepts[departmentId] !== 'membre') {
+              throw new GuardError(403, 'members: Baptême ne peut attribuer aucune fonction de supervision');
+            }
             if (!baptismDeptIds.has(departmentId) && canonical(beforeDepts[departmentId]) !== canonical(afterDepts[departmentId])) {
               throw new GuardError(403, `members: le rôle Baptême ne peut modifier le département ${departmentId}`);
             }
@@ -315,6 +341,49 @@ export async function assertCanWrite(name: string, ctx: RbacContext, incoming: a
       // servant au scoping Responsable de Zone/Commune.
       const busLines = await readCollection('bus_lines') as BloomBusEntity[];
       const storedScopeById = new Map((await readCollection('members', true)).map((m: Member) => [String(m.id), m]));
+      for (const item of await touchedItems(name, incoming)) {
+        const before = storedScopeById.get(String(item.id));
+        const structured = ['departments', 'deptBranches', 'deptSections', 'branch', 'mentorId', 'level'];
+        if (item.id === member.id && before && structured.some(f => canonical(item[f]) !== canonical((before as any)[f]))) {
+          throw new GuardError(403, 'members: vos propres affectations et niveaux ne sont pas modifiables');
+        }
+        if (before && before.branch !== item.branch) throw new GuardError(403, 'members: transfert de branche réservé aux autorités globales');
+        const deptIds = new Set([...Object.keys(before?.departments ?? {}), ...Object.keys(item.departments ?? {}),
+          ...Object.keys(before?.deptBranches ?? {}), ...Object.keys(item.deptBranches ?? {}),
+          ...Object.keys(before?.deptSections ?? {}), ...Object.keys(item.deptSections ?? {})]);
+        const busReception = !before && item.deptAttachmentStatus === 'pending' && item.deptAttachmentOrigin === 'bloom_bus'
+          && canAssignBusRole(member, roles, item, 'Membre', busLines, departments, ministries);
+        for (const id of deptIds) {
+          const changed = ['departments', 'deptBranches', 'deptSections'].some(f => canonical((before as any)?.[f]?.[id]) !== canonical(item[f]?.[id]));
+          if (!changed) continue;
+          for (const target of [before, item].filter(Boolean) as Member[]) {
+            if (!target.departments?.[id]) continue;
+            if (busReception && target.departments[id] === 'membre' && !item.deptBranches?.[id] && !item.deptSections?.[id]) continue;
+            const authority = departmentAuthority(member, roles, id, effectiveBranchFor(target, id), departments, ministries);
+            if (!canAssignDepartmentFunction(authority, roleForDeptFn(target.departments[id]))) {
+              throw new GuardError(403, `members: affectation ${id} hors de votre autorité départementale`);
+            }
+          }
+        }
+        if (before && canonical(before.mentorId) !== canonical(item.mentorId)
+          && !(roles.includes('Pasteur') && item.branch === member.branch)
+          && !Object.keys(item.departments ?? {}).some(id => ['Responsable', 'Ministre', 'Pasteur'].includes(
+            departmentAuthority(member, roles, id, effectiveBranchFor(item, id), departments, ministries) ?? ''))) {
+          throw new GuardError(403, 'members: attribution du mentor réservée à une autorité du périmètre');
+        }
+        const editRoles = roles.filter(r => !['Baptême', 'Intégration'].includes(r));
+        if (item.id !== member.id && before && !inMemberScopeForRoles(member, before, editRoles, busLines, departments, ministries)) {
+          const baptismScope = roles.includes('Baptême') && item.branch === member.branch;
+          const integrationScope = isPendingIntegrationTarget(ctx, before);
+          const allowed = new Set(['id', 'updatedAt',
+            ...(baptismScope ? ['currentStepId', 'baptismStatus', 'baptismDate', 'baptismViaDepartment'] : []),
+            ...(integrationScope ? ['integrationFollowStatus', 'integrationAssignedTo', 'integrationNotes', 'lastContact'] : [])]);
+          if ((!baptismScope && !integrationScope)
+            || [...new Set([...Object.keys(before), ...Object.keys(item)])].some(f => !allowed.has(f) && canonical((before as any)[f]) !== canonical(item[f]))) {
+            throw new GuardError(403, 'members: ce rôle outil ne permet pas de modifier la fiche');
+          }
+        }
+      }
       // Écritures ET suppressions par omission : les deux doivent rester dans le périmètre.
       for (const target of [...(await touchedItems(name, incoming)), ...(await removedItems(name, incoming, ctx))]) {
         const before = storedScopeById.get(String((target as Member).id));
@@ -330,7 +399,7 @@ export async function assertCanWrite(name: string, ctx: RbacContext, incoming: a
         // second département étranger.
         const isDepartmentAdjointOnly = roles.includes('Adjoint')
           && !hasAny(roles, ['Responsable', 'Ministre', 'Pasteur', 'Pasteur Principal', 'Admin', 'Super Admin']);
-        if (!before && isDepartmentAdjointOnly) {
+        if (!before && isDepartmentAdjointOnly && (target as Member).deptAttachmentOrigin !== 'bloom_bus') {
           const outsideOwnDepartments = Object.keys((target as Member).departments ?? {}).some((departmentId) =>
             member.departments?.[departmentId] !== 'adjoint'
             || effectiveBranchFor(member, departmentId) !== effectiveBranchFor(target as Member, departmentId));
@@ -366,7 +435,8 @@ export async function assertCanWrite(name: string, ctx: RbacContext, incoming: a
           const changed = ['deptAttachmentStatus', 'departments', 'level', 'pastoralCursus'].some(
             (f) => canonical((item as any)[f]) !== canonical(before[f]),
           );
-          if (changed && !roles.some((r) => approvalRoles.includes(r))) {
+          if (changed && !Object.keys(before.departments ?? {}).every(id => approvalRoles.includes(
+            departmentAuthority(member, roles, id, effectiveBranchFor(before, id), departments, ministries) ?? ''))) {
             throw new GuardError(403, 'members: validation ou cadrage d\'une auto-inscription réservé au Responsable ou à une autorité supérieure');
           }
         }
@@ -395,7 +465,8 @@ export async function assertCanWrite(name: string, ctx: RbacContext, incoming: a
           const stored = storedById.get(String(item.id));
           if (!stored) {
             const targetRolesAfter = resolveRoles(item as Member, adminsForRank, ministries, departments);
-            if (bestRank(roles) >= bestRank(targetRolesAfter)) {
+            const localRoles = roles.filter(role => inMemberScopeForRoles(member, item, [role], busLines, departments, ministries));
+            if (bestRank(localRoles) >= bestRank(targetRolesAfter)) {
               throw new GuardError(403, `members: ${item.id} — seul un profil strictement supérieur peut attribuer ce niveau, ce cursus ou cette fonction`);
             }
             continue;
@@ -405,7 +476,9 @@ export async function assertCanWrite(name: string, ctx: RbacContext, incoming: a
           );
           if (!changed) continue;
           const targetRolesBefore = resolveRoles(stored as Member, adminsForRank, ministries, departments);
-          if (bestRank(roles) >= bestRank(targetRolesBefore)) {
+          const targetRolesAfter = resolveRoles(item as Member, adminsForRank, ministries, departments);
+          const localRoles = roles.filter(role => inMemberScopeForRoles(member, stored, [role], busLines, departments, ministries));
+          if (bestRank(localRoles) >= bestRank(targetRolesBefore) || bestRank(localRoles) >= bestRank(targetRolesAfter)) {
             throw new GuardError(403, `members: ${item.id} — rang égal ou supérieur au vôtre, modification refusée`);
           }
         }
@@ -415,11 +488,12 @@ export async function assertCanWrite(name: string, ctx: RbacContext, incoming: a
       // restaure la valeur stockée sur chaque membre existant modifié → un PUT (whole-array ou
       // delta) d'un opérateur qui les a reçus masqués ne peut ni les effacer ni les falsifier.
       // (full-scope est déjà sorti plus haut ; ne concerne donc que l'encadrement intermédiaire.)
-      const blockedFields = await protectedHealthFields(ctx);
-      if (blockedFields.length) {
+      const healthPolicy = await healthFieldPolicy(ctx);
+      {
         for (const item of await touchedItems(name, incoming)) {
           const stored = storedById.get(String((item as any).id));
           if (!stored) continue; // création : aucune valeur antérieure à préserver
+          const blockedFields = healthPolicy(stored);
           (item as any).healthKPIs = { ...((item as any).healthKPIs ?? {}) };
           for (const f of blockedFields) (item as any).healthKPIs[f] = stored.healthKPIs?.[f];
         }
@@ -467,14 +541,15 @@ export async function assertCanWrite(name: string, ctx: RbacContext, incoming: a
             ...((item as Member).busRoles ?? []),
             ...((item as Member).busRole ? [(item as Member).busRole!] : []),
           ];
-          if (canonical([...new Set(busAvant)].sort()) !== canonical([...new Set(busApres)].sort())) {
+          const busMoved = before && before.bloomBusId !== item.bloomBusId;
+          if (busMoved || canonical([...new Set(busAvant)].sort()) !== canonical([...new Set(busApres)].sort())) {
             // Retrait comme attribution : les deux modifient la hiérarchie territoriale.
             // Le rang à franchir est le PLUS HAUT des deux, sinon un capitaine pourrait
             // destituer un responsable de commune en le « ramenant » à un rang qu'il domine.
-            for (const fn of new Set([...busApres, ...busAvant])) {
-              if (!fn) continue;
+            for (const fn of new Set([...busApres, ...busAvant, ...(busMoved ? ['membre'] : [])])) {
               const roleVise = roleForDeptFn(fn as any);
-              if (!canAssignBusRole(member, roles, cible, roleVise, allBus, allDepts, allMinistries)) {
+              const locations = [before?.bloomBusId ? before : undefined, item].filter(Boolean) as Member[];
+              if (locations.some(target => !canAssignBusRole(member, roles, target, roleVise, allBus, allDepts, allMinistries))) {
                 throw new GuardError(403,
                   `members: ${item.id} — la fonction Bloom Bus « ${roleVise} » dépasse votre périmètre ou votre niveau`);
               }
@@ -491,8 +566,9 @@ export async function assertCanWrite(name: string, ctx: RbacContext, incoming: a
       // « baptisé » en HTTP 200. Les champs sont exactement ceux que ces boutons écrivent.
       // Placé APRÈS le court-circuit full-scope, comme le masquage santé ci-dessus : la ligne
       // Admin/Pasteur reste souveraine sur ces jalons.
-      if (!(await hasCapAnyRole(ctx, 'modifier_jalons_bapteme_integration'))) {
-        for (const item of await touchedItems(name, incoming)) {
+      const canUpdateMilestones = await targetCapabilityPolicy(ctx);
+      for (const item of await touchedItems(name, incoming)) {
+        if (!canUpdateMilestones(item, 'modifier_jalons_bapteme_integration')) {
           const stored = storedById.get(String((item as any).id));
           if (!stored) continue; // création : le formulaire membre porte déjà ces champs
           for (const f of ['baptismStatus', 'baptismDate', 'baptismViaDepartment', 'currentStepId']) {
@@ -530,26 +606,22 @@ export async function assertCanWrite(name: string, ctx: RbacContext, incoming: a
 
     case 'activities':
     case 'departments': {
+      if (hasAny(roles, CROSS_BRANCH_ROLES)) return;
       const departments = await readCollection('departments') as Department[];
       const ministries = await readCollection('ministries') as Ministry[];
-      const managed = new Set(Object.entries(member.departments ?? {})
-        .filter(([, fn]) => fn === 'responsable').map(([id]) => id));
-      for (const ministry of ministries.filter(m => m.tuteurId === member.id)) {
-        departments.filter(d => d.ministryId === ministry.id && (!d.branch || d.branch === member.branch))
-          .forEach(d => managed.add(d.id));
-      }
-      const targets = [...(await touchedItems(name, incoming)), ...(await removedItems(name, incoming, ctx))];
-      if (hasAny(roles, CROSS_BRANCH_ROLES)) return;
-      if (roles.includes('Pasteur')) {
-        for (const target of targets) {
-          const dept = name === 'departments' ? target : departments.find(d => d.id === target.departmentId);
-          if (dept?.branch && dept.branch !== member.branch) throw new GuardError(403, `${name}: ${target.id} appartient à l'autre branche`);
+      const stored = new Map((await readCollection(name, true)).map(item => [item.id, item]));
+      for (const target of [...await touchedItems(name, incoming), ...await removedItems(name, incoming, ctx)]) {
+        const before = stored.get(target.id);
+        if (name === 'departments' && (!before || ['branch', 'specialFunction', 'ministryId'].some(f => canonical(before[f]) !== canonical(target[f])))) {
+          throw new GuardError(403, 'departments: structure globale réservée aux administrateurs');
         }
-        return;
-      }
-      for (const target of targets) {
-        const departmentId = name === 'departments' ? target.id : target.departmentId;
-        if (!managed.has(departmentId)) throw new GuardError(403, `${name}: ${target.id} hors des départements supervisés`);
+        for (const version of [before, target].filter(Boolean)) {
+          const id = name === 'departments' ? version.id : version.departmentId;
+          const branch = version.branch ?? effectiveBranchFor(member, id);
+          if (!['Responsable', 'Ministre', 'Pasteur'].includes(departmentAuthority(member, roles, id, branch, departments, ministries) ?? '')) {
+            throw new GuardError(403, name + ': hors de votre département et branche');
+          }
+        }
       }
       return;
     }
@@ -592,6 +664,8 @@ export async function assertCanWrite(name: string, ctx: RbacContext, incoming: a
       }
       const departmentsForTools = await readCollection('departments') as Department[];
       const ministriesForScope = await readCollection('ministries') as Ministry[];
+      const reportMembers = await readCollection('members') as Member[];
+      const reportBuses = await readCollection('bus_lines') as BloomBusEntity[];
       for (const r of reportTargets) {
         const department = departmentsForTools.find(d => d.id === r.departmentId);
         const isGdc = r.reportType === 'rapport_culte' || department?.specialFunction === 'gestion_cultes';
@@ -606,7 +680,12 @@ export async function assertCanWrite(name: string, ctx: RbacContext, incoming: a
         }
         if (isGdc && !hasAny(roles, [...AUTHORITY_ROLES, 'GDC'])) throw new GuardError(403, `reports: ${r.id} requiert le rôle GDC`);
         if (isPortier && !hasAny(roles, [...AUTHORITY_ROLES, 'Portier'])) throw new GuardError(403, `reports: ${r.id} requiert le rôle Portier`);
-        if ((isGdc || isPortier) && department?.branch && !hasAny(roles, CROSS_BRANCH_ROLES) && department.branch !== member.branch) {
+        for (const version of [storedReports.get(String(r.id)), r].filter(Boolean)) {
+          if (!canReadScopedReport(member, roles, version, reportMembers, departmentsForTools, ministriesForScope, reportBuses)) {
+            throw new GuardError(403, `reports: ${r.id} hors de votre filière et branche`);
+          }
+        }
+        if ((isGdc || isPortier) && department?.branch && !hasAny(roles, CROSS_BRANCH_ROLES) && department.branch !== effectiveBranchFor(member, department.id)) {
           throw new GuardError(403, `reports: ${r.id} appartient à l'autre branche`);
         }
         if (r.departmentId && !isBloomBus && !hasAny(roles, CROSS_BRANCH_ROLES) && !roles.includes('Pasteur')) {
@@ -620,30 +699,30 @@ export async function assertCanWrite(name: string, ctx: RbacContext, incoming: a
         if (['rapport_suivi_coach', 'rapport_pastoral'].includes(r.reportType) && r.content?.memberId) {
           const target = (await readCollection('members') as Member[]).find((m) => m.id === r.content.memberId);
           if (!target || !(await memberInRealScope(ctx, target))) throw new GuardError(403, `reports: ${r.id} cible un membre hors de votre périmètre`);
+          if (!r.departmentId && !hasAny(roles, CROSS_BRANCH_ROLES) && !(roles.includes('Pasteur') && target.branch === member.branch)
+            && target.mentorId !== member.id) throw new GuardError(403, 'reports: suivi sans département réservé au mentor');
+          if (r.departmentId && (!target.departments?.[r.departmentId] || effectiveBranchFor(target, r.departmentId) !== r.targetBranch)) {
+            throw new GuardError(403, 'reports: membre absent du département ou de la branche du rapport');
+          }
         }
       }
       if (!hasAny(roles, CROSS_BRANCH_ROLES)) {
-        const scopeRole = SCOPE_ROLE_ORDER.find(([r]) => roles.includes(r))?.[1] ?? 'Membre';
         const allMembers = await readCollection('members') as Member[];
         const busLines = await readCollection('bus_lines') as BloomBusEntity[];
         const departments = await readCollection('departments') as Department[];
         for (const r of [...(await touchedItems(name, incoming)), ...(await removedItems(name, incoming, ctx))]) {
-          if (r.targetBranch && r.targetBranch !== 'global' && member.branch && r.targetBranch !== member.branch) {
-            throw new GuardError(403, `reports: ${r.id} appartient à l'autre branche`);
-          }
           // Miroir serveur de canFillReportFor (client) : un rapport santé Bloom Bus ne peut
           // viser qu'un subordonné direct (ou soi-même) dans la hiérarchie Bloom Bus. Empêche
           // le bypass par appel API direct que l'UI interdisait déjà.
           if (r.reportType === 'rapport_bloom_bus_member' && r.content?.memberId) {
             const target = allMembers.find((m) => m.id === r.content.memberId);
-            if (target && !canFillReportFor(member, target, scopeRole, allMembers, busLines, departments)) {
+            if (!target || !roles.some(role => canFillReportFor(member, target, role, allMembers, busLines, departments, ministriesForScope))) {
               throw new GuardError(403, `reports: ${r.id} hors de votre hiérarchie Bloom Bus`);
             }
             // Auto-validation interdite : un membre qui remplit SON propre rapport ne peut pas le
             // marquer validé — la validation est réservée au capitaine (ou au-dessus).
             if (r.content.memberId === member.id && r.validated === true) {
-              const captainOrAbove = ['Capitaine de Bus', 'Responsable de Zone', 'Responsable de Commune', 'Responsable']
-                .includes(bloomBusRoleOf(member, departments) ?? '');
+              const captainOrAbove = canAssignBusRole(member, roles, target, 'Membre', busLines, departments, ministriesForScope);
               if (!captainOrAbove) {
                 throw new GuardError(403, `reports: auto-validation interdite (réservée au capitaine)`);
               }
@@ -659,11 +738,10 @@ export async function assertCanWrite(name: string, ctx: RbacContext, incoming: a
             }
             const targetBus = busLines.find((b) => b.id === busId);
             if (!targetBus) throw new GuardError(400, `reports: ${r.id} cible un Bloom Bus inconnu`);
-            const bloomBusScopeRole = roles.includes('Pasteur') ? 'Pasteur' : scopeRole;
-            const bbRole = bloomBusRoleOf(member, departments);
-            const manager = FULL_SCOPE_ROLES.includes(bloomBusScopeRole)
-              || ['Capitaine de Bus', 'Responsable de Zone', 'Responsable de Commune', 'Responsable'].includes(bbRole ?? '');
-            if (!manager || !busInScope(member, targetBus, bloomBusScopeRole, busLines, departments)) {
+            const branch = targetBus.branch ?? r.targetBranch;
+            if (!branch || branch === 'global' || !canAssignBusRole(member, roles,
+              { ...member, bloomBusId: targetBus.id, branch }, 'Membre',
+              busLines.map(b => b.id === targetBus.id ? { ...b, branch } : b), departments, ministriesForScope)) {
               throw new GuardError(403, `reports: ${r.id} hors de votre périmètre Bloom Bus`);
             }
           }
@@ -675,13 +753,12 @@ export async function assertCanWrite(name: string, ctx: RbacContext, incoming: a
     case 'certifications':
       // §10 — inscription formations/certifications réservée aux habilités par la capacité
       // (par défaut Responsable+ ; PAS Coach). Enforce la capacité fine (avant : UI seule).
-      const nativeCertification = await hasCapAnyRole(ctx, 'inscrire_formations_certifications');
+      const canRegisterCertification = await targetCapabilityPolicy(ctx);
       for (const item of [...(await touchedItems(name, incoming)), ...(await removedItems(name, incoming, ctx))]) {
         const target = (await readCollection('members') as Member[]).find((m) => m.id === item.memberId);
         const delegatedDept = target ? await delegatedDepartmentScope(ctx, 'inscrire_formations_certifications', target) : undefined;
         if (!target || (!(await memberInRealScope(ctx, target)) && !delegatedDept)) throw new GuardError(403, `certifications: ${item.id} hors de votre périmètre`);
-        const delegated = !!delegatedDept && await hasCapAnyRole(ctx, 'inscrire_formations_certifications', delegatedDept);
-        if (!nativeCertification && !delegated) throw new GuardError(403, 'certifications: capacité inscrire_formations_certifications requise');
+        if (!canRegisterCertification(target, 'inscrire_formations_certifications')) throw new GuardError(403, 'certifications: capacité inscrire_formations_certifications requise');
       }
       return;
 
@@ -724,13 +801,28 @@ export async function assertCanWrite(name: string, ctx: RbacContext, incoming: a
     // l'église entière, pas seulement le sien (l'UI le lui interdisait déjà — canAdminTerritory
     // masque le bouton, mais un appel API direct passait).
     case 'bus_lines': {
-      if (hasAny(roles, ['Admin', 'Super Admin'])) return;
+      if (hasAny(roles, CROSS_BRANCH_ROLES)) return;
       // §27 pont : le responsable du département Bloom Bus a autorité pleine sur le module,
       // y compris le CRUD territorial (créer/déplacer/supprimer bus/zone), pas seulement
       // l'attribution de busRole (déjà couverte plus bas).
       const deptsAll = await readCollection('departments') as Department[];
-      if (fullBloomBusAccess(member, roles[0] ?? 'Membre', deptsAll)) return;
-      throw new GuardError(403, 'bus_lines: CRUD territorial réservé à l\'Admin ou au responsable du département Bloom Bus');
+      const ministries = await readCollection('ministries') as Ministry[];
+      const stored = new Map((await readCollection(name, true)).map(b => [b.id, b]));
+      const targets = [...await touchedItems(name, incoming), ...await removedItems(name, incoming, ctx)];
+      // Even an empty operation must prove a real module authority (import undo).
+      if (!targets.length && !deptsAll.some(d => d.specialFunction === 'bloom_bus'
+        && ['Responsable', 'Ministre', 'Pasteur'].includes(departmentAuthority(member, roles, d.id, effectiveBranchFor(member, d.id), deptsAll, ministries) ?? ''))
+        && !roles.includes('Pasteur')) throw new GuardError(403, 'bus_lines: autorité Bloom Bus requise');
+      for (const target of targets) {
+        for (const version of [stored.get(target.id), target].filter(Boolean)) {
+          if (!isBusBranch(version.branch)) throw new GuardError(403, 'bus_lines: branche à régulariser par un administrateur');
+          if (!roles.some(role => fullBloomBusAccess(member, role, deptsAll, version.branch))
+            && !deptsAll.some(d => d.specialFunction === 'bloom_bus' && departmentAuthority(member, roles, d.id, version.branch, deptsAll, ministries) === 'Ministre')) {
+            throw new GuardError(403, 'bus_lines: hors de votre branche de responsabilité Bloom Bus');
+          }
+        }
+      }
+      return;
     }
 
     case 'audits': {
@@ -813,117 +905,22 @@ export async function filterReadable(name: string, ctx: RbacContext, items: any[
   const fullScope = hasAny(roles, CROSS_BRANCH_ROLES);
 
   switch (name) {
+    case 'bus_lines': {
+      if (fullScope) return items;
+      const [departments, ministries, members] = await Promise.all([readCollection('departments'), readCollection('ministries'), readCollection('members')]);
+      // Discovery of a bus for registration stays possible within the primary branch.
+      // Secondary branches require real departmental/ministry authority.
+      return items.filter(b => isBusBranch(b.branch) && !members.some(m => m.bloomBusId === b.id && m.branch !== b.branch) && (b.branch === member.branch
+        || departments.some(d => d.specialFunction === 'bloom_bus'
+          && ['Responsable', 'Ministre', 'Pasteur'].includes(departmentAuthority(member, roles, d.id, b.branch, departments, ministries) ?? ''))));
+    }
     case 'reports': {
-      // §8.3 — le corps pastoral voit les rapports confidentiels ; un Coach/Responsable
-      // seulement si explicitement partagé. La confidentialité prime même sur Admin/Super Admin.
-      const pastoralCorps = hasAny(roles, ['Pasteur', 'Pasteur Principal']);
-      // §240/§5 CAHIER — un rapport de SUIVI de membre (rapport_suivi_coach, confidentiel, ciblant
-      // un membre) est visible au Coach dont ce membre relève du périmètre ; et par EXCEPTION
-      // NOMINATIVE à un non-Coach porteur d'une SpecialAuthorization (accordée par Ministre/
-      // Pasteur). Grant ADDITIF — n'élargit qu'aux parties explicitement autorisées, ne masque rien.
-      const isCoach = roles.includes('Coach');
-      const suiviAuths = ((await readCollection('special_authorizations')) as SpecialAuthorization[]).filter(
-        (s) => !s.deletedAt && s.memberId === member.id && s.capability === CAP_VOIR_SUIVI_MEMBRE
-          && (s.branchId == null || s.branchId === member.branch),
-      );
-      let suiviSubjectInScope: (memberId: string) => boolean = () => false;
-      if (isCoach || suiviAuths.length) {
-        const byId = new Map(((await readCollection('members')) as Member[]).map((m) => [m.id, m]));
-        const departments = await readCollection('departments') as Department[];
-        const ministries = await readCollection('ministries') as Ministry[];
-        const busLines = await readCollection('bus_lines') as BloomBusEntity[];
-        suiviSubjectInScope = (mid) => {
-          const subject = byId.get(mid);
-          return !!subject && inMemberScopeForRoles(member, subject, roles, busLines, departments, ministries);
-        };
-      }
-      // §8.1 — cascade de visibilité par FILIÈRE pour les rapports NON confidentiels : un rapport
-      // ne remonte qu'à la hiérarchie de sa filière. Rapport Bloom Bus → hiérarchie Bloom Bus
-      // (capitaine/zone/commune/responsable du bus visé) ; rapport de département → hiérarchie du
-      // département (fonction supervisrice dans CE département, ou ministre de tutelle). Le corps
-      // pastoral / full-scope voient tout ; l'auteur voit toujours le sien. Ainsi un Responsable de
-      // dépt ne voit PAS les rapports Bloom Bus de ses membres s'il n'est pas dans la filière bus.
-      const scopeRole = SCOPE_ROLE_ORDER.find(([r]) => roles.includes(r))?.[1] ?? 'Membre';
-      const SUP_DEPT_FNS = new Set(['responsable', 'adjoint', 'responsable_section']);
-      let allMembers: Member[] = [];
-      let deptsAll: Department[] = [];
-      let minsAll: Ministry[] = [];
-      let busAll: BloomBusEntity[] = [];
-      if (!fullScope) {
-        allMembers = await readCollection('members') as Member[];
-        deptsAll = await readCollection('departments') as Department[];
-        minsAll = await readCollection('ministries') as Ministry[];
-        busAll = await readCollection('bus_lines') as BloomBusEntity[];
-      }
-      const canSeeNonConfidential = (r: any): boolean => {
-        if (fullScope || pastoralCorps) return true;
-        if (r.authorId && r.authorId === member.id) return true;
-        const isBus = r.reportType === 'rapport_bloom_bus_member'
-          || r.reportType === 'rapport_bloom_bus_life' || r.departmentId === 'dept_bloom_bus';
-        if (isBus) {
-          if (r.reportType === 'rapport_bloom_bus_member' && r.content?.memberId) {
-            const subject = allMembers.find((m) => m.id === r.content.memberId);
-            return !!subject && canFillReportFor(member, subject, scopeRole, allMembers, busAll, deptsAll);
-          }
-          if (r.content?.busId) {
-            const bus = busAll.find((b) => b.id === r.content.busId);
-            return !!bus && busInScope(member, bus, scopeRole, busAll, deptsAll);
-          }
-          return fullBloomBusAccess(member, scopeRole, deptsAll);
-        }
-        if (r.departmentId) {
-          const fn = member.departments?.[r.departmentId];
-          if (fn && SUP_DEPT_FNS.has(fn)) {
-            if (fn !== 'responsable_section') return true;
-            return !!r.sectionId && member.deptSections?.[r.departmentId] === r.sectionId;
-          }
-          const dept = deptsAll.find((d) => d.id === r.departmentId);
-          return !!dept && minsAll.some((mi) => mi.id === dept.ministryId && mi.tuteurId === member.id);
-        }
-        // Rapport sans filière identifiable (ni bus ni département) : REFUS par défaut.
-        // C'était un `return true` (visibilité de branche, faute de hiérarchie à remonter).
-        // Le défaut permissif était le vrai risque : un futur type de rapport introduit sans
-        // `departmentId` devenait lisible par tout membre de la branche SILENCIEUSEMENT.
-        // Aucun type actuel n'emprunte ce chemin — tous portent un departmentId, sauf
-        // rapport_pastoral qui est confidentiel et traité dans l'autre branche — donc ce
-        // basculement n'ôte rien à personne aujourd'hui, et transforme un oubli futur en
-        // absence visible plutôt qu'en fuite. Auteur, corps pastoral et full-scope sont
-        // déjà sortis plus haut : eux continuent de voir.
-        return false;
-      };
-      let out = items.filter((r) => {
-        if (!r.confidential) return canSeeNonConfidential(r);
-        if (r.authorId === member.id) return true;
-        if (pastoralCorps) return true;
-        if (roles.includes('Ministre') && r.departmentId) {
-          const dept = deptsAll.find((d) => d.id === r.departmentId);
-          if (dept && minsAll.some((mi) => mi.id === dept.ministryId && mi.tuteurId === member.id)) return true;
-        }
-        if (roles.includes('Responsable de section') && r.sectionId && r.departmentId
-          && member.departments?.[r.departmentId] === 'responsable_section'
-          && member.deptSections?.[r.departmentId] === r.sectionId) return true;
-        if (r.reportType === 'rapport_suivi_coach' && r.content?.memberId
-            && (isCoach || suiviAuths.length) && suiviSubjectInScope(r.content.memberId)) return true;
-        if (r.partagerAvecResponsableDept && r.departmentId) {
-          return ['responsable', 'adjoint'].includes(member.departments?.[r.departmentId] ?? '');
-        }
-        return false;
-      });
-      // Hors corps à périmètre global, on ne renvoie que la branche de l'opérateur.
-      if (!fullScope && member.branch) {
-        out = out.filter((r) => !r.targetBranch || r.targetBranch === 'global' || r.targetBranch === member.branch);
-      }
-      // Scale : les rapports de plus de 24 mois restent en base (archives) mais ne sont
-      // plus servis au bootstrap — et par symétrie preservedIds, jamais tombstonés par les
-      // PUT whole-array des clients qui ne les ont pas reçus. 24 mois = 2× la période max
-      // du sélecteur (année) ; le générateur de rapports couvre donc toujours ses bornes.
-      const archiveCutoff = new Date();
-      archiveCutoff.setMonth(archiveCutoff.getMonth() - 24);
-      out = out.filter((r) => {
-        const d = new Date(r.weekOf ?? r.date);
-        return Number.isNaN(d.getTime()) || d >= archiveCutoff; // sans date lisible → jamais archivé
-      });
-      return out;
+      const [members, departments, ministries, buses] = await Promise.all([
+        readCollection('members'), readCollection('departments'), readCollection('ministries'), readCollection('bus_lines'),
+      ]);
+      const cutoff = new Date(); cutoff.setMonth(cutoff.getMonth() - 24);
+      return items.filter(r => canReadScopedReport(member, roles, r, members, departments, ministries, buses))
+        .filter(r => { const date = new Date(r.weekOf ?? r.date); return !Number.isFinite(date.getTime()) || date >= cutoff; });
     }
 
     case 'members': {
@@ -931,8 +928,9 @@ export async function filterReadable(name: string, ctx: RbacContext, items: any[
       // §13.2 — masque les champs de santé confidentiels non autorisés (financier/présence) sur
       // CHAQUE fiche renvoyée. Symétrique du repinçage en écriture (assertCanWrite members) : ce
       // qu'un opérateur ne voit pas, il ne peut pas l'écrire. (full-scope voit tout, sorti ci-dessus.)
-      const blocked = await protectedHealthFields(ctx);
+      const healthPolicy = await healthFieldPolicy(ctx);
       const mask = (m: any) => {
+        const blocked = healthPolicy(m);
         if (!blocked.length) return m;
         const hk = { ...(m.healthKPIs ?? {}) };
         for (const f of blocked) delete hk[f];
@@ -1040,13 +1038,16 @@ export async function filterReadable(name: string, ctx: RbacContext, items: any[
     case 'capability_overrides':
       // Lecture symétrique à l'écriture (assertCanWrite ci-dessus) : la matrice dynamique
       // de capacités n'est pas exposée plus largement en lecture qu'en écriture.
-      return hasAny(roles, ['Admin', 'Pasteur Principal', 'Super Admin']) ? items : [];
+      return fullScope ? items : items.filter((o: CapabilityOverride) => accessibleBranches(member, roles).includes(o.branchId)
+        && (o.subjectType === 'level' ? member.level === o.subjectValue
+          : o.subjectType === 'cursus' ? member.pastoralCursus === o.subjectValue
+          : Object.entries(member.departments ?? {}).some(([id, fn]) => fn === o.subjectValue && effectiveBranchFor(member, id) === o.branchId)));
 
     case 'special_authorizations':
       // Lecture symétrique à l'écriture (GRANTORS dans assertCanWrite) : les exceptions
       // nominatives (qui a accès aux rapports de suivi confidentiels de qui) ne fuitent
       // pas à tout membre authentifié via /bootstrap.
-      if (!hasAny(roles, ['Ministre', 'Pasteur', 'Pasteur Principal', 'Admin', 'Super Admin'])) return [];
+      if (!hasAny(roles, ['Ministre', 'Pasteur', 'Pasteur Principal', 'Admin', 'Super Admin'])) return items.filter(s => s.memberId === member.id);
       if (fullScope) return items;
       {
         const allMembers = await readCollection('members') as Member[];
@@ -1060,32 +1061,35 @@ export async function filterReadable(name: string, ctx: RbacContext, items: any[
 
     case 'departments': {
       if (fullScope) return items;
-      if (roles.includes('Pasteur')) return items.filter((d: Department) => !d.branch || d.branch === member.branch);
       const ministries = await readCollection('ministries') as Ministry[];
       const tutored = new Set(ministries.filter((m) => m.tuteurId === member.id).map((m) => m.id));
-      return items.filter((d: Department) => Object.hasOwn(member.departments ?? {}, d.id) || tutored.has(d.ministryId));
+      return items.filter((d: Department) => (roles.includes('Pasteur') && (!d.branch || d.branch === member.branch))
+        || (Object.hasOwn(member.departments ?? {}, d.id) && (!d.branch || d.branch === effectiveBranchFor(member, d.id)))
+        || (tutored.has(d.ministryId) && (!d.branch || d.branch === member.branch)));
     }
 
     case 'ministries': {
       if (fullScope) return items;
-      if (roles.includes('Pasteur')) return items.filter((m: Ministry) => !m.branch || m.branch === member.branch);
       const ownDeptIds = new Set(Object.keys(member.departments ?? {}));
       const departments = await readCollection('departments') as Department[];
       const ownMinistries = new Set(departments.filter((d) => ownDeptIds.has(d.id)).map((d) => d.ministryId));
-      return items.filter((m: Ministry) => m.tuteurId === member.id || ownMinistries.has(m.id));
+      return items.filter((m: Ministry) => (roles.includes('Pasteur') && (!m.branch || m.branch === member.branch)) || m.tuteurId === member.id || ownMinistries.has(m.id));
     }
 
     case 'activities': {
       if (fullScope) return items;
       const departments = await readCollection('departments') as Department[];
-      if (roles.includes('Pasteur')) {
-        const allowed = new Set(departments.filter((d) => !d.branch || d.branch === member.branch).map((d) => d.id));
-        return items.filter((a: any) => allowed.has(a.departmentId));
-      }
       const ministries = await readCollection('ministries') as Ministry[];
       const tutored = new Set(ministries.filter((m) => m.tuteurId === member.id).map((m) => m.id));
       const allowed = new Set(departments.filter((d) => Object.hasOwn(member.departments ?? {}, d.id) || tutored.has(d.ministryId)).map((d) => d.id));
-      return items.filter((a: any) => allowed.has(a.departmentId));
+      return items.filter((a: any) => {
+        const dept = departments.find(d => d.id === a.departmentId);
+        const branch = a.branch ?? dept?.branch;
+        if (roles.includes('Pasteur') && (!branch || branch === member.branch)) return true;
+        if (!allowed.has(a.departmentId)) return false;
+        return !branch || (Object.hasOwn(member.departments ?? {}, a.departmentId)
+          ? effectiveBranchFor(member, a.departmentId) === branch : member.branch === branch);
+      });
     }
 
     default:
