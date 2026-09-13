@@ -1,6 +1,6 @@
 import React, { useState, useDeferredValue } from 'react';
 import { Branch, Member, PastoralCursus, Report, Department, Ministry, BloomBusEntity } from '../types';
-import { Heart, User, ArrowUpCircle, FileText, Share2, Search, PenLine, LayoutList, Network, X } from 'lucide-react';
+import { Heart, User, UserPlus, ArrowUpCircle, FileText, Share2, Search, PenLine, LayoutList, Network, X } from 'lucide-react';
 import { labelFor } from '../data';
 import { apiNominatePastoral } from '../data/api';
 import { canNominatePastoral, memberInBranch, PASTORAL_ORDER } from '../../packages/domain/authorization';
@@ -34,6 +34,8 @@ export default function CursusView({ activeBranch, simulatedRole, activeRoles, m
   const [searchTerm, setSearchTerm] = useState('');
   const [viewMode, setViewMode] = useState<'list' | 'tree'>('list');
   const [promoting, setPromoting] = useState<Member | null>(null);
+  const [addingToCursus, setAddingToCursus] = useState(false);
+  const [candidateId, setCandidateId] = useState('');
 
   // Spec (Onglet 8) : promotions validées uniquement par le Pasteur Principal.
   const canManage = activeRoles.some(r => ['Super Admin', 'Admin', 'Pasteur Principal'].includes(r));
@@ -74,11 +76,28 @@ export default function CursusView({ activeBranch, simulatedRole, activeRoles, m
   // Même cloisonnement que MembersView (scope.ts) : un Coach/Responsable ne voit que
   // le cursus des membres de son propre département, pas de tout le branch.
   const cursusBase = members.filter(m =>
-    m.pastoralCursus &&
-    (canManage || m.pastoralCursus !== 'aucun') &&
+    m.pastoralCursus !== 'aucun' &&
     (!operator || inMemberScopeForRoles(operator, m, activeRoles, busLines, departments, ministries))
   );
   const cursusMembers = cursusBase.filter(m => memberInBranch(m, operatorBranch));
+  const candidates = canManage ? members.filter(m =>
+    m.pastoralCursus === 'aucun'
+    && memberInBranch(m, operatorBranch)
+    && (!operator || inMemberScopeForRoles(operator, m, activeRoles, busLines, departments, ministries))
+  ) : [];
+
+  const openEnrollment = () => {
+    setCandidateId(candidates[0]?.id ?? '');
+    setSaveError('');
+    setAddingToCursus(true);
+  };
+  const confirmEnrollment = () => {
+    const candidate = candidates.find(m => m.id === candidateId);
+    if (!candidate) return;
+    setAddingToCursus(false);
+    setPromoting(candidate);
+    setNewCursus('appele');
+  };
 
   // ponytail: recherche différée → frappe instantanée, le filtrage tourne sur la valeur différée.
   const deferredSearch = useDeferredValue(searchTerm);
@@ -131,20 +150,32 @@ export default function CursusView({ activeBranch, simulatedRole, activeRoles, m
           </p>
         </div>
 
-        {/* View toggle */}
-        <div className="bg-bc-canvas rounded-full p-1 flex items-center gap-1 shrink-0">
-          <button
-            onClick={() => setViewMode('list')}
-            className={`px-3 py-1.5 rounded-full text-xs font-bold flex items-center gap-1.5 transition-colors active-scale ${viewMode === 'list' ? 'bg-white text-bc-text shadow-sm' : 'text-bc-text-secondary'}`}
-          >
-            <LayoutList size={14} /> Liste
-          </button>
-          <button
-            onClick={() => setViewMode('tree')}
-            className={`px-3 py-1.5 rounded-full text-xs font-bold flex items-center gap-1.5 transition-colors active-scale ${viewMode === 'tree' ? 'bg-white text-bc-text shadow-sm' : 'text-bc-text-secondary'}`}
-          >
-            <Network size={14} /> Organigramme
-          </button>
+        <div className="flex items-center gap-2 shrink-0">
+          {canManage && (
+            <button
+              onClick={openEnrollment}
+              disabled={candidates.length === 0}
+              className="px-3 py-2 rounded-full text-xs font-bold flex items-center gap-1.5 bg-bc-green text-white hover:opacity-90 active-scale disabled:opacity-40"
+              title={candidates.length ? 'Ajouter un membre au cursus pastoral' : 'Aucun membre hors cursus dans cette branche'}
+            >
+              <UserPlus size={14} /> Ajouter au cursus
+            </button>
+          )}
+          {/* View toggle */}
+          <div className="bg-bc-canvas rounded-full p-1 flex items-center gap-1">
+            <button
+              onClick={() => setViewMode('list')}
+              className={`px-3 py-1.5 rounded-full text-xs font-bold flex items-center gap-1.5 transition-colors active-scale ${viewMode === 'list' ? 'bg-white text-bc-text shadow-sm' : 'text-bc-text-secondary'}`}
+            >
+              <LayoutList size={14} /> Liste
+            </button>
+            <button
+              onClick={() => setViewMode('tree')}
+              className={`px-3 py-1.5 rounded-full text-xs font-bold flex items-center gap-1.5 transition-colors active-scale ${viewMode === 'tree' ? 'bg-white text-bc-text shadow-sm' : 'text-bc-text-secondary'}`}
+            >
+              <Network size={14} /> Organigramme
+            </button>
+          </div>
         </div>
       </div>
 
@@ -345,10 +376,24 @@ export default function CursusView({ activeBranch, simulatedRole, activeRoles, m
       )}
 
       {/* Promotion confirmation modal */}
+      {addingToCursus && (
+        <Modal open={addingToCursus} onClose={() => setAddingToCursus(false)} title="Ajouter au cursus pastoral" icon={<UserPlus size={20} className="text-bc-green" />} maxWidth="max-w-md">
+          <p className="text-sm text-bc-text-secondary mb-4">Sélectionnez un membre hors cursus. Le niveau <strong>Appelé</strong> sera proposé avant confirmation et pourra être ajusté si nécessaire.</p>
+          <label className="text-xs font-bold text-bc-text mb-1 block" htmlFor="cursus-candidate">Membre</label>
+          <select id="cursus-candidate" value={candidateId} onChange={e => setCandidateId(e.target.value)} className="w-full border border-bc-border rounded-xl px-3 py-2 text-sm bg-white">
+            {candidates.map(m => <option key={m.id} value={m.id}>{m.firstName} {m.lastName} — {m.branch === 'church' ? 'Bloom Church' : 'Bloom Light'}</option>)}
+          </select>
+          <div className="flex gap-3 justify-end pt-5 mt-5 border-t border-bc-border">
+            <button onClick={() => setAddingToCursus(false)} className="px-4 py-2 border border-bc-border text-bc-text-secondary rounded-full text-xs hover:bg-bc-canvas active-scale">Annuler</button>
+            <button onClick={confirmEnrollment} disabled={!candidateId} className="px-5 py-2 bg-bc-green text-white rounded-full text-xs font-ui font-bold hover:opacity-90 active-scale disabled:opacity-40">Continuer</button>
+          </div>
+        </Modal>
+      )}
+
       {promoting && (
-        <Modal open={!!promoting} onClose={() => setPromoting(null)} title="Promotion pastorale" icon={<ArrowUpCircle size={20} className="text-bc-green" />} maxWidth="max-w-md">
+        <Modal open={!!promoting} onClose={() => setPromoting(null)} title={promoting.pastoralCursus === 'aucun' ? 'Inscription au cursus pastoral' : 'Modification du cursus pastoral'} icon={<ArrowUpCircle size={20} className="text-bc-green" />} maxWidth="max-w-md">
           <p className="text-sm text-bc-text-secondary mb-5">
-            Modifier le cursus pastoral de <span className="font-bold text-bc-text">{promoting.firstName} {promoting.lastName}</span>.
+            {promoting.pastoralCursus === 'aucun' ? 'Inscrire' : 'Modifier le cursus pastoral de'} <span className="font-bold text-bc-text">{promoting.firstName} {promoting.lastName}</span>.
           </p>
           <div className="flex items-center justify-center gap-3 mb-6">
             <span className="text-xs font-bold px-3 py-1.5 rounded-full bg-bc-canvas text-bc-text-secondary">{labelFor(promoting.pastoralCursus)}</span>

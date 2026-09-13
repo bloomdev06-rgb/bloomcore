@@ -450,18 +450,26 @@ export async function apiCreateMember(member: unknown): Promise<{ ok: boolean; e
   }
 }
 
-export async function apiPatchMember(member: { id: string }): Promise<boolean> {
-  if (!isAuthed()) return false;
+export async function apiPatchMember(member: { id: string }): Promise<{ ok: boolean; error?: string }> {
+  if (!isAuthed()) return { ok: false, error: 'Connexion requise.' };
+  // `updatedAt` et `deletedAt` sont posés par le stockage serveur. Les membres reçus au
+  // bootstrap les portent, mais le schéma PATCH est volontairement strict : les renvoyer
+  // ferait rejeter toute édition légitime avec une 400.
+  const { updatedAt: _updatedAt, deletedAt: _deletedAt, ...payload } = member as typeof member & {
+    updatedAt?: unknown; deletedAt?: unknown;
+  };
   try {
     const res = await fetch(`${API_BASE}/members/${encodeURIComponent(member.id)}`, {
       credentials: 'include', // Phase 6 (T6.1)
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json', ...authHeaders() },
-      body: JSON.stringify(member),
+      body: JSON.stringify(payload),
     });
-    return res.ok;
+    if (res.ok) return { ok: true };
+    const data = await res.json().catch(() => ({}));
+    return { ok: false, error: typeof data.error === 'string' ? data.error : `Erreur serveur (${res.status}).` };
   } catch {
-    return false;
+    return { ok: false, error: 'Serveur indisponible. Vérifiez votre connexion.' };
   }
 }
 

@@ -434,9 +434,12 @@ export default function App() {
   };
 
   const handleUpdateMember = async (m: Member): Promise<boolean> => {
-    if (hasServerSession() && !(await apiPatchMember(m))) {
-      toast.error('Modification non enregistrée : autorisation refusée ou serveur indisponible.');
-      return false;
+    if (hasServerSession()) {
+      const result = await apiPatchMember(m);
+      if (!result.ok) {
+        toast.error(`Modification non enregistrée : ${result.error ?? 'erreur inconnue.'}`);
+        return false;
+      }
     }
     // P1.2 — un seul point de diff pour toutes les vues qui appellent onUpdateMember
     // (validation de réception, promotion, changement d'affectation, transfert de
