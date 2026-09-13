@@ -77,5 +77,5 @@ assert.equal(canReadScopedReport(crossBusLead, ['Responsable', 'Capitaine de Bus
 assert.equal(canAssignBusRole(crossBusLead, ['Responsable', 'Capitaine de Bus'], member('church_cap', { bloomBusId: 'ba' }), 'Capitaine de Bus', buses, [busDepartment]), false, 'rang Light ne se combine pas au territoire capitaine Church');
 assert.equal(canAssignBusRole(crossBusLead, ['Responsable', 'Capitaine de Bus'], member('church_member', { bloomBusId: 'ba' }), 'Membre', buses, [busDepartment]), true, 'capitaine Church conserve son droit local');
 assert.equal(canAssignBusRole(crossBusLead, ['Responsable', 'Capitaine de Bus'], member('light_lead', { bloomBusId: 'bl', branch: 'light' }), 'Responsable de Commune', buses, [busDepartment]), true, 'responsable Light conserve son droit dans Light');
-assert.deepEqual(directReportsOf(zone, 'Responsable de Zone', [captain], buses, departments).map(m => m.id), ['cap'], 'capitaine cumulant une autre fonction reste affiché');
+assert.deepEqual(directReportsOf(zone, 'Responsable de Zone', [captain], buses, departments).map(m => m.id), [], 'un responsable de commune cumulé n’est pas un capitaine à se valider dans la zone');
 console.log('scopedAuthorization.check OK');

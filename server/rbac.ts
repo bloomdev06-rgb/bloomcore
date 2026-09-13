@@ -4,7 +4,7 @@
 // pas diverger sur la sémantique des capacités et du scope.
 import { Member, Ministry, PermissionMatrix, Delegation, AdminAccount, Department, BloomBusEntity, SpecialAuthorization, CapabilityOverride } from '../packages/domain/types.ts';
 import { resolveCapability, resolveTargetCapability } from '../packages/domain/permissions.ts';
-import { inMemberScopeForRoles, canFillReportFor, fullBloomBusAccess, MULTI_BRANCH_ROLES, COACH_AND_ABOVE, canManageAccountOf, bestRank, canAssignBusRole, effectiveBranchFor } from '../packages/domain/scope.ts';
+import { inMemberScopeForRoles, canFillReportFor, canValidateBloomBusReport, fullBloomBusAccess, MULTI_BRANCH_ROLES, COACH_AND_ABOVE, canManageAccountOf, bestRank, canAssignBusRole, effectiveBranchFor } from '../packages/domain/scope.ts';
 import { isBusReportLocked } from '../packages/domain/reportLock.ts';
 import { getKv } from './datastore.ts';
 import { GuardError, readCollection, canonical } from './guards.ts';
@@ -719,13 +719,12 @@ export async function assertCanWrite(name: string, ctx: RbacContext, incoming: a
             if (!target || !roles.some(role => canFillReportFor(member, target, role, allMembers, busLines, departments, ministriesForScope))) {
               throw new GuardError(403, `reports: ${r.id} hors de votre hiérarchie Bloom Bus`);
             }
-            // Auto-validation interdite : un membre qui remplit SON propre rapport ne peut pas le
-            // marquer validé — la validation est réservée au capitaine (ou au-dessus).
-            if (r.content.memberId === member.id && r.validated === true) {
-              const captainOrAbove = canAssignBusRole(member, roles, target, 'Membre', busLines, departments, ministriesForScope);
-              if (!captainOrAbove) {
-                throw new GuardError(403, `reports: auto-validation interdite (réservée au capitaine)`);
-              }
+            const previous = storedReports.get(String(r.id));
+            // Valider n'est pas saisir : une personne ne se valide jamais, même si elle cumule
+            // Capitaine et Responsable de zone. Le garde est commun à l'UI et à l'API.
+            if (r.validated === true && previous?.validated !== true
+              && !canValidateBloomBusReport(member, target, roles, allMembers, busLines, departments, ministriesForScope)) {
+              throw new GuardError(403, `reports: ${r.id} validation réservée au responsable direct`);
             }
           }
           // Rapport d'activité Bloom Bus : même étanchéité territoriale que le rapport

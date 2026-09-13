@@ -27,7 +27,7 @@ import { useSyncedSave } from "../data/useSyncedSave";
 import { CULTE_SLOT_KEYS, culteSlotLabel } from "../data/events";
 import { isBusReportLocked } from "../data/reportLock";
 import { toast } from "./ui/Toast";
-import { busInScope, bloomBusRoleOf, bloomBusRolesOf, fullBloomBusAccess, canFillReportFor, canRegisterMemberViaBloomBus, canAssignBusRole, FULL_SCOPE_ROLES } from "../data/scope";
+import { busInScope, bloomBusRoleOf, bloomBusPrimaryRole, bloomBusRolesOf, fullBloomBusAccess, canFillReportFor, canValidateBloomBusReport, canRegisterMemberViaBloomBus, canAssignBusRole } from "../data/scope";
 import { moissonTotal, busVisitesTotal, busPresenceCulteTotal, busActivitesTotal, periodHealthLevels, periodRange, healthEvolutionSeries, Period, PeriodInput } from "../data/kpi";
 import { reportingWindow, weekId, weekLabel, mondaysInRange } from "../data/week";
 import { memberWeekStatus, membersFillRate } from "../data/completude";
@@ -103,13 +103,19 @@ function RatingRow({ label, value, onChange }: { label: string; value: number | 
   );
 }
 
-function CaptainBadge({ className = "" }: { className?: string }) {
+function RoleCrown({ role, className = "" }: { role: string | undefined; className?: string }) {
+  const style = role === 'Responsable' ? 'bg-amber-500'
+    : role === 'Responsable de Commune' ? 'bg-bc-orange'
+    : role === 'Responsable de Zone' ? 'bg-violet-600'
+    : 'bg-bc-cerulean';
+  const label = role === 'Responsable' ? 'Responsable du département Bloom Bus'
+    : role ?? 'Capitaine de Bloom Bus';
   return (
     <span
       role="img"
-      aria-label="Capitaine de Bloom Bus"
-      title="Capitaine de Bloom Bus"
-      className={`pointer-events-none absolute z-10 flex h-5 w-5 items-center justify-center rounded-full bg-bc-cerulean text-white ring-2 ring-white shadow-sm ${className}`}
+      aria-label={label}
+      title={label}
+      className={`pointer-events-none absolute z-10 flex h-5 w-5 items-center justify-center rounded-full ${style} text-white ring-2 ring-white shadow-sm ${className}`}
     >
       <Crown size={11} strokeWidth={2.5} aria-hidden="true" />
     </span>
@@ -287,11 +293,7 @@ export default function BloomBusView({
       toast.success('Branche du Bloom Bus enregistrée.');
     } finally { setSavingBranchId(null); }
   };
-  const isCaptain = (member: Member) => bloomBusRolesOf(member, departments).has("Capitaine de Bus");
-  // Un rapport saisi par un Capitaine (ou au-dessus) est validé d'office ; saisi par un membre
-  // pour lui-même → « en attente » de validation du capitaine.
-  const operatorAutoValidates = FULL_SCOPE_ROLES.includes(simulatedRole)
-    || ["Capitaine de Bus", "Responsable de Zone", "Responsable de Commune", "Responsable"].includes(bloomBusRole ?? "");
+  const primaryBloomBusRole = (member: Member) => bloomBusPrimaryRole(member, departments);
   const visibleBusLines = operator
     ? busLines.filter((b) => (activeBranch === 'global' || b.branch === activeBranch)
       && (hasFullBloomBusAccess || operatorRolesForBus.some(role => busInScope(operator,
@@ -419,7 +421,7 @@ export default function BloomBusView({
   const leaderPins: { id: string; name: string; lat: number; lng: number }[] = (() => {
     if (selectedLevel.type === "zone") {
       return activeBuses.flatMap((bus) => {
-        const captain = members.find((m) => m.bloomBusId === bus.id && bloomBusRolesOf(m, departments).has("Capitaine de Bus"));
+        const captain = members.find((m) => m.bloomBusId === bus.id && bloomBusPrimaryRole(m, departments) === "Capitaine de Bus");
         if (!captain) return [];
         const pos = captain.gps ?? { lat: bus.centerLat, lng: bus.centerLng };
         return [{ id: captain.id, name: `${captain.firstName} ${captain.lastName} (${bus.name})`, lat: pos.lat, lng: pos.lng }];
@@ -429,7 +431,10 @@ export default function BloomBusView({
       const zones = Array.from(new Set(activeBuses.map((b) => b.zone)));
       return zones.flatMap((zone) => {
         const zoneBus = activeBuses.find((b) => b.zone === zone);
-        const lead = members.find((m) => bloomBusRolesOf(m, departments).has("Responsable de Zone") && busLines.find((b) => b.id === m.bloomBusId)?.zone === zone);
+        const lead = members.find((m) => bloomBusPrimaryRole(m, departments) === "Responsable de Zone"
+          && busLines.find((b) => b.id === m.bloomBusId)?.zone === zone
+          && busLines.find((b) => b.id === m.bloomBusId)?.commune === selectedLevel.id
+          && (activeBranch === 'global' || m.branch === activeBranch));
         if (!lead || !zoneBus) return [];
         const pos = lead.gps ?? { lat: zoneBus.centerLat, lng: zoneBus.centerLng };
         return [{ id: lead.id, name: `${lead.firstName} ${lead.lastName} (${zone})`, lat: pos.lat, lng: pos.lng }];
@@ -439,7 +444,9 @@ export default function BloomBusView({
       const communes = Array.from(new Set(visibleBusLines.map((b) => b.commune)));
       return communes.flatMap((commune) => {
         const communeBus = visibleBusLines.find((b) => b.commune === commune);
-        const lead = members.find((m) => bloomBusRolesOf(m, departments).has("Responsable de Commune") && (busLines.find((b) => b.id === m.bloomBusId)?.commune ?? m.gps?.commune) === commune);
+        const lead = members.find((m) => bloomBusPrimaryRole(m, departments) === "Responsable de Commune"
+          && (busLines.find((b) => b.id === m.bloomBusId)?.commune ?? m.gps?.commune) === commune
+          && (activeBranch === 'global' || m.branch === activeBranch));
         if (!lead || !communeBus) return [];
         const pos = lead.gps ?? { lat: communeBus.centerLat, lng: communeBus.centerLng };
         return [{ id: lead.id, name: `${lead.firstName} ${lead.lastName} (${commune})`, lat: pos.lat, lng: pos.lng }];
@@ -515,28 +522,41 @@ export default function BloomBusView({
   };
 
   const isHierarchicalOperator = !!operator && (hasFullBloomBusAccess || bloomBusRole === "Responsable de Zone" || bloomBusRole === "Responsable de Commune");
-  // Le roster reflète le NIVEAU sélectionné (comme la carte, cf. leaderPins) et requête les
-  // entités PROPRES à ce niveau — pas les subordonnés fixes de l'opérateur relabellisés :
-  //   root    → Responsables de Commune (sur les bus visibles)
-  //   commune → Responsables de Zone (des bus de cette commune)
-  //   zone    → Capitaines de Bus (des bus de cette zone)
-  //   bus     → membres du bus
-  // Le scope est préservé : visibleBusLines/activeBuses sont déjà filtrés au périmètre de l'opérateur.
-  const rosterMembers = (() => {
-    if (selectedLevel.type === "bus") return busMembers;
-    const wantRole = selectedLevel.type === "root" ? "Responsable de Commune"
-      : selectedLevel.type === "commune" ? "Responsable de Zone"
-      : "Capitaine de Bus"; // zone
-    const scopeBusIds = new Set((selectedLevel.type === "root" ? visibleBusLines : activeBuses).map((b) => b.id));
-    return members.filter((m) =>
-      bloomBusRolesOf(m, departments).has(wantRole)
-      && !!m.bloomBusId && scopeBusIds.has(m.bloomBusId)
-      && (activeBranch === "global" || m.branch === activeBranch));
-  })();
-  const rosterTitle = selectedLevel.type === "bus" ? "Membres du Bus"
-    : selectedLevel.type === "root" ? "Responsables de Commune"
-    : selectedLevel.type === "commune" ? "Responsables de Zone"
-    : "Capitaines de Bus"; // zone
+  // Chaque palier est un groupe complet : son responsable est présenté séparément et les
+  // responsables du palier inférieur forment ses membres. Une personne cumulant des rôles
+  // n'apparaît qu'à son rang territorial le plus haut, sauf dans le roster de son propre bus
+  // où elle reste bien un membre du bus.
+  const scopeBusIds = new Set((selectedLevel.type === "root" ? visibleBusLines : activeBuses).map((b) => b.id));
+  const inActiveGroup = (m: Member) => !!m.bloomBusId && scopeBusIds.has(m.bloomBusId)
+    && (activeBranch === "global" || m.branch === activeBranch);
+  const groupLeaderRole = selectedLevel.type === "root" ? "Responsable"
+    : selectedLevel.type === "commune" ? "Responsable de Commune"
+    : selectedLevel.type === "zone" ? "Responsable de Zone"
+    : "Capitaine de Bus";
+  const hierarchyLeaders = members.filter((m) => {
+    const role = primaryBloomBusRole(m);
+    if (role !== groupLeaderRole || (activeBranch !== "global" && m.branch !== activeBranch)) return false;
+    if (selectedLevel.type === "root") return departments.some(d => d.specialFunction === 'bloom_bus'
+      && m.departments?.[d.id] === 'responsable'
+      && (activeBranch === 'global' || (m.deptBranches?.[d.id] ?? d.branch ?? m.branch) === activeBranch));
+    return inActiveGroup(m);
+  });
+  const leaderIds = new Set(hierarchyLeaders.map(m => m.id));
+  const childRole = selectedLevel.type === "root" ? "Responsable de Commune"
+    : selectedLevel.type === "commune" ? "Responsable de Zone"
+    : selectedLevel.type === "zone" ? "Capitaine de Bus"
+    : undefined;
+  const rosterMembers = selectedLevel.type === "bus"
+    ? busMembers.filter(m => !leaderIds.has(m.id))
+    : members.filter(m => inActiveGroup(m) && !leaderIds.has(m.id) && primaryBloomBusRole(m) === childRole);
+  const rosterTitle = selectedLevel.type === "bus" ? "Membres du Bloom Bus"
+    : selectedLevel.type === "root" ? "Responsables de commune"
+    : selectedLevel.type === "commune" ? "Responsables de zone"
+    : "Capitaines des Bloom Bus";
+  const leaderTitle = selectedLevel.type === "bus" ? "Capitaine du Bloom Bus"
+    : selectedLevel.type === "zone" ? "Responsable de zone"
+    : selectedLevel.type === "commune" ? "Responsable de commune"
+    : "Responsable du département Bloom Bus";
   // Descente explicite dans la hiérarchie : la liste affichée à un niveau mène au
   // territoire de la personne listée, sans jamais sortir de visibleBusLines (déjà RBAC-scopé).
   const openChildTerritory = (member: Member) => {
@@ -560,8 +580,9 @@ export default function BloomBusView({
   // pas de tous les membres du périmètre — même ensemble que le roster.
   const rosterIds = rosterMembers.map((m) => m.id);
   // Rapports en attente de validation dans le roster (S-1 + S-2) — visible par le capitaine+.
-  const rosterPendingCount = operatorAutoValidates
-    ? rosterMembers.reduce((n, m) =>
+  const canValidateMember = (target: Member) => !!operator && canValidateBloomBusReport(operator, target, operatorRolesForBus, members, busLines, departments, ministriesForBus);
+  const rosterPendingCount = operator
+    ? rosterMembers.filter(canValidateMember).reduce((n, m) =>
         n + (memberWeekStatus(m.id, s1, branchReports) === "pending" ? 1 : 0)
           + (memberWeekStatus(m.id, s2, branchReports) === "pending" ? 1 : 0), 0)
     : 0;
@@ -686,11 +707,13 @@ export default function BloomBusView({
       weekOf: selectedWeek,
       reportType: "rapport_bloom_bus_member",
       confidential: false,
-      validated: operatorAutoValidates, // capitaine+ = validé ; membre = en attente
+      // Son propre rapport remonte toujours au palier supérieur. Saisie par le validateur
+      // direct = validée, jamais une auto-validation déguisée par un rôle cumulé.
+      validated: canValidateMember(targetMember),
       // Ancre du verrou 24h : conserve l'horodatage du PREMIER remplissage (une correction
       // dans la fenêtre ne repousse pas l'échéance).
       filledAt: existing?.filledAt ?? new Date().toISOString(),
-      validatedAt: operatorAutoValidates ? new Date().toISOString() : existing?.validatedAt,
+      validatedAt: canValidateMember(targetMember) ? new Date().toISOString() : existing?.validatedAt,
       content: {
         memberId: targetMemberId,
         memberName: `${targetMember.firstName} ${targetMember.lastName}`,
@@ -740,7 +763,7 @@ export default function BloomBusView({
   // Rapport de la semaine affichée en attente de validation ET l'opérateur peut valider (supérieur).
   const currentReport = selectedWeek ? reportFor(targetMemberId, selectedWeek) : undefined;
   const canValidateCurrent = !!currentReport && currentReport.validated === false
-    && operatorAutoValidates && !!operator && targetMemberId !== operator.id;
+    && !!operator && !!members.find(m => m.id === targetMemberId && canValidateMember(m));
   // Verrou 24h : le contenu n'est plus modifiable ; la validation (relecture) reste permise.
   const currentLocked = !!currentReport && isBusReportLocked(currentReport);
 
@@ -1007,7 +1030,7 @@ export default function BloomBusView({
                       size="sm"
                       className="w-16 h-16 text-base bg-bc-green/15 text-bc-green border-2 border-white"
                     />
-                    {isCaptain(m) && <CaptainBadge className="-left-0.5 -top-0.5" />}
+                    {primaryBloomBusRole(m) && <RoleCrown role={primaryBloomBusRole(m)} className="-left-0.5 -top-0.5" />}
                   </button>
                 ))}
                 {busMembers.length > 6 && (
@@ -1389,11 +1412,28 @@ export default function BloomBusView({
                   </div>
                 );
               })()}
+              {hierarchyLeaders.length > 0 && (
+                <div className="mb-3 space-y-2" aria-label={leaderTitle}>
+                  <p className="text-[10px] font-bold uppercase tracking-wider text-bc-text-secondary">{leaderTitle}</p>
+                  {hierarchyLeaders.map((m) => (
+                    <div key={m.id} className="p-3 rounded-xl border border-bc-border bg-amber-50/60 flex items-center gap-3">
+                      <span className="relative shrink-0">
+                        <Avatar src={m.avatarUrl} initials={`${m.firstName[0]}${m.lastName[0]}`} size="sm" className="w-10 h-10 bg-white border border-bc-border text-bc-text text-xs shadow-sm" />
+                        <RoleCrown role={primaryBloomBusRole(m)} className="-right-1 -top-1" />
+                      </span>
+                      <div className="min-w-0 flex-1">
+                        <p className="text-sm font-bold text-bc-text truncate">{m.firstName} {m.lastName}</p>
+                        <p className="text-[10px] text-bc-text-secondary">{primaryBloomBusRole(m)}</p>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
               <div className="space-y-3 overflow-y-auto flex-1 pr-2">
                 {rosterMembers.length === 0 ? (
                   <div className="text-center py-8">
                     <p className="text-xs text-bc-text-secondary font-bold">
-                      Aucun membre rattaché à ce bus.
+                      Aucun membre du niveau hiérarchique sélectionné.
                     </p>
                   </div>
                 ) : (
@@ -1417,7 +1457,7 @@ export default function BloomBusView({
                               size="sm"
                               className="w-10 h-10 bg-white border border-bc-border text-bc-text text-xs shadow-sm"
                             />
-                            {isCaptain(m) && <CaptainBadge className="-right-1 -top-1" />}
+                            {primaryBloomBusRole(m) && <RoleCrown role={primaryBloomBusRole(m)} className="-right-1 -top-1" />}
                           </span>
                           <div className="min-w-0 flex-1">
                             <p className="text-sm font-bold text-bc-text truncate">
@@ -1431,7 +1471,7 @@ export default function BloomBusView({
                           memberId={m.id}
                           reports={branchReports}
                           now={now}
-                          onValidate={operatorAutoValidates ? (week) => openValidateReport(m.id, week) : undefined}
+                          onValidate={canValidateMember(m) ? (week) => openValidateReport(m.id, week) : undefined}
                           />
                         {selectedLevel.type !== "bus" && (
                           <button
@@ -1779,7 +1819,7 @@ export default function BloomBusView({
                   size="sm"
                   className="w-12 h-12 bg-bc-green/15 text-bc-green border border-bc-border"
                 />
-                {isCaptain(m) && <CaptainBadge className="-right-1 -top-1" />}
+                {primaryBloomBusRole(m) && <RoleCrown role={primaryBloomBusRole(m)} className="-right-1 -top-1" />}
               </span>
               <div className="min-w-0 flex-1">
                 <p className="text-xs text-bc-text-secondary mb-1">Fonction Bloom Bus</p>

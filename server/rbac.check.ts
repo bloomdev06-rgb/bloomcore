@@ -374,6 +374,12 @@ assert.deepEqual(
   assert.ok(await sees('mCap', busReport), 'Capitaine du bus du membre voit son rapport Bloom Bus');
 
   const ctxCap = (await buildContext('mCap'))!;
+  await assert.rejects(
+    () => assertCanWrite('reports', ctxCap, [{ ...busReport, id: 'r_cap_self', authorId: 'mCap', validated: true, content: { memberId: 'mCap' } }]),
+    (e: any) => e instanceof GuardError && e.status === 403,
+    'un capitaine ne peut pas auto-valider son propre rapport',
+  );
+  await assertCanWrite('reports', ctxCap, [{ ...busReport, id: 'r_cap_member', authorId: 'mCap', validated: true }]);
   const lifeOwnBus = { id: 'r_life_own', reportType: 'rapport_bloom_bus_life', departmentId: 'dept_bloom_bus', confidential: false, targetBranch: 'church', date: '2026-07-15', authorId: 'mCap', content: { busId: 'bus1' } };
   const lifeOtherBus = { ...lifeOwnBus, id: 'r_life_other', content: { busId: 'bus2' } };
   await assertCanWrite('reports', ctxCap, [lifeOwnBus]);

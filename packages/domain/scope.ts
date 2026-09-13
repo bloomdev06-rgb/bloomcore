@@ -286,6 +286,13 @@ export function bloomBusRoleOf(operator: Member, departments: Department[]): str
   return BUS_ROLE_LADDER.find((role) => roles.has(role));
 }
 
+// Une personne peut cumuler des fonctions, mais son compte rendu remonte par sa fonction
+// la plus haute. Exemple : capitaine + responsable de zone = responsable de zone dans la
+// chaîne des rapports ; il ne peut ni se valider ni être compté comme son propre capitaine.
+export function bloomBusPrimaryRole(operator: Member, departments: Department[]): string | undefined {
+  return bloomBusRoleOf(operator, departments);
+}
+
 export function fullBloomBusAccess(operator: Member, role: string, departments: Department[], branch = operator.branch): boolean {
   if (CROSS_BRANCH_ROLES.includes(role)) return true;
   if (role === 'Pasteur' && branch === operator.branch) return true;
@@ -326,21 +333,21 @@ export function directReportsOf(operator: Member, role: string, members: Member[
   const ownBus = busLines.find(b => b.id === operator.bloomBusId);
   return members.filter(target => {
     if (target.id === operator.id) return false;
-    const targetRoles = bloomBusRolesOf(target, departments);
-    if (CROSS_BRANCH_ROLES.includes(role)) return targetRoles.has('Responsable');
-    if (role === 'Pasteur' && operator.branch === target.branch && targetRoles.has('Responsable')) return true;
+    const targetRole = bloomBusPrimaryRole(target, departments);
+    if (CROSS_BRANCH_ROLES.includes(role)) return targetRole === 'Responsable';
+    if (role === 'Pasteur' && operator.branch === target.branch && targetRole === 'Responsable') return true;
     if (held.has('Responsable') && fullBloomBusAccess(operator, 'Responsable', departments, target.branch)
-      && targetRoles.has('Responsable de Commune')) return true;
+      && targetRole === 'Responsable de Commune') return true;
     if (target.branch !== operator.branch) return false;
     const bus = busLines.find(b => b.id === target.bloomBusId);
     const commune = ownBus?.commune ?? operator.gps?.commune;
     const targetCommune = bus?.commune ?? target.gps?.commune;
-    if (held.has('Responsable de Commune') && targetRoles.has('Responsable de Zone')
+    if (held.has('Responsable de Commune') && targetRole === 'Responsable de Zone'
       && !!commune && commune === targetCommune) return true;
-    if (held.has('Responsable de Zone') && targetRoles.has('Capitaine de Bus')
+    if (held.has('Responsable de Zone') && targetRole === 'Capitaine de Bus'
       && !!ownBus?.zone && ownBus.zone === bus?.zone && !!commune && commune === targetCommune) return true;
     return held.has('Capitaine de Bus') && !!operator.bloomBusId && operator.bloomBusId === target.bloomBusId
-      && targetRoles.size === 0;
+      && !targetRole;
   });
 }
 
@@ -369,7 +376,32 @@ export function canFillReportFor(
   ministries: Ministry[] = [],
 ): boolean {
   if (target.id === operator.id) return true;
-  return canAssignBusRole(operator, [role], target, 'Membre', busLines, departments, ministries);
+  return directReportsOf(operator, role, members, busLines, departments).some(member => member.id === target.id)
+    || CROSS_BRANCH_ROLES.includes(role)
+    || (role === 'Pasteur' && target.branch === operator.branch);
+}
+
+// La validation est un acte distinct de la saisie : jamais sur soi, et seulement par le
+// responsable direct dans la chaîne Capitaine → Zone → Commune → Département. Les autorités
+// pastorales/globales conservent leur pouvoir de supervision dans leur branche.
+export function canValidateBloomBusReport(
+  operator: Member,
+  target: Member,
+  roles: Iterable<string>,
+  members: Member[],
+  busLines: BloomBusEntity[],
+  departments: Department[],
+  ministries: Ministry[] = [],
+): boolean {
+  if (operator.id === target.id) return false;
+  const held = [...roles];
+  if (held.some(role => CROSS_BRANCH_ROLES.includes(role))) return true;
+  if (held.includes('Pasteur') && operator.branch === target.branch) return true;
+  const tutoredBloomBus = departments.some(d => d.specialFunction === 'bloom_bus'
+    && (!d.branch || d.branch === target.branch)
+    && ministries.some(ministry => ministry.id === d.ministryId && ministry.tuteurId === operator.id && operator.branch === target.branch));
+  if (tutoredBloomBus) return true;
+  return held.some(role => directReportsOf(operator, role, members, busLines, departments).some(member => member.id === target.id));
 }
 
 // --- Attribution des fonctions Bloom Bus (§27) ---------------------------------------------

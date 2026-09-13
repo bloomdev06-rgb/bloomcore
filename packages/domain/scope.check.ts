@@ -1,6 +1,6 @@
 // Run: npx tsx src/data/scope.check.ts
 import assert from 'node:assert';
-import { inMemberScope, inMemberScopeForRoles, busInScope, directReportsOf, canFillReportFor, canManageAccountOf, rankOf, bestRank } from './scope.ts';
+import { inMemberScope, inMemberScopeForRoles, busInScope, directReportsOf, canFillReportFor, canValidateBloomBusReport, bloomBusPrimaryRole, canManageAccountOf, rankOf, bestRank } from './scope.ts';
 import { Member, BloomBusEntity, Department, Ministry } from './types.ts';
 
 let nextId = 0;
@@ -172,10 +172,11 @@ assert.equal(canFillReportFor(zoneLead1, capC, 'Responsable de Zone', hierMember
 const communeReports = directReportsOf(communeLead, 'Responsable de Commune', hierMembers, hierBusLines, hierDepts).map((m) => m.id).sort();
 assert.deepEqual(communeReports, ['zoneLead1', 'zoneLead2']);
 assert.equal(canFillReportFor(communeLead, zoneLead2, 'Responsable de Commune', hierMembers, hierBusLines, hierDepts), true);
-// Autorité territoriale : le Responsable de Commune peut remplir le rapport de tout membre
-// dont le bus est dans sa commune (capA/membre1 sur bus_z1a, Cocody), pas seulement ses zones.
-assert.equal(canFillReportFor(communeLead, capA, 'Responsable de Commune', hierMembers, hierBusLines, hierDepts), true);
-assert.equal(canFillReportFor(communeLead, membre1, 'Responsable de Commune', hierMembers, hierBusLines, hierDepts), true);
+// La saisie/validation suit maintenant UN palier : Commune → Zone uniquement. Les données
+// d'un capitaine/membre restent lisibles dans le périmètre, mais son rapport ne saute pas
+// son responsable direct.
+assert.equal(canFillReportFor(communeLead, capA, 'Responsable de Commune', hierMembers, hierBusLines, hierDepts), false);
+assert.equal(canFillReportFor(communeLead, membre1, 'Responsable de Commune', hierMembers, hierBusLines, hierDepts), false);
 // Un SIMPLE membre ne remplit QUE le sien, jamais un autre membre de son bus.
 assert.equal(canFillReportFor(membre1, capA, 'Membre', hierMembers, hierBusLines, hierDepts), false);
 
@@ -191,6 +192,18 @@ assert.equal(canFillReportFor(pasteur, communeLead, 'Pasteur', hierMembers, hier
 
 // Auto-remplissage toujours autorisé, à tout palier, même sans être un supérieur de qui que ce soit.
 assert.equal(canFillReportFor(membre1, membre1, 'Membre', hierMembers, hierBusLines, hierDepts), true);
+
+// Cumul : le rôle territorial le plus haut porte le rapport. Un capitaine également
+// responsable de zone est validé par la commune, jamais par lui-même ni par sa propre zone.
+const capAndZone = mk({ id: 'capAndZone', bloomBusId: 'bus_z1a', busRoles: ['capitaine', 'responsable_zone'] });
+const withCumulative = [...hierMembers, capAndZone];
+assert.equal(bloomBusPrimaryRole(capAndZone, hierDepts), 'Responsable de Zone');
+assert.equal(directReportsOf(zoneLead1, 'Responsable de Zone', withCumulative, hierBusLines, hierDepts).some(m => m.id === capAndZone.id), false);
+assert.equal(directReportsOf(communeLead, 'Responsable de Commune', withCumulative, hierBusLines, hierDepts).some(m => m.id === capAndZone.id), true);
+assert.equal(canValidateBloomBusReport(capAndZone, capAndZone, ['Capitaine de Bus', 'Responsable de Zone'], withCumulative, hierBusLines, hierDepts), false);
+assert.equal(canValidateBloomBusReport(communeLead, capAndZone, ['Responsable de Commune'], withCumulative, hierBusLines, hierDepts), true);
+assert.equal(canValidateBloomBusReport(deptLead, communeLead, ['Responsable'], withCumulative, hierBusLines, hierDepts), true);
+assert.equal(canValidateBloomBusReport(deptLead, membre1, ['Responsable'], withCumulative, hierBusLines, hierDepts), false, 'responsable département valide le responsable de commune, pas directement le membre');
 
 // canManageAccountOf — hiérarchie de suppression/promotion de compte (rang strict + portée).
 const dept1 = { id: 'dept_1', name: 'Louange', type: 'normal' as const, ministryId: 'min_1', description: '' };
