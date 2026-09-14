@@ -317,6 +317,8 @@ app.post('/api/v1/auth/request-reset', async (req, res) => {
 // Liste publique des départements pour le sélecteur du formulaire « Créer mon compte » —
 // SANS auth, l'inscription étant publique.
 //
+const PublicBranchSchema = z.object({ branch: z.enum(['church', 'light']) }).strict();
+
 // Strictement id + nom : c'est tout ce que le menu déroulant affiche. La version initiale
 // renvoyait aussi `branch` et `specialFunction`, exposant à un visiteur non authentifié la
 // structure interne de l'organisation (quels départements sont spéciaux, comment les branches
@@ -326,8 +328,26 @@ app.get('/api/v1/public/departments', async (req, res) => {
   if (await tooManyRequests('publicdepts', String(req.ip ?? 'unknown'), 30, 3600)) {
     return res.status(429).json({ error: 'trop de requêtes, réessayez plus tard' });
   }
+  const parsed = PublicBranchSchema.safeParse(req.query);
+  if (!parsed.success) return res.status(400).json({ error: 'branche invalide' });
   const departments = await readCollection('departments');
-  res.json(departments.map((d: any) => ({ id: d.id, name: d.name })));
+  res.json(departments
+    .filter((d: any) => !d.branch || d.branch === parsed.data.branch)
+    .map((d: any) => ({ id: d.id, name: d.name })));
+});
+
+// Référentiel public minimal pour l'auto-inscription : les candidats ont besoin de choisir
+// leur bus, sans exposer sa position GPS, ses membres, responsables ou rapports.
+app.get('/api/v1/public/bloom-buses', async (req, res) => {
+  if (await tooManyRequests('publicbuses', String(req.ip ?? 'unknown'), 30, 3600)) {
+    return res.status(429).json({ error: 'trop de requêtes, réessayez plus tard' });
+  }
+  const parsed = PublicBranchSchema.safeParse(req.query);
+  if (!parsed.success) return res.status(400).json({ error: 'branche invalide' });
+  const buses = await readCollection('bus_lines');
+  res.json(buses
+    .filter((b: any) => b.branch === parsed.data.branch)
+    .map((b: any) => ({ id: b.id, name: b.name, commune: b.commune, zone: b.zone })));
 });
 
 // Auto-inscription publique ("Créer mon compte") — quiconque peut s'inscrire, mais le
@@ -351,6 +371,8 @@ const RegisterSchema = z.object({
   branch: z.enum(['church', 'light']),
   departmentId: z.string().min(1),
   commune: z.string().min(1),
+  zone: z.string().min(1),
+  bloomBusId: z.string().min(1),
 }).strict();
 
 app.post('/api/v1/auth/register', async (req, res) => {
@@ -372,7 +394,16 @@ app.post('/api/v1/auth/register', async (req, res) => {
   }
 
   const department = (await readCollection('departments')).find((d: any) => d.id === input.departmentId);
-  if (!department) return res.status(400).json({ error: 'département inconnu' });
+  if (!department || (department.branch && department.branch !== input.branch)) {
+    return res.status(400).json({ error: 'département inconnu ou hors de votre branche' });
+  }
+  const busLine = (await readCollection('bus_lines')).find((b: any) => b.id === input.bloomBusId);
+  const normalized = (value: unknown) => String(value ?? '').trim().toLocaleLowerCase('fr-FR');
+  if (!busLine || busLine.branch !== input.branch
+    || normalized(busLine.commune) !== normalized(input.commune)
+    || normalized(busLine.zone) !== normalized(input.zone)) {
+    return res.status(400).json({ error: 'Bloom Bus, commune ou zone invalide pour votre branche' });
+  }
 
   const existing = await findByIdentifier(input.phone) || await findByIdentifier(input.email);
   if (existing) return res.status(409).json({ error: 'un compte existe déjà avec ce téléphone ou cet email' });
@@ -381,10 +412,7 @@ app.post('/api/v1/auth/register', async (req, res) => {
   // la commune déclarée (même principe que MemberFormModal.handleCommuneChange côté client) —
   // pas de coordonnée fixe par défaut si la commune ne matche aucun bus existant, plutôt qu'une
   // fausse position partagée par tous les inscrits.
-  const busLine = (await readCollection('bus_lines')).find(
-    (b: any) => b.branch === input.branch && String(b.commune).toLowerCase() === input.commune.toLowerCase(),
-  );
-  const gps = busLine ? { lat: busLine.centerLat, lng: busLine.centerLng, commune: input.commune } : undefined;
+  const gps = { lat: busLine.centerLat, lng: busLine.centerLng, commune: busLine.commune };
 
   const member = {
     id: `mem_reg_${randomUUID()}`,
@@ -396,12 +424,13 @@ app.post('/api/v1/auth/register', async (req, res) => {
     birthDate: input.birthDate,
     maritalStatus: input.maritalStatus,
     profession: input.profession,
-    ...(gps && { gps }),
+    gps,
     entryDate: new Date().toISOString().slice(0, 10),
     branch: input.branch,
     level: 'nouveau' as const,
     pastoralCursus: 'aucun' as const,
     departments: { [input.departmentId]: 'membre' as const },
+    bloomBusId: busLine.id,
     deptAttachmentStatus: 'pending' as const,
     deptAttachmentOrigin: 'self_registration' as const,
     healthKPIs: { spirituel: 3, social: 3, financier: 3, physique: 3, presenceCulte: 3, presenceService: 3 },

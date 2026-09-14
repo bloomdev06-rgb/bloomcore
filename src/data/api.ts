@@ -694,9 +694,22 @@ export const apiRequestReset = (identifier: string) => postJson('/auth/request-r
 // Liste des départements pour le sélecteur du formulaire — endpoint public (pas de session).
 // id + nom uniquement : le serveur ne renvoie volontairement rien d'autre à un visiteur non
 // authentifié (ni branche ni fonction spéciale — structure interne de l'organisation).
-export async function apiPublicDepartments(): Promise<{ id: string; name: string }[] | null> {
+export async function apiPublicDepartments(branch: 'church' | 'light'): Promise<{ id: string; name: string }[] | null> {
   try {
-    const res = await fetch(`${API_BASE}/public/departments`);
+    const res = await fetch(`${API_BASE}/public/departments?branch=${encodeURIComponent(branch)}`);
+    if (!res.ok) return null;
+    const data = await res.json();
+    return Array.isArray(data) ? data : null;
+  } catch {
+    return null;
+  }
+}
+
+export interface PublicBloomBus { id: string; name: string; commune: string; zone: string }
+
+export async function apiPublicBloomBuses(branch: 'church' | 'light'): Promise<PublicBloomBus[] | null> {
+  try {
+    const res = await fetch(`${API_BASE}/public/bloom-buses?branch=${encodeURIComponent(branch)}`);
     if (!res.ok) return null;
     const data = await res.json();
     return Array.isArray(data) ? data : null;
@@ -718,6 +731,8 @@ export interface RegisterInput {
   branch: 'church' | 'light';
   departmentId: string;
   commune: string;
+  zone: string;
+  bloomBusId: string;
 }
 
 // null = serveur injoignable ; { status, error? } sinon (201 = demande envoyée).

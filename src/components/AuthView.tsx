@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Member } from '../types';
 import { apiLogin } from '../data';
-import { apiRequestActivation, apiRequestReset, apiComplete, apiPublicDepartments, apiRegister, RegisterInput } from '../data/api';
+import { apiRequestActivation, apiRequestReset, apiComplete, apiPublicDepartments, apiPublicBloomBuses, apiRegister, PublicBloomBus, RegisterInput } from '../data/api';
 import { Phone, KeyRound, ArrowRight, ShieldCheck, Sparkles } from 'lucide-react';
 
 interface AuthViewProps {
@@ -16,7 +16,7 @@ type Mode = 'login' | 'activate' | 'reset' | 'register';
 
 const EMPTY_REGISTER: RegisterInput = {
   lastName: '', firstName: '', phone: '', email: '', gender: 'H', birthDate: '',
-  maritalStatus: 'Célibataire', profession: '', branch: 'church', departmentId: '', commune: '',
+  maritalStatus: 'Célibataire', profession: '', branch: 'church', departmentId: '', commune: '', zone: '', bloomBusId: '',
 };
 
 // Lien d'activation/reset (server/index.ts issueAuthLink) : ${APP_URL}/?activate=<token>
@@ -55,14 +55,20 @@ export default function AuthView({ members, onLogin }: AuthViewProps) {
   const [confirmPassword, setConfirmPassword] = useState('');
   const [registerForm, setRegisterForm] = useState<RegisterInput>(EMPTY_REGISTER);
   const [departments, setDepartments] = useState<{ id: string; name: string }[]>([]);
+  const [bloomBuses, setBloomBuses] = useState<PublicBloomBus[]>([]);
 
   // Charge la liste des départements (public, pas de session) au premier passage en mode
   // inscription — évite l'aller-retour réseau tant que l'utilisateur n'a pas cliqué "Créer mon compte".
   useEffect(() => {
-    if (mode !== 'register' || departments.length > 0) return;
-    apiPublicDepartments().then(list => { if (list) setDepartments(list); });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mode]);
+    if (mode !== 'register') return;
+    let active = true;
+    Promise.all([apiPublicDepartments(registerForm.branch), apiPublicBloomBuses(registerForm.branch)]).then(([deptList, busList]) => {
+      if (!active) return;
+      setDepartments(deptList ?? []);
+      setBloomBuses(busList ?? []);
+    });
+    return () => { active = false; };
+  }, [mode, registerForm.branch]);
 
   // Le token ne doit servir qu'une fois et ne pas traîner dans l'historique/URL partageable
   // (capture d'écran, etc.) — on le retire de la barre d'adresse juste après lecture.
@@ -139,7 +145,7 @@ export default function AuthView({ members, onLogin }: AuthViewProps) {
     e.preventDefault();
     setError('');
     const f = registerForm;
-    if (!f.lastName || !f.firstName || !f.phone || !f.email || !f.birthDate || !f.profession || !f.departmentId || !f.commune) {
+    if (!f.lastName || !f.firstName || !f.phone || !f.email || !f.birthDate || !f.profession || !f.departmentId || !f.commune || !f.zone || !f.bloomBusId) {
       setError('Tous les champs sont requis.');
       return;
     }
@@ -164,6 +170,14 @@ export default function AuthView({ members, onLogin }: AuthViewProps) {
     setPassword('');
     setRegisterForm(EMPTY_REGISTER);
   };
+
+  const registrationCommunes = Array.from(new Set<string>(bloomBuses.map(bus => bus.commune))).sort((a, b) => a.localeCompare(b, 'fr'));
+  const registrationZones = Array.from(new Set<string>(bloomBuses
+    .filter(bus => bus.commune === registerForm.commune).map(bus => bus.zone))).sort((a, b) => a.localeCompare(b, 'fr'));
+  const registrationBuses = bloomBuses.filter(bus => bus.commune === registerForm.commune && bus.zone === registerForm.zone);
+  const changeRegistrationBranch = (branch: RegisterInput['branch']) => setRegisterForm({ ...registerForm, branch, departmentId: '', commune: '', zone: '', bloomBusId: '' });
+  const changeRegistrationCommune = (commune: string) => setRegisterForm({ ...registerForm, commune, zone: '', bloomBusId: '' });
+  const changeRegistrationZone = (zone: string) => setRegisterForm({ ...registerForm, zone, bloomBusId: '' });
 
   const identifierField = (
     <div>
@@ -303,20 +317,6 @@ export default function AuthView({ members, onLogin }: AuthViewProps) {
                   className="mt-1 w-full border border-bc-border rounded-xl px-3 py-2 text-sm outline-none" />
               </div>
             </div>
-            <div>
-              <label className="text-xs font-bold text-bc-text-secondary">Commune</label>
-              {/* Sert de repli GPS côté serveur (centre du Bloom Bus de la commune) quand
-                  l'appareil ne fournit pas de géolocalisation — évite qu'un membre sans
-                  position réelle se retrouve avec une coordonnée fixe partagée par tous. */}
-              <select value={registerForm.commune} onChange={e => setRegisterForm({ ...registerForm, commune: e.target.value })}
-                className="mt-1 w-full border border-bc-border rounded-xl px-3 py-2 text-sm outline-none bg-white">
-                <option value="">— Choisir —</option>
-                <option value="Cocody">Cocody</option>
-                <option value="Yopougon">Yopougon</option>
-                <option value="Abobo">Abobo</option>
-                <option value="Koumassi">Koumassi</option>
-              </select>
-            </div>
             <div className="grid grid-cols-2 gap-2">
               <div>
                 <label className="text-xs font-bold text-bc-text-secondary">Branche</label>
@@ -324,7 +324,7 @@ export default function AuthView({ members, onLogin }: AuthViewProps) {
                     transverse (« les deux branches ») servant au périmètre/filtrage. Une fiche
                     membre en 'global' serait incohérente — partout ailleurs l'affichage d'une
                     branche de membre ne teste que church/light. */}
-                <select value={registerForm.branch} onChange={e => setRegisterForm({ ...registerForm, branch: e.target.value as RegisterInput['branch'] })}
+                <select value={registerForm.branch} onChange={e => changeRegistrationBranch(e.target.value as RegisterInput['branch'])}
                   className="mt-1 w-full border border-bc-border rounded-xl px-3 py-2 text-sm outline-none bg-white">
                   <option value="church">Bloom Church</option>
                   <option value="light">Bloom Light</option>
@@ -336,6 +336,32 @@ export default function AuthView({ members, onLogin }: AuthViewProps) {
                   className="mt-1 w-full border border-bc-border rounded-xl px-3 py-2 text-sm outline-none bg-white">
                   <option value="">— Choisir —</option>
                   {departments.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
+                </select>
+              </div>
+            </div>
+            <div>
+              <label className="text-xs font-bold text-bc-text-secondary">Commune</label>
+              <select value={registerForm.commune} onChange={e => changeRegistrationCommune(e.target.value)}
+                className="mt-1 w-full border border-bc-border rounded-xl px-3 py-2 text-sm outline-none bg-white">
+                <option value="">— Choisir —</option>
+                {registrationCommunes.map(commune => <option key={commune} value={commune}>{commune}</option>)}
+              </select>
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              <div>
+                <label className="text-xs font-bold text-bc-text-secondary">Zone</label>
+                <select value={registerForm.zone} disabled={!registerForm.commune} onChange={e => changeRegistrationZone(e.target.value)}
+                  className="mt-1 w-full border border-bc-border rounded-xl px-3 py-2 text-sm outline-none bg-white disabled:opacity-40">
+                  <option value="">— Choisir —</option>
+                  {registrationZones.map(zone => <option key={zone} value={zone}>{zone}</option>)}
+                </select>
+              </div>
+              <div>
+                <label className="text-xs font-bold text-bc-text-secondary">Bloom Bus</label>
+                <select value={registerForm.bloomBusId} disabled={!registerForm.zone} onChange={e => setRegisterForm({ ...registerForm, bloomBusId: e.target.value })}
+                  className="mt-1 w-full border border-bc-border rounded-xl px-3 py-2 text-sm outline-none bg-white disabled:opacity-40">
+                  <option value="">— Choisir —</option>
+                  {registrationBuses.map(bus => <option key={bus.id} value={bus.id}>{bus.name}</option>)}
                 </select>
               </div>
             </div>

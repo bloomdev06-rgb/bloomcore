@@ -460,7 +460,6 @@ export default function BloomBusView({
     (m) =>
       m.bloomBusId &&
       busIds.includes(m.bloomBusId) &&
-      m.level !== "nouveau" &&
       (activeBranch === "global" || m.branch === activeBranch), // étanchéité par branche §3
   );
   // Source unique des disques de remplissage + de la synthèse d'évolution : les membres réels
@@ -614,7 +613,7 @@ export default function BloomBusView({
   // Nombre de membres par territoire (§5 — commune / zone / bus), pour l'arbre de la sidebar.
   const countForBusIds = (ids: string[]) =>
     members.filter(
-      (m) => m.bloomBusId && ids.includes(m.bloomBusId) && m.level !== "nouveau" && (activeBranch === "global" || m.branch === activeBranch),
+      (m) => m.bloomBusId && ids.includes(m.bloomBusId) && (activeBranch === "global" || m.branch === activeBranch),
     ).length;
 
   // Synthèse santé + évolution (§Accueil-1.3 / §5) — sur les membres du niveau territorial sélectionné.
@@ -1464,6 +1463,9 @@ export default function BloomBusView({
                               {m.firstName} {m.lastName}
                             </p>
                             <p className="text-[10px] text-bc-text-secondary">{m.phone}</p>
+                            {m.deptAttachmentOrigin === 'self_registration' && m.deptAttachmentStatus === 'pending' && (
+                              <span className="inline-flex mt-1 text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-bc-warning/15 text-bc-warning">Département en attente</span>
+                            )}
                           </div>
                           {editable && <Heart size={14} className="text-bc-green shrink-0" />}
                         </button>
