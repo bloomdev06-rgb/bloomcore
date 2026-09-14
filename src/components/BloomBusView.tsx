@@ -496,9 +496,12 @@ export default function BloomBusView({
   ];
   const canAssign = (target: Member, role: string) =>
     !!operator && canAssignBusRole(operator, operatorRolesForBus, target, role, busLines, departments, ministriesForBus);
-  const pendingBusRequests = selectedLevel.type === 'bus'
-    ? busAttachedMembers.filter((m) => m.bloomBusAttachmentOrigin === 'self_registration' && m.bloomBusAttachmentStatus === 'pending')
-    : [];
+  // La file suit le périmètre affiché : un Super Admin, un responsable de commune ou de
+  // zone voit les demandes de tous les bus sous ses yeux, sans devoir deviner le bon bus.
+  // Un simple membre reste exclu du rendu par `isMembre` plus bas.
+  const pendingBusRequests = busAttachedMembers.filter((m) =>
+    m.bloomBusAttachmentOrigin === 'self_registration' && m.bloomBusAttachmentStatus === 'pending',
+  );
   const canReviewBusRequest = (target: Member) => canAssign(target, 'Membre')
     // Dès qu'un capitaine a demandé une aide, la main passe effectivement à l'échelon
     // supérieur ; un cumul de fonctions garde naturellement le rôle supérieur actif.
@@ -580,7 +583,7 @@ export default function BloomBusView({
   const rosterMembers = selectedLevel.type === "bus"
     ? busMembers.filter(m => !leaderIds.has(m.id))
     : members.filter(m => inActiveGroup(m) && !leaderIds.has(m.id) && primaryBloomBusRole(m) === childRole);
-  const rosterTitle = selectedLevel.type === "bus" ? "Membres du Bloom Bus"
+  const rosterTitle = selectedLevel.type === "bus" ? "Liste complète des membres"
     : selectedLevel.type === "root" ? "Responsables de commune"
     : selectedLevel.type === "commune" ? "Responsables de zone"
     : "Capitaines des Bloom Bus";
@@ -1036,9 +1039,24 @@ export default function BloomBusView({
           )}
         </div>
 
-        {/* Rang 1 : membres du bus (avatars) + ajout — avant les statistiques */}
+        {/* Bloc membre unique : aperçu visuel + accès à la liste complète. La liste détaillée
+            plus bas est volontairement son prolongement, jamais un second widget concurrent. */}
         {selectedLevel.type === "bus" && !isMembre && (
-          <div className="bg-white p-4 rounded-[2rem] border border-bc-border shadow-sm flex items-center gap-3 flex-wrap shrink-0">
+          <section className="bg-white p-4 rounded-[2rem] border border-bc-border shadow-sm shrink-0" aria-label="Membres du Bloom Bus">
+            <div className="flex items-center justify-between gap-3 mb-3">
+              <div>
+                <h2 className="text-sm font-ui font-bold text-bc-text">Membres du Bloom Bus</h2>
+                <p className="text-[11px] text-bc-text-secondary">{busMembers.length} membre{busMembers.length > 1 ? 's' : ''} actif{busMembers.length > 1 ? 's' : ''}</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => rosterPanelRef.current?.scrollIntoView({ behavior: "smooth", block: "start" })}
+                className="px-3 py-1.5 rounded-full border border-bc-border text-[11px] font-bold text-bc-green hover:bg-bc-green/10 active-scale"
+              >
+                Voir la liste
+              </button>
+            </div>
+            <div className="flex items-center gap-3 flex-wrap">
             {busMembers.length === 0 ? (
               <p className="text-xs text-bc-text-secondary flex-1">Aucun membre rattaché à ce bus pour l'instant.</p>
             ) : (
@@ -1084,26 +1102,34 @@ export default function BloomBusView({
                 <Plus size={14} /> Ajouter un membre
               </button>
             )}
-          </div>
+            </div>
+          </section>
         )}
 
-        {selectedLevel.type === 'bus' && pendingBusRequests.length > 0 && !isMembre && (
+        {!isMembre && (
           <section className="rounded-2xl border border-bc-warning/40 bg-bc-warning/5 p-4 shrink-0" aria-label="Demandes Bloom Bus à valider">
             <div className="flex items-start justify-between gap-3 mb-3">
               <div>
                 <h2 className="text-sm font-bold text-bc-text">Demandes Bloom Bus à valider</h2>
-                <p className="text-xs text-bc-text-secondary mt-1">Ces personnes ne sont pas encore dans l'effectif et aucun rapport ne peut être saisi avant validation.</p>
+                <p className="text-xs text-bc-text-secondary mt-1">La file couvre le périmètre actuellement affiché. Ces personnes ne sont pas encore dans l'effectif et aucun rapport ne peut être saisi avant validation.</p>
               </div>
               <span className="text-xs font-bold rounded-full bg-bc-warning/15 text-bc-text px-2 py-1">{pendingBusRequests.length}</span>
             </div>
-            <div className="space-y-2">
+            {pendingBusRequests.length === 0 ? (
+              <div className="rounded-xl border border-dashed border-bc-warning/40 bg-white/60 p-4 text-xs text-bc-text-secondary">
+                Aucune demande Bloom Bus à traiter dans ce périmètre.
+              </div>
+            ) : <div className="space-y-2">
               {pendingBusRequests.map((member) => (
                 <div key={member.id} className="flex flex-wrap items-center gap-3 rounded-xl bg-white border border-bc-border p-3">
                   <Avatar src={member.avatarUrl} initials={`${member.firstName[0]}${member.lastName[0]}`} size="sm" className="bg-bc-warning/15 text-bc-text" />
                   <div className="min-w-0 flex-1">
                     <p className="text-sm font-bold text-bc-text truncate">{member.firstName} {member.lastName}</p>
-                    <p className="text-[11px] text-bc-text-secondary">Choix effectué à l'inscription</p>
+                    <p className="text-[11px] text-bc-text-secondary">Choix effectué à l'inscription · {busLines.find((bus) => bus.id === member.bloomBusId)?.name ?? 'Bloom Bus inconnu'}</p>
                   </div>
+                  {selectedLevel.type !== 'bus' && member.bloomBusId && (
+                    <button type="button" onClick={() => setSelectedLevel({ type: 'bus', id: member.bloomBusId! })} className="px-3 py-1.5 rounded-full text-xs font-bold border border-bc-border text-bc-green active-scale">Ouvrir le bus</button>
+                  )}
                   {canReviewBusRequest(member) ? (
                     <div className="flex flex-wrap gap-2">
                       <button type="button" onClick={() => resolveBusRequest(member, 'validate')} className="px-3 py-1.5 rounded-full text-xs font-bold bg-bc-green text-white active-scale">Valider</button>
@@ -1115,13 +1141,13 @@ export default function BloomBusView({
                   )}
                 </div>
               ))}
-            </div>
+            </div>}
           </section>
         )}
 
         {/* Dashboard Grid — statistiques territoriales, masquées pour un Membre */}
         {!isMembre && (
-        <>
+        <div className="order-20 flex flex-col gap-4">
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 shrink-0">
           <div className="bg-white p-4 rounded-2xl border border-bc-border shadow-sm flex flex-col justify-center items-center">
             <div className="flex justify-between items-center w-full mb-2">
@@ -1328,11 +1354,11 @@ export default function BloomBusView({
             </div>
           )}
         </div>
-        </>
+        </div>
         )}
 
-        {/* Map & List Split */}
-        <div className="flex-1 flex flex-col xl:flex-row gap-6 min-h-[400px]">
+        {/* Carte et actions : juste sous le bloc membre, avant les tableaux de statistiques. */}
+        <div className="order-10 flex-1 flex flex-col xl:flex-row gap-6 min-h-[400px]">
           {/* MAP */}
           <div className="flex-1 bg-white p-5 rounded-[2rem] border border-bc-border shadow-sm flex flex-col">
             <h3 className="text-sm font-ui font-bold text-bc-text mb-4 flex items-center gap-2">
