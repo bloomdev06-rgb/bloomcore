@@ -2,6 +2,7 @@
 // tout en restant uniquement en attente dans le département choisi.
 import assert from 'node:assert/strict';
 import { createServer } from 'node:net';
+import { signToken } from './auth.ts';
 
 process.env.NODE_ENV = 'test';
 process.env.BLOOMCORE_DB = ':memory:';
@@ -51,9 +52,35 @@ try {
   assert.equal((await send(form)).status, 201, 'inscription au bus de la même branche acceptée');
   const registered = (await getCollection('members')).find((member: any) => member.phone === form.phone) as any;
   assert.equal(registered.bloomBusId, 'bus_church');
+  assert.equal(registered.bloomBusAttachmentStatus, 'pending');
+  assert.equal(registered.bloomBusAttachmentOrigin, 'self_registration');
   assert.equal(registered.deptAttachmentStatus, 'pending');
   assert.equal(registered.deptAttachmentOrigin, 'self_registration');
   assert.deepEqual(registered.departments, { dept_church: 'membre' });
+
+  // La validation Bloom Bus est une intention authentifiée séparée : le capitaine
+  // active l'effectif sans valider pour autant le rattachement départemental.
+  const captain = {
+    ...registered, id: 'captain_church', phone: '+2250700000001', email: 'captain@example.org',
+    firstName: 'Capitaine', lastName: 'Church', bloomBusId: 'bus_church',
+    bloomBusAttachmentStatus: 'validated', bloomBusAttachmentOrigin: undefined,
+    departments: { dept_bloom_bus: 'membre' }, busRole: 'capitaine', entryDate: '2026-01-01',
+  };
+  await setCollection('departments', [
+    { id: 'dept_church', name: 'Accueil Church', branch: 'church', type: 'normal', ministryId: 'min_church' },
+    { id: 'dept_light', name: 'Accueil Light', branch: 'light', type: 'normal', ministryId: 'min_light' },
+    { id: 'dept_bloom_bus', name: 'Bloom Bus', branch: 'church', type: 'special', specialFunction: 'bloom_bus', ministryId: 'min_church' },
+  ]);
+  await setCollection('members', [...(await getCollection('members')), captain]);
+  const captainToken = await signToken(captain.id);
+  const approval = await fetch(`${base}/members/${registered.id}/bloom-bus-attachment`, {
+    method: 'PATCH', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${captainToken}` },
+    body: JSON.stringify({ action: 'validate' }),
+  });
+  assert.equal(approval.status, 200, 'capitaine du bus peut valider la demande Bloom Bus');
+  assert.equal((await approval.json()).bloomBusAttachmentStatus, 'validated');
+  const afterApproval = (await getCollection('members')).find((member: any) => member.id === registered.id) as any;
+  assert.equal(afterApproval.deptAttachmentStatus, 'pending', 'validation Bloom Bus indépendante de la validation départementale');
 
   assert.equal((await send({ ...form, phone: '+2250700000098', email: 'other@example.org', bloomBusId: 'bus_light' })).status, 400, 'bus d’autre branche refusé');
   assert.equal((await send({ ...form, phone: '+2250700000097', email: 'other2@example.org', departmentId: 'dept_light' })).status, 400, 'département d’autre branche refusé');

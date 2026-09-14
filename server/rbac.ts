@@ -245,6 +245,13 @@ export async function assertCanWrite(name: string, ctx: RbacContext, incoming: a
       const existingMembers = new Map((await readCollection(name, true)).map((m: Member) => [m.id, m]));
       for (const item of await touchedItems(name, incoming)) {
         const before = existingMembers.get(item.id);
+        // La demande Bloom Bus est une machine d'état serveur. Son statut, son origine et
+        // sa remontée ne peuvent jamais être forgés via le PATCH générique.
+        if (before && ['bloomBusAttachmentStatus', 'bloomBusAttachmentOrigin', 'bloomBusEscalatedTo'].some(
+          field => canonical((before as any)[field]) !== canonical((item as any)[field]),
+        )) {
+          throw new GuardError(403, 'members: rattachement Bloom Bus modifiable uniquement via sa validation dédiée');
+        }
         if (before && item.id === member.id && !hasAny(roles, CROSS_BRANCH_ROLES)
           && ['departments', 'deptBranches', 'deptSections', 'branch', 'mentorId', 'level', 'bloomBusId', 'busRole', 'busRoles'].some(f => canonical((before as any)[f]) !== canonical(item[f]))) {
           throw new GuardError(403, 'members: auto-modification des affectations interdite');

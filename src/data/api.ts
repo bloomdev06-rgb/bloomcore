@@ -473,6 +473,18 @@ export async function apiPatchMember(member: { id: string }): Promise<{ ok: bool
   }
 }
 
+export async function apiResolveBloomBusAttachment(id: string, action: 'validate' | 'redirect' | 'escalate', targetBusId?: string): Promise<{ member?: import('../types').Member; error?: string }> {
+  if (!isAuthed()) return { error: 'Connexion requise.' };
+  try {
+    const res = await fetch(`${API_BASE}/members/${encodeURIComponent(id)}/bloom-bus-attachment`, {
+      credentials: 'include', method: 'PATCH', headers: { 'Content-Type': 'application/json', ...authHeaders() },
+      body: JSON.stringify({ action, ...(targetBusId ? { targetBusId } : {}) }),
+    });
+    const body = await res.json().catch(() => ({}));
+    return res.ok ? { member: body } : { error: body.error ?? 'Action Bloom Bus refusée.' };
+  } catch { return { error: 'Serveur indisponible.' }; }
+}
+
 export async function apiNominatePastoral(id: string, pastoralCursus: string, previousCursus: string): Promise<{ member?: import('../types').Member; error?: string }> {
   if (!isAuthed()) return { error: 'Connexion requise pour une nomination pastorale.' };
   try {

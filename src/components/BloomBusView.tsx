@@ -22,7 +22,7 @@ import { useBusLines, useMinistries, useAdmins, save, labelFor } from "../data";
 import { resolveMemberRoles } from "../data/roles";
 import { departmentAuthority } from "../../packages/domain/authorization";
 import { importBusesFromCsv, importBusMemberState } from "../data/busImport";
-import { apiCreateImportBatch, apiCreateItem, apiDeleteItem, apiSetBusBranch } from "../data/api";
+import { apiCreateImportBatch, apiCreateItem, apiDeleteItem, apiPublicBloomBuses, apiResolveBloomBusAttachment, apiSetBusBranch } from "../data/api";
 import { useSyncedSave } from "../data/useSyncedSave";
 import { CULTE_SLOT_KEYS, culteSlotLabel } from "../data/events";
 import { isBusReportLocked } from "../data/reportLock";
@@ -128,6 +128,7 @@ interface BloomBusViewProps {
   reports: Report[];
   events?: Event[];
   onUpdateMember: (member: Member) => Promise<boolean>;
+  onBloomBusAttachmentSaved?: (member: Member) => void;
   onAddReport: (report: Report) => void;
   onAddMember?: (member: Member) => Promise<boolean>;
   onImportUndone?: (result: ImportUndoResult) => void;
@@ -143,6 +144,7 @@ export default function BloomBusView({
   reports,
   events = [],
   onUpdateMember,
+  onBloomBusAttachmentSaved,
   onAddReport,
   onAddMember,
   onImportUndone,
@@ -327,6 +329,9 @@ export default function BloomBusView({
   const [showAddBus, setShowAddBus] = useState(false);
   const [showDirectRegister, setShowDirectRegister] = useState(false);
   const [showAttachExisting, setShowAttachExisting] = useState(false);
+  const [redirectingRequest, setRedirectingRequest] = useState<Member | null>(null);
+  const [redirectBusId, setRedirectBusId] = useState('');
+  const [redirectBuses, setRedirectBuses] = useState<{ id: string; name: string; commune: string; zone: string }[]>([]);
   // Clic sur un avatar de la barre du haut → attribution de fonction Bloom Bus.
   // C'est l'unique point d'entrée UI : le roster inférieur reste dédié aux rapports membres.
   const [roleAssignMemberId, setRoleAssignMemberId] = useState<string | null>(null);
@@ -456,12 +461,15 @@ export default function BloomBusView({
   })();
 
   const busIds = activeBuses.map((b) => b.id);
-  const busMembers = members.filter(
+  const busAttachedMembers = members.filter(
     (m) =>
       m.bloomBusId &&
       busIds.includes(m.bloomBusId) &&
       (activeBranch === "global" || m.branch === activeBranch), // étanchéité par branche §3
   );
+  // Une demande d'auto-inscription n'entre dans aucun effectif opérationnel, ni dans
+  // les listes de rapports, avant la validation explicite du capitaine.
+  const busMembers = busAttachedMembers.filter((m) => m.bloomBusAttachmentStatus !== 'pending');
   // Source unique des disques de remplissage + de la synthèse d'évolution : les membres réels
   // du Bloom Bus au niveau territorial affiché (bus → ses membres ; zone/commune/racine → tous
   // les membres des bus en portée). Le taux se recalcule à chaque remplissage/validation.
@@ -488,6 +496,30 @@ export default function BloomBusView({
   ];
   const canAssign = (target: Member, role: string) =>
     !!operator && canAssignBusRole(operator, operatorRolesForBus, target, role, busLines, departments, ministriesForBus);
+  const pendingBusRequests = selectedLevel.type === 'bus'
+    ? busAttachedMembers.filter((m) => m.bloomBusAttachmentOrigin === 'self_registration' && m.bloomBusAttachmentStatus === 'pending')
+    : [];
+  const canReviewBusRequest = (target: Member) => canAssign(target, 'Membre')
+    // Dès qu'un capitaine a demandé une aide, la main passe effectivement à l'échelon
+    // supérieur ; un cumul de fonctions garde naturellement le rôle supérieur actif.
+    && !(target.bloomBusEscalatedTo && operator && bloomBusPrimaryRole(operator, departments) === 'Capitaine de Bus');
+  const resolveBusRequest = async (target: Member, action: 'validate' | 'redirect' | 'escalate', targetBusId?: string) => {
+    const result = await apiResolveBloomBusAttachment(target.id, action, targetBusId);
+    if (!result.member) { toast.error(result.error ?? 'Action Bloom Bus refusée.'); return; }
+    onBloomBusAttachmentSaved?.(result.member);
+    setRedirectingRequest(null);
+    setRedirectBusId('');
+    toast.success(action === 'validate' ? 'Membre validé dans le Bloom Bus.' : action === 'redirect' ? 'Demande redirigée vers le capitaine concerné.' : 'Demande remontée au niveau suivant.');
+  };
+  const openRedirect = async (target: Member) => {
+    // Un membre ne peut pas appartenir à la branche globale ; le cas global ne peut
+    // venir que d'un état ancien/corrompu et ne doit jamais élargir la recherche.
+    const branch = target.branch === 'light' ? 'light' : 'church';
+    const buses = await apiPublicBloomBuses(branch);
+    setRedirectBuses((buses ?? []).filter((bus) => bus.id !== target.bloomBusId));
+    setRedirectBusId('');
+    setRedirectingRequest(target);
+  };
   // Contrôle d'attribution affiché uniquement depuis le clic sur un avatar de la barre du haut.
   // Les permissions restent calculées option par option avec le garde serveur partagé.
   const renderBusRoleSelect = (m: Member) => {
@@ -613,7 +645,7 @@ export default function BloomBusView({
   // Nombre de membres par territoire (§5 — commune / zone / bus), pour l'arbre de la sidebar.
   const countForBusIds = (ids: string[]) =>
     members.filter(
-      (m) => m.bloomBusId && ids.includes(m.bloomBusId) && (activeBranch === "global" || m.branch === activeBranch),
+      (m) => m.bloomBusId && m.bloomBusAttachmentStatus !== 'pending' && ids.includes(m.bloomBusId) && (activeBranch === "global" || m.branch === activeBranch),
     ).length;
 
   // Synthèse santé + évolution (§Accueil-1.3 / §5) — sur les membres du niveau territorial sélectionné.
@@ -1055,6 +1087,38 @@ export default function BloomBusView({
           </div>
         )}
 
+        {selectedLevel.type === 'bus' && pendingBusRequests.length > 0 && !isMembre && (
+          <section className="rounded-2xl border border-bc-warning/40 bg-bc-warning/5 p-4 shrink-0" aria-label="Demandes Bloom Bus à valider">
+            <div className="flex items-start justify-between gap-3 mb-3">
+              <div>
+                <h2 className="text-sm font-bold text-bc-text">Demandes Bloom Bus à valider</h2>
+                <p className="text-xs text-bc-text-secondary mt-1">Ces personnes ne sont pas encore dans l'effectif et aucun rapport ne peut être saisi avant validation.</p>
+              </div>
+              <span className="text-xs font-bold rounded-full bg-bc-warning/15 text-bc-text px-2 py-1">{pendingBusRequests.length}</span>
+            </div>
+            <div className="space-y-2">
+              {pendingBusRequests.map((member) => (
+                <div key={member.id} className="flex flex-wrap items-center gap-3 rounded-xl bg-white border border-bc-border p-3">
+                  <Avatar src={member.avatarUrl} initials={`${member.firstName[0]}${member.lastName[0]}`} size="sm" className="bg-bc-warning/15 text-bc-text" />
+                  <div className="min-w-0 flex-1">
+                    <p className="text-sm font-bold text-bc-text truncate">{member.firstName} {member.lastName}</p>
+                    <p className="text-[11px] text-bc-text-secondary">Choix effectué à l'inscription</p>
+                  </div>
+                  {canReviewBusRequest(member) ? (
+                    <div className="flex flex-wrap gap-2">
+                      <button type="button" onClick={() => resolveBusRequest(member, 'validate')} className="px-3 py-1.5 rounded-full text-xs font-bold bg-bc-green text-white active-scale">Valider</button>
+                      <button type="button" onClick={() => openRedirect(member)} className="px-3 py-1.5 rounded-full text-xs font-bold border border-bc-border text-bc-text active-scale">Rediriger</button>
+                      <button type="button" onClick={() => resolveBusRequest(member, 'escalate')} className="px-3 py-1.5 rounded-full text-xs font-bold border border-bc-border text-bc-text-secondary active-scale">Je ne sais pas</button>
+                    </div>
+                  ) : (
+                    <span className="text-[11px] text-bc-text-secondary">En attente de l'autorité compétente</span>
+                  )}
+                </div>
+              ))}
+            </div>
+          </section>
+        )}
+
         {/* Dashboard Grid — statistiques territoriales, masquées pour un Membre */}
         {!isMembre && (
         <>
@@ -1437,7 +1501,7 @@ export default function BloomBusView({
                   </div>
                 ) : (
                   rosterMembers.map((m) => {
-                    const editable = !!operator && operatorRolesForBus.some(role => canFillReportFor(operator, m, role, members, busLines, departments, ministriesForBus));
+                    const editable = m.bloomBusAttachmentStatus !== 'pending' && !!operator && operatorRolesForBus.some(role => canFillReportFor(operator, m, role, members, busLines, departments, ministriesForBus));
                     return (
                       <div
                         key={m.id}
@@ -1846,6 +1910,27 @@ export default function BloomBusView({
             toast.success(`${m.firstName} ${m.lastName} rattaché(e) au bus.`);
           }}
         />
+      )}
+
+      {redirectingRequest && (
+        <Modal open onClose={() => setRedirectingRequest(null)} title="Rediriger vers un Bloom Bus" maxWidth="max-w-md">
+          <div className="space-y-4">
+            <p className="text-sm text-bc-text-secondary">Le capitaine du Bloom Bus choisi recevra la demande et devra la valider.</p>
+            <select
+              value={redirectBusId}
+              onChange={(event) => setRedirectBusId(event.target.value)}
+              className="w-full rounded-xl border border-bc-border bg-white px-3 py-2.5 text-sm text-bc-text"
+            >
+              <option value="">Choisir le Bloom Bus</option>
+              {redirectBuses.map((bus) => <option key={bus.id} value={bus.id}>{bus.name} — {bus.commune}, {bus.zone}</option>)}
+            </select>
+            {redirectBuses.length === 0 && <p className="text-xs text-bc-text-secondary">Aucun autre Bloom Bus disponible dans cette branche. Utilisez « Je ne sais pas » pour remonter la demande.</p>}
+            <div className="flex justify-end gap-2">
+              <button type="button" onClick={() => setRedirectingRequest(null)} className="px-4 py-2 rounded-full text-xs font-bold text-bc-text-secondary">Annuler</button>
+              <button type="button" disabled={!redirectBusId} onClick={() => resolveBusRequest(redirectingRequest, 'redirect', redirectBusId)} className="px-4 py-2 rounded-full text-xs font-bold bg-bc-green text-white disabled:opacity-40 active-scale">Rediriger</button>
+            </div>
+          </div>
+        </Modal>
       )}
 
       <ConfirmDialog

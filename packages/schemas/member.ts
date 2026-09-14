@@ -75,6 +75,9 @@ export const MemberSchema = z.object({
   deptBranches: z.record(z.string(), branch).optional(),
   testRole: z.string().optional(),
   bloomBusId: z.string().optional(),
+  bloomBusAttachmentStatus: z.enum(['pending', 'validated']).optional(),
+  bloomBusAttachmentOrigin: z.enum(['self_registration']).optional(),
+  bloomBusEscalatedTo: z.enum(['zone', 'commune', 'department']).optional(),
   // Fonction du MODULE Bloom Bus — distincte de la fonction tenue dans le DÉPARTEMENT du même
   // nom (departments['dept_bloom_bus']). Voir packages/domain/types.ts BusRole.
   busRole: z.enum(['capitaine', 'responsable_zone', 'responsable_commune']).optional(),

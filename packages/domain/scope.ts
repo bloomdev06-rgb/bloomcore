@@ -375,6 +375,9 @@ export function canFillReportFor(
   departments: Department[],
   ministries: Ministry[] = [],
 ): boolean {
+  // Une auto-inscription attend encore l'accord de son capitaine : elle ne doit
+  // produire aucun rapport, même si l'opérateur est le capitaine ou le membre lui-même.
+  if (target.bloomBusAttachmentStatus === 'pending') return false;
   if (target.id === operator.id) return true;
   return directReportsOf(operator, role, members, busLines, departments).some(member => member.id === target.id)
     || CROSS_BRANCH_ROLES.includes(role)

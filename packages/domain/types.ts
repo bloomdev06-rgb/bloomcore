@@ -128,6 +128,11 @@ export interface Member {
 
   // Special territorial coordinates
   bloomBusId?: string; // Attached bus ID
+  // Demande d'affectation au Bloom Bus, indépendante de l'attente départementale. Le bus
+  // choisi à l'inscription est provisoire jusqu'à validation par son Capitaine.
+  bloomBusAttachmentStatus?: 'pending' | 'validated';
+  bloomBusAttachmentOrigin?: 'self_registration';
+  bloomBusEscalatedTo?: 'zone' | 'commune' | 'department';
 
   // Fonction dans le MODULE Bloom Bus, indépendante de la fonction tenue dans le DÉPARTEMENT
   // Bloom Bus (departments['dept_bloom_bus']). Attribuée depuis le module, jamais depuis la

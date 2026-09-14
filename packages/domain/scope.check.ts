@@ -147,7 +147,8 @@ const hierDepts = [bbDept];
 
 const membre1 = mk({ id: 'membre1', bloomBusId: 'bus_z1a', departments: { dept_bb: 'membre' } });
 const pendingSelfRegistration = mk({ id: 'pendingSelfRegistration', bloomBusId: 'bus_z1a', level: 'nouveau',
-  departments: { dept_1: 'membre' }, deptAttachmentStatus: 'pending', deptAttachmentOrigin: 'self_registration' });
+  departments: { dept_1: 'membre' }, deptAttachmentStatus: 'pending', deptAttachmentOrigin: 'self_registration',
+  bloomBusAttachmentStatus: 'pending', bloomBusAttachmentOrigin: 'self_registration' });
 const capA = mk({ id: 'capA', bloomBusId: 'bus_z1a', departments: { dept_bb: 'capitaine' } });
 const capB = mk({ id: 'capB', bloomBusId: 'bus_z1b', departments: { dept_bb: 'capitaine' } });
 const capC = mk({ id: 'capC', bloomBusId: 'bus_z2a', departments: { dept_bb: 'capitaine' } });
@@ -163,7 +164,7 @@ const hierMembers = [membre1, pendingSelfRegistration, capA, capB, capC, zoneLea
 // Capitaine de Bus -> ses membres (même bus), pas les autres capitaines.
 assert.deepEqual(directReportsOf(capA, 'Capitaine de Bus', hierMembers, hierBusLines, hierDepts).map((m) => m.id), ['membre1', 'pendingSelfRegistration']);
 assert.equal(canFillReportFor(capA, membre1, 'Capitaine de Bus', hierMembers, hierBusLines, hierDepts), true);
-assert.equal(canFillReportFor(capA, pendingSelfRegistration, 'Capitaine de Bus', hierMembers, hierBusLines, hierDepts), true, 'auto-inscrit pending suivi immédiatement dans son Bloom Bus');
+assert.equal(canFillReportFor(capA, pendingSelfRegistration, 'Capitaine de Bus', hierMembers, hierBusLines, hierDepts), false, 'auto-inscrit pending sans rapport avant validation du capitaine');
 assert.equal(canFillReportFor(capA, capB, 'Capitaine de Bus', hierMembers, hierBusLines, hierDepts), false);
 
 // Responsable de Zone -> les Capitaines de sa zone (pas ceux d'une autre zone/commune).

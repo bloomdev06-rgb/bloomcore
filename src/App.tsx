@@ -804,6 +804,7 @@ export default function App() {
             reports={reports}
             events={events}
             onUpdateMember={handleUpdateMember}
+            onBloomBusAttachmentSaved={(member) => setMembers((current) => current.map((item) => item.id === member.id ? member : item))}
             onAddReport={handleAddReport}
             onAddMember={handleAddMember}
             onImportUndone={handleImportUndone}

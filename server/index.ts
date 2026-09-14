@@ -20,7 +20,7 @@ import { runBusBranchMigration } from './migrateBusBranches.ts';
 import { runActionsProphetiquesMigration } from './migrateActionsProphetiques.ts';
 import { runBootMigration } from './bootMigrate.ts';
 import { applyWrite, readCollection, deltaToWhole, GuardError } from './guards.ts';
-import { buildContext, assertCanWrite, assertCanDelete, filterReadable, filterKv, preservedIds, RbacContext } from './rbac.ts';
+import { buildContext, assertCanWrite, assertCanDelete, filterReadable, filterKv, preservedIds, RbacContext, resolveRoles } from './rbac.ts';
 import { dispatch } from './notify.ts';
 import { addClient, poke, initPokeSubscriber } from './stream.ts';
 import { startScheduler } from './scheduler.ts';
@@ -28,7 +28,7 @@ import { loginKey, isLocked, recordFail, clearFails, tooManyRequests } from './r
 import { redisHealthy } from './redis.ts';
 import { getStorage, SIGNED_URL_TTL_SEC } from './storage.ts';
 import { z } from 'zod';
-import { effectiveBranchFor } from '../packages/domain/scope.ts';
+import { effectiveBranchFor, canAssignBusRole, bloomBusPrimaryRole } from '../packages/domain/scope.ts';
 import type { ImportBatch, ImportBusMemberState, Member } from '../packages/domain/types.ts';
 import { canAccessImportBatch, importedBusHasRemainingMembers, restoreBusMemberState, sameBusMemberState, unchangedSinceImport } from './importBatches.ts';
 import { MemberSchema, MemberPatchSchema } from '../packages/schemas/member.ts';
@@ -431,6 +431,8 @@ app.post('/api/v1/auth/register', async (req, res) => {
     pastoralCursus: 'aucun' as const,
     departments: { [input.departmentId]: 'membre' as const },
     bloomBusId: busLine.id,
+    bloomBusAttachmentStatus: 'pending' as const,
+    bloomBusAttachmentOrigin: 'self_registration' as const,
     deptAttachmentStatus: 'pending' as const,
     deptAttachmentOrigin: 'self_registration' as const,
     healthKPIs: { spirituel: 3, social: 3, financier: 3, physique: 3, presenceCulte: 3, presenceService: 3 },
@@ -490,15 +492,131 @@ app.post('/api/v1/auth/register', async (req, res) => {
       targetMemberId: r.id,
     })));
   }
+  // La demande Bloom Bus est traitée par le capitaine du bus choisi. Cette alerte reste
+  // exclusivement dans l'application : le seul mail conservé lors d'une inscription est
+  // celui du circuit départemental déjà arbitré (responsable puis fallback).
+  const allDepartments = await readCollection('departments') as any[];
+  const busCaptainNotifs = members
+    .filter((m: any) => m.id !== check.data.id && m.branch === input.branch
+      && m.bloomBusId === busLine.id && bloomBusPrimaryRole(m, allDepartments) === 'Capitaine de Bus')
+    .map((m: any) => ({
+      id: `notif_bus_registration_${check.data.id}_${m.id}`,
+      timestamp: new Date().toISOString(),
+      title: 'Demande Bloom Bus à valider',
+      message: `${input.firstName} ${input.lastName} a choisi votre Bloom Bus à l'inscription. Validez, redirigez ou remontez la demande.`,
+      type: 'info' as const, read: false, targetMemberId: m.id,
+    }));
   const knownNotifIds = new Set((await readCollection('notifications', true)).map((n: any) => n.id));
   const freshNotifs = notifs.filter((n) => !knownNotifIds.has(n.id));
+  const freshBusNotifs = busCaptainNotifs.filter((n) => !knownNotifIds.has(n.id));
   if (freshNotifs.length) {
     await appendToCollection('notifications', freshNotifs.map((n) => ({ ...n, updatedAt: new Date().toISOString() })));
     await dispatch(freshNotifs, members, await getKv('settings'));
   }
+  if (freshBusNotifs.length) await appendToCollection('notifications', freshBusNotifs.map((n) => ({ ...n, updatedAt: new Date().toISOString() })));
   poke(); // la demande en attente + la cloche apparaissent en direct chez le responsable
 
   res.status(201).json({ ok: true });
+});
+
+const BloomBusAttachmentSchema = z.object({
+  action: z.enum(['validate', 'redirect', 'escalate']),
+  targetBusId: z.string().min(1).optional(),
+}).strict();
+
+// Intention dédiée : la validation/redistribution d'une demande Bloom Bus ne passe jamais
+// par le PATCH générique d'un membre. Elle reste indépendante du rattachement départemental.
+app.patch('/api/v1/members/:id/bloom-bus-attachment', requireAuth, async (req, res) => {
+  const parsed = BloomBusAttachmentSchema.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: 'action Bloom Bus invalide' });
+  const ctx = (req as any).rbac as RbacContext;
+  try {
+    const [members, buses, departments, ministries, admins] = await Promise.all([
+      readCollection('members') as Promise<Member[]>, readCollection('bus_lines') as Promise<any[]>,
+      readCollection('departments') as Promise<any[]>, readCollection('ministries') as Promise<any[]>,
+      readCollection('admins') as Promise<any[]>,
+    ]);
+    const stored = members.find(member => member.id === req.params.id);
+    const currentBus = stored && buses.find(bus => bus.id === stored.bloomBusId);
+    if (!stored || !currentBus || stored.bloomBusAttachmentOrigin !== 'self_registration' || stored.bloomBusAttachmentStatus !== 'pending') {
+      throw new GuardError(404, 'demande Bloom Bus introuvable ou déjà traitée');
+    }
+    if (!canAssignBusRole(ctx.member, ctx.roles, stored, 'Membre', buses, departments, ministries)) {
+      throw new GuardError(403, 'demande Bloom Bus hors de votre périmètre');
+    }
+    const actorRole = bloomBusPrimaryRole(ctx.member, departments);
+    if (stored.bloomBusEscalatedTo && actorRole === 'Capitaine de Bus') {
+      throw new GuardError(403, 'demande remontée : elle doit être traitée par votre responsable');
+    }
+    let next: Member = { ...stored };
+    let notificationText = '';
+    if (parsed.data.action === 'validate') {
+      next = { ...next, bloomBusAttachmentStatus: 'validated', bloomBusEscalatedTo: undefined };
+      notificationText = `${stored.firstName} ${stored.lastName} a été validé(e) dans ${currentBus.name}.`;
+    } else if (parsed.data.action === 'redirect') {
+      const targetBus = buses.find(bus => bus.id === parsed.data.targetBusId);
+      if (!targetBus || targetBus.branch !== stored.branch) throw new GuardError(400, 'Bloom Bus cible invalide ou hors branche');
+      next = { ...next, bloomBusId: targetBus.id, bloomBusEscalatedTo: undefined };
+      notificationText = `${stored.firstName} ${stored.lastName} doit valider son rattachement à ${targetBus.name}.`;
+    } else {
+      const ownBus = buses.find(bus => bus.id === ctx.member.bloomBusId);
+      const hasZoneLead = members.some(member => bloomBusPrimaryRole(member, departments) === 'Responsable de Zone'
+        && buses.find(bus => bus.id === member.bloomBusId)?.commune === currentBus.commune
+        && buses.find(bus => bus.id === member.bloomBusId)?.zone === currentBus.zone);
+      const hasCommuneLead = members.some(member => bloomBusPrimaryRole(member, departments) === 'Responsable de Commune'
+        && buses.find(bus => bus.id === member.bloomBusId)?.commune === currentBus.commune);
+      // Une étape absente ne bloque jamais une demande : elle monte directement au prochain
+      // responsable identifié (zone → commune → responsable du département Bloom Bus).
+      const level = actorRole === 'Capitaine de Bus'
+        ? (hasZoneLead ? 'zone' : hasCommuneLead ? 'commune' : 'department')
+        : actorRole === 'Responsable de Zone'
+          ? (hasCommuneLead ? 'commune' : 'department')
+          : 'department';
+      next = { ...next, bloomBusEscalatedTo: level };
+      notificationText = `Aide requise pour orienter ${stored.firstName} ${stored.lastName} (demande Bloom Bus).`;
+      if (!ownBus && !['Responsable', 'Pasteur', 'Super Admin', 'Admin', 'Pasteur Principal'].some(role => ctx.roles.includes(role))) {
+        throw new GuardError(403, 'niveau de remontée Bloom Bus introuvable');
+      }
+    }
+    const body = await deltaToWhole('members', [next], []);
+    await applyWrite('members', body, undefined, await preservedIds('members', ctx));
+    const bloomBusDepartmentIds = new Set(departments
+      .filter((department: any) => department.specialFunction === 'bloom_bus')
+      .map((department: any) => department.id));
+    let recipients = members.filter(member => {
+      if (member.id === ctx.member.id || member.branch !== next.branch) return false;
+      const role = bloomBusPrimaryRole(member, departments);
+      const bus = buses.find(item => item.id === member.bloomBusId);
+      if (parsed.data.action === 'redirect') return role === 'Capitaine de Bus' && member.bloomBusId === next.bloomBusId;
+      if (parsed.data.action === 'escalate' && next.bloomBusEscalatedTo === 'zone') return role === 'Responsable de Zone' && bus?.commune === currentBus.commune && bus?.zone === currentBus.zone;
+      if (parsed.data.action === 'escalate' && next.bloomBusEscalatedTo === 'commune') return role === 'Responsable de Commune' && bus?.commune === currentBus.commune;
+      if (parsed.data.action === 'escalate') return [...bloomBusDepartmentIds].some(
+        departmentId => member.departments?.[departmentId] === 'responsable',
+      );
+      return false;
+    });
+    // Si aucun responsable Bloom Bus n'est identifié, une autorité pastorale/admin de la
+    // même branche récupère la demande dans sa cloche. Aucun courriel supplémentaire n'est
+    // émis par ce flux : seules les notifications in-app sont créées ici.
+    if (parsed.data.action === 'escalate' && next.bloomBusEscalatedTo === 'department' && recipients.length === 0) {
+      recipients = members.filter(member => member.id !== ctx.member.id
+        && (member.branch === next.branch || ['Super Admin', 'Admin', 'Pasteur Principal'].some(role => resolveRoles(member, admins, ministries, departments).includes(role)))
+        && resolveRoles(member, admins, ministries, departments).some(role => ['Pasteur', 'Pasteur Principal', 'Admin', 'Super Admin'].includes(role)));
+    }
+    if (recipients.length) await appendToCollection('notifications', recipients.map(recipient => ({
+      id: `notif_bus_attachment_${next.id}_${recipient.id}_${Date.now()}`,
+      timestamp: new Date().toISOString(), title: 'Demande Bloom Bus à traiter', message: notificationText,
+      type: 'info', read: false, targetMemberId: recipient.id, updatedAt: new Date().toISOString(),
+    })));
+    await appendToCollection('audits', [{ id: `aud_bus_attachment_${randomUUID()}`, timestamp: new Date().toISOString(),
+      actionType: 'MEMBER_PROFILE_UPDATED', operatorId: ctx.member.id, operatorName: `${ctx.member.firstName} ${ctx.member.lastName}`,
+      branch: next.branch, details: `Demande Bloom Bus : ${parsed.data.action}`, previousValue: stored.bloomBusId, newValue: next.bloomBusId }]);
+    poke('members'); poke('notifications'); poke('audits');
+    res.json(next);
+  } catch (e) {
+    if (e instanceof GuardError) return res.status(e.status).json({ error: e.message });
+    throw e;
+  }
 });
 
 app.post('/api/v1/auth/complete', async (req, res) => {
