@@ -1041,20 +1041,22 @@ export default function BloomBusView({
 
         {/* Bloc membre unique : aperçu visuel + accès à la liste complète. La liste détaillée
             plus bas est volontairement son prolongement, jamais un second widget concurrent. */}
-        {selectedLevel.type === "bus" && !isMembre && (
+        {!isMembre && (
           <section className="bg-white p-4 rounded-[2rem] border border-bc-border shadow-sm shrink-0" aria-label="Membres du Bloom Bus">
             <div className="flex items-center justify-between gap-3 mb-3">
               <div>
-                <h2 className="text-sm font-ui font-bold text-bc-text">Membres du Bloom Bus</h2>
+                <h2 className="text-sm font-ui font-bold text-bc-text">{selectedLevel.type === 'bus' ? 'Membres du Bloom Bus' : 'Membres du périmètre'}</h2>
                 <p className="text-[11px] text-bc-text-secondary">{busMembers.length} membre{busMembers.length > 1 ? 's' : ''} actif{busMembers.length > 1 ? 's' : ''}</p>
               </div>
-              <button
-                type="button"
-                onClick={() => rosterPanelRef.current?.scrollIntoView({ behavior: "smooth", block: "start" })}
-                className="px-3 py-1.5 rounded-full border border-bc-border text-[11px] font-bold text-bc-green hover:bg-bc-green/10 active-scale"
-              >
-                Voir la liste
-              </button>
+              {selectedLevel.type === 'bus' && (
+                <button
+                  type="button"
+                  onClick={() => rosterPanelRef.current?.scrollIntoView({ behavior: "smooth", block: "start" })}
+                  className="px-3 py-1.5 rounded-full border border-bc-border text-[11px] font-bold text-bc-green hover:bg-bc-green/10 active-scale"
+                >
+                  Voir la liste
+                </button>
+              )}
             </div>
             <div className="flex items-center gap-3 flex-wrap">
             {busMembers.length === 0 ? (
@@ -1094,7 +1096,7 @@ export default function BloomBusView({
                 )}
               </div>
             )}
-            {canRegisterMember && (
+            {selectedLevel.type === 'bus' && canRegisterMember && (
               <button
                 onClick={() => setShowAttachExisting(true)}
                 className="flex items-center gap-1.5 px-4 py-2 rounded-full bg-bc-green text-white text-xs font-bold hover:opacity-90 active-scale shrink-0"
@@ -1106,7 +1108,7 @@ export default function BloomBusView({
           </section>
         )}
 
-        {!isMembre && (
+        {!isMembre && pendingBusRequests.length > 0 && (
           <section className="rounded-2xl border border-bc-warning/40 bg-bc-warning/5 p-4 shrink-0" aria-label="Demandes Bloom Bus à valider">
             <div className="flex items-start justify-between gap-3 mb-3">
               <div>
@@ -1115,11 +1117,7 @@ export default function BloomBusView({
               </div>
               <span className="text-xs font-bold rounded-full bg-bc-warning/15 text-bc-text px-2 py-1">{pendingBusRequests.length}</span>
             </div>
-            {pendingBusRequests.length === 0 ? (
-              <div className="rounded-xl border border-dashed border-bc-warning/40 bg-white/60 p-4 text-xs text-bc-text-secondary">
-                Aucune demande Bloom Bus à traiter dans ce périmètre.
-              </div>
-            ) : <div className="space-y-2">
+            <div className="space-y-2">
               {pendingBusRequests.map((member) => (
                 <div key={member.id} className="flex flex-wrap items-center gap-3 rounded-xl bg-white border border-bc-border p-3">
                   <Avatar src={member.avatarUrl} initials={`${member.firstName[0]}${member.lastName[0]}`} size="sm" className="bg-bc-warning/15 text-bc-text" />
@@ -1141,7 +1139,7 @@ export default function BloomBusView({
                   )}
                 </div>
               ))}
-            </div>}
+            </div>
           </section>
         )}
 
