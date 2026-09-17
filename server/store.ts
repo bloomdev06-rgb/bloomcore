@@ -226,6 +226,9 @@ export async function listPushSubsForMember(memberId: string): Promise<{ endpoin
 export async function deletePushSub(endpoint: string): Promise<void> {
   await prisma.pushSubscription.deleteMany({ where: { endpoint } });
 }
+export async function deletePushSubForMember(endpoint: string, memberId: string): Promise<void> {
+  await prisma.pushSubscription.deleteMany({ where: { endpoint, memberId } });
+}
 
 // One-shot migration from the old SQLite blob store into Postgres. Canonicalizes
 // every item (M5 snake_case) at the boundary. Replaces target collections via

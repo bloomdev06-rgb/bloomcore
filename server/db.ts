@@ -259,3 +259,6 @@ export function listPushSubsForMember(memberId: string): PushSubRow[] {
 export function deletePushSub(endpoint: string): void {
   db.prepare('DELETE FROM push_subscriptions WHERE endpoint = ?').run(endpoint);
 }
+export function deletePushSubForMember(endpoint: string, memberId: string): void {
+  db.prepare('DELETE FROM push_subscriptions WHERE endpoint = ? AND member_id = ?').run(endpoint, memberId);
+}

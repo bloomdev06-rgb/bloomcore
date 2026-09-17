@@ -24,7 +24,7 @@ await new Promise<void>(resolve => allocator.close(() => resolve()));
 const base = `http://127.0.0.1:${address.port}/api/v1`;
 try {
   await import('./index.ts');
-  const { setCollection, getCollection } = await import('./datastore.ts');
+  const { setCollection, getCollection, insertPushSub, listPushSubsForMember } = await import('./datastore.ts');
   await setCollection('departments', [
     { id: 'dept_church', name: 'Accueil Church', branch: 'church', type: 'normal', ministryId: 'min_church' },
     { id: 'dept_light', name: 'Accueil Light', branch: 'light', type: 'normal', ministryId: 'min_light' },
@@ -84,6 +84,28 @@ try {
 
   assert.equal((await send({ ...form, phone: '+2250700000098', email: 'other@example.org', bloomBusId: 'bus_light' })).status, 400, 'bus d’autre branche refusé');
   assert.equal((await send({ ...form, phone: '+2250700000097', email: 'other2@example.org', departmentId: 'dept_light' })).status, 400, 'département d’autre branche refusé');
+
+  // Une session ne peut retirer que ses propres abonnements Web Push : connaître l'endpoint
+  // d'un autre appareil ne doit pas permettre de le désinscrire.
+  const pushOwner = { ...captain, id: 'push_owner', phone: '+2250700000011', email: 'push-owner@example.org' };
+  const pushAttacker = { ...captain, id: 'push_attacker', phone: '+2250700000012', email: 'push-attacker@example.org' };
+  await setCollection('members', [...(await getCollection('members')), pushOwner, pushAttacker]);
+  const ownerEndpoint = 'https://push.example/owner-device';
+  await insertPushSub(ownerEndpoint, pushOwner.id, 'owner-p256dh', 'owner-auth', new Date().toISOString());
+  const attackerToken = await signToken(pushAttacker.id);
+  const attackerUnsubscribe = await fetch(`${base}/push/unsubscribe`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${attackerToken}` },
+    body: JSON.stringify({ endpoint: ownerEndpoint }),
+  });
+  assert.equal(attackerUnsubscribe.status, 200);
+  assert.equal((await listPushSubsForMember(pushOwner.id)).length, 1, 'un autre membre ne peut pas désinscrire cet appareil');
+  const ownerToken = await signToken(pushOwner.id);
+  const ownerUnsubscribe = await fetch(`${base}/push/unsubscribe`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${ownerToken}` },
+    body: JSON.stringify({ endpoint: ownerEndpoint }),
+  });
+  assert.equal(ownerUnsubscribe.status, 200);
+  assert.equal((await listPushSubsForMember(pushOwner.id)).length, 0, 'le propriétaire peut désinscrire son appareil');
   console.log('register.http.check OK');
   process.exit(0);
 } catch (error) {

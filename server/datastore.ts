@@ -31,6 +31,7 @@ import {
   insertPushSub as dbInsertPushSub,
   listPushSubsForMember as dbListPushSubsForMember,
   deletePushSub as dbDeletePushSub,
+  deletePushSubForMember as dbDeletePushSubForMember,
 } from './db.ts';
 
 export const usePostgres = !!process.env.DATABASE_URL;
@@ -162,4 +163,11 @@ export async function listPushSubsForMember(memberId: string): Promise<{ endpoin
 export async function deletePushSub(endpoint: string): Promise<void> {
   const b = await backend();
   return b ? b.deletePushSub(endpoint) : dbDeletePushSub(endpoint);
+}
+
+// Désinscription initiée par le client : l'endpoint est un identifiant d'appareil,
+// mais ne doit jamais permettre à une session de retirer l'abonnement d'un autre membre.
+export async function deletePushSubForMember(endpoint: string, memberId: string): Promise<void> {
+  const b = await backend();
+  return b ? b.deletePushSubForMember(endpoint, memberId) : dbDeletePushSubForMember(endpoint, memberId);
 }

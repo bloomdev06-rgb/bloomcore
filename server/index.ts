@@ -12,7 +12,7 @@ import { fileURLToPath } from 'node:url';
 import express from 'express';
 import compression from 'compression';
 import cookieParser from 'cookie-parser';
-import { getCollection, setCollection, appendToCollection, getKv, setKv, getCredential, syncOpSeen, markSyncOp, insertWebhookEvent, markWebhookProcessed, insertPushSub, deletePushSub } from './datastore.ts';
+import { getCollection, setCollection, appendToCollection, getKv, setKv, getCredential, syncOpSeen, markSyncOp, insertWebhookEvent, markWebhookProcessed, insertPushSub, deletePushSubForMember } from './datastore.ts';
 import { hashPassword, verifyPassword, signToken, verifyToken, createOneTimeToken, consumeOneTimeToken, upsertCredentials, requireSecret, usingInsecureSecret, resolveBindHost, TOKEN_TTL_MS } from './auth.ts';
 import { ensureSeeded } from './seed.ts';
 import { runBusRoleMigration } from './migrateBusRoles.ts';
@@ -692,7 +692,7 @@ app.post('/api/v1/push/subscribe', requireAuth, async (req, res) => {
 });
 app.post('/api/v1/push/unsubscribe', requireAuth, async (req, res) => {
   const { endpoint } = req.body || {};
-  if (endpoint) await deletePushSub(endpoint);
+  if (endpoint) await deletePushSubForMember(endpoint, (req as any).memberId as string);
   res.json({ ok: true });
 });
 

@@ -620,6 +620,21 @@ export default function BloomBusView({
         n + (memberWeekStatus(m.id, s1, branchReports) === "pending" ? 1 : 0)
           + (memberWeekStatus(m.id, s2, branchReports) === "pending" ? 1 : 0), 0)
     : 0;
+  // Suivi mensuel : le rapport reste hebdomadaire, mais le widget agrège toutes les semaines
+  // calendaires qui recouvrent le mois courant. Les semaines fermées restent lisibles.
+  const reportMonthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+  const reportMonthEnd = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+  const monthlyReportWeeks = mondaysInRange(reportMonthStart, reportMonthEnd);
+  const monthlyReportRates = monthlyReportWeeks.map((week) => ({ week, ...membersFillRate(rosterIds, week, branchReports) }));
+  const monthlyReportSummary = monthlyReportRates.reduce(
+    (summary, rate) => ({
+      validated: summary.validated + rate.validated.length,
+      pending: summary.pending + rate.pending.length,
+      missing: summary.missing + rate.missing.length,
+    }),
+    { validated: 0, pending: 0, missing: 0 },
+  );
+  const reportMonthLabel = reportMonthStart.toLocaleDateString('fr-FR', { month: 'long', year: 'numeric' });
 
   const canEdit = [
     "Pasteur",
@@ -1097,14 +1112,108 @@ export default function BloomBusView({
               </div>
             )}
             {selectedLevel.type === 'bus' && canRegisterMember && (
-              <button
-                onClick={() => setShowAttachExisting(true)}
-                className="flex items-center gap-1.5 px-4 py-2 rounded-full bg-bc-green text-white text-xs font-bold hover:opacity-90 active-scale shrink-0"
-              >
-                <Plus size={14} /> Ajouter un membre
-              </button>
+              <div className="flex flex-wrap gap-2 shrink-0">
+                <button
+                  onClick={() => setShowAttachExisting(true)}
+                  className="flex items-center gap-1.5 px-3 py-2 rounded-full bg-white border border-bc-border text-bc-text text-xs font-bold hover:bg-bc-canvas active-scale"
+                >
+                  <Users size={14} /> Membre existant
+                </button>
+                <button
+                  id="bloombus-add-member-btn"
+                  onClick={() => setShowDirectRegister(true)}
+                  className="flex items-center gap-1.5 px-3 py-2 rounded-full bg-bc-green text-white text-xs font-bold hover:opacity-90 active-scale"
+                >
+                  <Plus size={14} /> Nouvelle fiche
+                </button>
+              </div>
             )}
             </div>
+            {!isMembre && operator && (bloomBusRole || (canEdit && selectedLevel.type === "bus")) && (
+              <div className="flex flex-wrap gap-2 mt-4 pt-4 border-t border-bc-border">
+                {bloomBusRole && (
+                  <button
+                    type="button"
+                    onClick={() => openMemberReport(operator.id)}
+                    className="inline-flex items-center gap-2 px-3 py-2 rounded-xl bg-bc-cerulean/10 text-bc-cerulean text-xs font-bold hover:bg-bc-cerulean/20 active-scale"
+                    title="Remplir mon propre rapport de santé spirituelle"
+                  >
+                    <Heart size={16} /> Mon rapport
+                  </button>
+                )}
+                {canEdit && selectedLevel.type === "bus" && (
+                  <button
+                    type="button"
+                    onClick={() => { setLifeReportTab("infos"); setShowLifeReportModal(true); }}
+                    className="inline-flex items-center gap-2 px-3 py-2 rounded-xl bg-bc-green/10 text-bc-green text-xs font-bold hover:bg-bc-green/20 active-scale"
+                    title="Rapport d'activité du Bloom Bus sélectionné"
+                  >
+                    <Sliders size={16} /> Rapport d'activité
+                  </button>
+                )}
+              </div>
+            )}
+            {(selectedLevel.type === "bus" || isHierarchicalOperator) && (
+              <div ref={rosterPanelRef} className="mt-4 pt-4 border-t border-bc-border">
+                <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
+                  <div className="flex items-center gap-2">
+                    <h3 className="text-sm font-ui font-bold text-bc-text">{rosterTitle}</h3>
+                    {rosterPendingCount > 0 && (
+                      <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-bc-warning/15 text-bc-warning" title="Rapports en attente de votre validation">
+                        {rosterPendingCount} à valider
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-[10px] text-bc-text-secondary">
+                    {selectedLevel.type === "bus" ? "Touchez un membre pour ouvrir son rapport." : "Ouvrez un responsable pour descendre au niveau suivant."}
+                  </p>
+                </div>
+                {hierarchyLeaders.length > 0 && (
+                  <div className="mb-3 space-y-2" aria-label={leaderTitle}>
+                    {hierarchyLeaders.map((m) => (
+                      <div key={m.id} className="p-3 rounded-xl border border-bc-border bg-bc-canvas flex items-center gap-3">
+                        <span className="relative shrink-0">
+                          <Avatar src={m.avatarUrl} initials={`${m.firstName[0]}${m.lastName[0]}`} size="sm" className="w-10 h-10 bg-white border border-bc-border text-bc-text text-xs" />
+                          <RoleCrown role={primaryBloomBusRole(m)} className="-right-1 -top-1" />
+                        </span>
+                        <div className="min-w-0 flex-1">
+                          <p className="text-sm font-bold text-bc-text truncate">{m.firstName} {m.lastName}</p>
+                          <p className="text-[10px] text-bc-text-secondary">{primaryBloomBusRole(m)}</p>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                <div className="space-y-2 max-h-[72vh] overflow-y-auto pr-1">
+                  {rosterMembers.length === 0 ? (
+                    <p className="text-xs text-bc-text-secondary text-center py-6">Aucun membre du niveau hiérarchique sélectionné.</p>
+                  ) : rosterMembers.map((m) => {
+                    const editable = m.bloomBusAttachmentStatus !== 'pending' && !!operator && operatorRolesForBus.some(role => canFillReportFor(operator, m, role, members, busLines, departments, ministriesForBus));
+                    return (
+                      <div key={m.id} className="w-full p-3 bg-bc-canvas border border-bc-border rounded-xl flex items-center gap-3">
+                        <button type="button" onClick={() => { if (editable) openMemberReport(m.id); }} disabled={!editable} className="flex items-center gap-3 min-w-0 flex-1 text-left hover:opacity-80 transition-opacity disabled:cursor-default active-scale">
+                          <span className="relative shrink-0">
+                            <Avatar src={m.avatarUrl} initials={`${m.firstName[0]}${m.lastName[0]}`} size="sm" className="w-10 h-10 bg-white border border-bc-border text-bc-text text-xs" />
+                            {primaryBloomBusRole(m) && <RoleCrown role={primaryBloomBusRole(m)} className="-right-1 -top-1" />}
+                          </span>
+                          <span className="min-w-0 flex-1">
+                            <span className="block text-sm font-bold text-bc-text truncate">{m.firstName} {m.lastName}</span>
+                            <span className="block text-[10px] text-bc-text-secondary">{m.phone}</span>
+                          </span>
+                          {editable && <Heart size={14} className="text-bc-green shrink-0" />}
+                        </button>
+                        <ReportStatusBoxes memberId={m.id} reports={branchReports} now={now} onValidate={canValidateMember(m) ? (week) => openValidateReport(m.id, week) : undefined} />
+                        {selectedLevel.type !== "bus" && (
+                          <button type="button" onClick={() => openChildTerritory(m)} className="shrink-0 flex items-center gap-1 px-2.5 py-1.5 rounded-full bg-white border border-bc-border text-[10px] font-bold text-bc-green hover:bg-bc-green/10 active-scale" title="Ouvrir le territoire correspondant">
+                            Voir <ChevronRight size={13} />
+                          </button>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
           </section>
         )}
 
@@ -1380,9 +1489,9 @@ export default function BloomBusView({
             </div>
           </div>
 
-          {/* Right column: action widget + member list, stacked above one another */}
+          {/* Le panneau latéral ne duplique plus la liste des membres : il devient un suivi
+              mensuel actionnable. La liste complète reste dans le bloc Membres ci-dessus. */}
           <div className="w-full xl:w-80 flex flex-col gap-6">
-          {/* Member List (only shown when bus is selected) */}
           {selectedLevel.type === "bus" && isMembre && (
             <div className="bg-white p-5 rounded-[2rem] border border-bc-border shadow-sm flex flex-col items-center justify-center text-center gap-3">
               <Heart size={28} className="text-bc-green" />
@@ -1396,189 +1505,47 @@ export default function BloomBusView({
               </button>
             </div>
           )}
-          {(selectedLevel.type === "bus" || isHierarchicalOperator) && !isMembre && operator && (bloomBusRole || (canEdit && selectedLevel.type === "bus")) && (
-            <div className="bg-white p-4 rounded-[2rem] border border-bc-border shadow-sm flex gap-3">
-              {bloomBusRole && (
-                <button
-                  onClick={() => openMemberReport(operator.id)}
-                  className="flex-1 flex flex-col items-center gap-1.5 py-4 rounded-2xl bg-bc-cerulean/10 text-bc-cerulean font-bold hover:bg-bc-cerulean/20 transition-colors active-scale"
-                  title="Remplir mon propre rapport de santé spirituelle"
-                >
-                  <Heart size={20} />
-                  <span className="text-xs">Mon rapport</span>
-                </button>
-              )}
-              {canEdit && selectedLevel.type === "bus" && (
-                <button
-                  onClick={() => { setLifeReportTab("infos"); setShowLifeReportModal(true); }}
-                  className="flex-1 flex flex-col items-center gap-1.5 py-4 rounded-2xl bg-bc-green/10 text-bc-green font-bold hover:bg-bc-green/20 transition-colors active-scale"
-                  title="Rapport d'activité du bus (Capitaine)"
-                >
-                  <Sliders size={20} />
-                  <span className="text-xs">Rapport d'activité</span>
-                </button>
-              )}
-            </div>
-          )}
-          {(selectedLevel.type === "bus" || isHierarchicalOperator) && !isMembre && (
-            // max-h borne le panneau → la liste interne (flex-1 overflow-y-auto) défile
-            // au lieu d'allonger la page quand les membres sont nombreux.
-            <div ref={rosterPanelRef} className="bg-white p-5 rounded-[2rem] border border-bc-border shadow-sm flex flex-col max-h-[80vh]">
-              <div className="flex items-center justify-between mb-4">
-                <div className="flex items-center gap-2">
-                  <h3 className="text-sm font-ui font-bold text-bc-text">{rosterTitle}</h3>
-                  {rosterPendingCount > 0 && (
-                    <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-bc-warning/15 text-bc-warning" title="Rapports en attente de votre validation">
-                      {rosterPendingCount} à valider
-                    </span>
-                  )}
+          {!isMembre && (selectedLevel.type === "bus" || isHierarchicalOperator) && (
+            <aside className="bg-white p-5 rounded-[2rem] border border-bc-border shadow-sm" aria-label="Suivi mensuel des rapports membres">
+              <div className="flex items-start gap-3 mb-4">
+                <span className="w-10 h-10 rounded-xl bg-bc-green/10 text-bc-green flex items-center justify-center shrink-0"><ClipboardList size={19} /></span>
+                <div>
+                  <h3 className="text-sm font-ui font-bold text-bc-text">Rapports des membres</h3>
+                  <p className="text-[11px] text-bc-text-secondary capitalize">{reportMonthLabel}</p>
                 </div>
-                {canRegisterMember && (
-                  <div className="flex items-center gap-2">
-                    <button
-                      onClick={() => setShowAttachExisting(true)}
-                      className="flex items-center gap-1 px-3 py-1.5 rounded-full bg-white border border-bc-border text-bc-text text-[10px] font-bold active:scale-95 transition-transform"
-                    >
-                      <Users size={12} /> Membre existant
-                    </button>
-                    <button
-                      id="bloombus-add-member-btn"
-                      onClick={() => setShowDirectRegister(true)}
-                      className="flex items-center gap-1 px-3 py-1.5 rounded-full bg-bc-green text-white text-[10px] font-bold active:scale-95 transition-transform"
-                    >
-                      <Plus size={12} /> Nouvelle fiche
-                    </button>
-                  </div>
-                )}
               </div>
-              <p className="text-[10px] text-bc-text-secondary mb-3">
-                {selectedLevel.type === "bus"
-                  ? "Clique un membre pour faire son rapport de suivi."
-                  : "Ouvre le périmètre d’un responsable pour descendre au niveau suivant."}
-              </p>
-              {/* §6-7 — disques de remplissage cliquables : taux RÉEL des membres du Bloom Bus au
-                  niveau affiché (membersFillRate sur les responsables du niveau directement
-                  inférieur — rosterIds), identique à tous les niveaux.
-                  Se recalcule dès qu'un rapport est rempli (en attente) ou validé. */}
-              {operator && rosterIds.length > 0 && (
-                <div className="flex items-center gap-4 mb-3 px-1 pb-3 border-b border-bc-border">
-                  {([s2, s1] as const).map((w) => {
-                    const rate = membersFillRate(rosterIds, w, branchReports);
-                    return (
-                      <button
-                        key={w}
-                        type="button"
-                        onClick={() => setFillPopover(fillPopover === w ? null : w)}
-                        className="flex items-center gap-2 active-scale"
-                        title="Voir le remplissage des membres du Bloom Bus"
-                      >
-                        <Ring value={rate.pct} total={100} color={rate.missing.length === 0 && rate.pending.length === 0 ? "var(--color-bc-success)" : rate.pct > 0 ? "var(--color-bc-warning)" : "var(--color-bc-danger)"} size={28} onClick={() => setFillPopover(fillPopover === w ? null : w)} />
-                        <span className="text-[10px] font-bold text-bc-text-secondary text-left">
-                          {weekLabel(w)}<br />{rate.pct}%
-                        </span>
+              {rosterIds.length === 0 ? (
+                <p className="text-xs text-bc-text-secondary py-3">Aucun rapport à suivre dans ce périmètre.</p>
+              ) : (
+                <>
+                  <div className="grid grid-cols-3 gap-2 mb-4 text-center">
+                    <div className="rounded-xl bg-bc-success/10 px-2 py-2"><strong className="block text-sm text-bc-success">{monthlyReportSummary.validated}</strong><span className="text-[9px] font-bold text-bc-text-secondary">validés</span></div>
+                    <div className="rounded-xl bg-bc-warning/15 px-2 py-2"><strong className="block text-sm text-bc-warning">{monthlyReportSummary.pending}</strong><span className="text-[9px] font-bold text-bc-text-secondary">à valider</span></div>
+                    <div className="rounded-xl bg-bc-danger/10 px-2 py-2"><strong className="block text-sm text-bc-danger">{monthlyReportSummary.missing}</strong><span className="text-[9px] font-bold text-bc-text-secondary">manquants</span></div>
+                  </div>
+                  <div className="space-y-2">
+                    {monthlyReportRates.map((rate) => (
+                      <button key={rate.week} type="button" onClick={() => setFillPopover(fillPopover === rate.week ? null : rate.week)} className="w-full flex items-center justify-between gap-3 rounded-xl border border-bc-border px-3 py-2.5 text-left hover:bg-bc-canvas active-scale">
+                        <span className="text-[10px] font-bold text-bc-text">{weekLabel(rate.week)}</span>
+                        <span className="text-[10px] font-bold text-bc-text-secondary tabular-nums">{rate.pct}% rempli</span>
                       </button>
-                    );
-                  })}
-                </div>
-              )}
-              {operator && fillPopover && rosterIds.length > 0 && (() => {
-                const rate = membersFillRate(rosterIds, fillPopover, branchReports);
-                const nameOf = (id: string) => { const m = members.find((mm) => mm.id === id); return m ? `${m.firstName} ${m.lastName}` : id; };
-                return (
-                  <div className="mb-3 p-3 bg-bc-canvas border border-bc-border rounded-xl text-[11px] space-y-2">
-                    <p className="font-bold text-bc-text">{weekLabel(fillPopover)} — {rate.pct}% rempli</p>
-                    {rate.validated.length > 0 && (
-                      <p><span className="text-bc-success font-bold">✓ Validés :</span> {rate.validated.map(nameOf).join(", ")}</p>
-                    )}
-                    {rate.pending.length > 0 && (
-                      <p><span className="text-bc-warning font-bold">◔ En attente :</span> {rate.pending.map(nameOf).join(", ")}</p>
-                    )}
-                    {rate.missing.length > 0 && (
-                      <p><span className="text-bc-danger font-bold">✗ Manquants :</span> {rate.missing.map(nameOf).join(", ")}</p>
-                    )}
+                    ))}
                   </div>
-                );
-              })()}
-              {hierarchyLeaders.length > 0 && (
-                <div className="mb-3 space-y-2" aria-label={leaderTitle}>
-                  <p className="text-[10px] font-bold uppercase tracking-wider text-bc-text-secondary">{leaderTitle}</p>
-                  {hierarchyLeaders.map((m) => (
-                    <div key={m.id} className="p-3 rounded-xl border border-bc-border bg-amber-50/60 flex items-center gap-3">
-                      <span className="relative shrink-0">
-                        <Avatar src={m.avatarUrl} initials={`${m.firstName[0]}${m.lastName[0]}`} size="sm" className="w-10 h-10 bg-white border border-bc-border text-bc-text text-xs shadow-sm" />
-                        <RoleCrown role={primaryBloomBusRole(m)} className="-right-1 -top-1" />
-                      </span>
-                      <div className="min-w-0 flex-1">
-                        <p className="text-sm font-bold text-bc-text truncate">{m.firstName} {m.lastName}</p>
-                        <p className="text-[10px] text-bc-text-secondary">{primaryBloomBusRole(m)}</p>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-              <div className="space-y-3 overflow-y-auto flex-1 pr-2">
-                {rosterMembers.length === 0 ? (
-                  <div className="text-center py-8">
-                    <p className="text-xs text-bc-text-secondary font-bold">
-                      Aucun membre du niveau hiérarchique sélectionné.
-                    </p>
-                  </div>
-                ) : (
-                  rosterMembers.map((m) => {
-                    const editable = m.bloomBusAttachmentStatus !== 'pending' && !!operator && operatorRolesForBus.some(role => canFillReportFor(operator, m, role, members, busLines, departments, ministriesForBus));
+                  {fillPopover && (() => {
+                    const rate = membersFillRate(rosterIds, fillPopover, branchReports);
+                    const nameOf = (id: string) => { const m = members.find((member) => member.id === id); return m ? `${m.firstName} ${m.lastName}` : id; };
                     return (
-                      <div
-                        key={m.id}
-                        className="w-full p-3 bg-bc-canvas border border-bc-border rounded-xl flex items-center gap-3"
-                      >
-                        <button
-                          type="button"
-                          onClick={() => { if (editable) openMemberReport(m.id); }}
-                          disabled={!editable}
-                          className="flex items-center gap-3 min-w-0 flex-1 text-left hover:opacity-80 transition-opacity disabled:cursor-default active-scale"
-                        >
-                          <span className="relative shrink-0">
-                            <Avatar
-                              src={m.avatarUrl}
-                              initials={`${m.firstName[0]}${m.lastName[0]}`}
-                              size="sm"
-                              className="w-10 h-10 bg-white border border-bc-border text-bc-text text-xs shadow-sm"
-                            />
-                            {primaryBloomBusRole(m) && <RoleCrown role={primaryBloomBusRole(m)} className="-right-1 -top-1" />}
-                          </span>
-                          <div className="min-w-0 flex-1">
-                            <p className="text-sm font-bold text-bc-text truncate">
-                              {m.firstName} {m.lastName}
-                            </p>
-                            <p className="text-[10px] text-bc-text-secondary">{m.phone}</p>
-                            {m.deptAttachmentOrigin === 'self_registration' && m.deptAttachmentStatus === 'pending' && (
-                              <span className="inline-flex mt-1 text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-bc-warning/15 text-bc-warning">Département en attente</span>
-                            )}
-                          </div>
-                          {editable && <Heart size={14} className="text-bc-green shrink-0" />}
-                        </button>
-                          <ReportStatusBoxes
-                          memberId={m.id}
-                          reports={branchReports}
-                          now={now}
-                          onValidate={canValidateMember(m) ? (week) => openValidateReport(m.id, week) : undefined}
-                          />
-                        {selectedLevel.type !== "bus" && (
-                          <button
-                            type="button"
-                            onClick={() => openChildTerritory(m)}
-                            className="shrink-0 flex items-center gap-1 px-2.5 py-1.5 rounded-full bg-white border border-bc-border text-[10px] font-bold text-bc-green hover:bg-bc-green/10 active-scale"
-                            title="Ouvrir le territoire correspondant"
-                          >
-                            Voir <ChevronRight size={13} />
-                          </button>
-                        )}
+                      <div className="mt-3 p-3 bg-bc-canvas border border-bc-border rounded-xl text-[11px] space-y-2">
+                        <p className="font-bold text-bc-text">{weekLabel(fillPopover)} — {rate.pct}% rempli</p>
+                        {rate.validated.length > 0 && <p><span className="text-bc-success font-bold">✓ Validés :</span> {rate.validated.map(nameOf).join(", ")}</p>}
+                        {rate.pending.length > 0 && <p><span className="text-bc-warning font-bold">◔ À valider :</span> {rate.pending.map(nameOf).join(", ")}</p>}
+                        {rate.missing.length > 0 && <p><span className="text-bc-danger font-bold">✗ Manquants :</span> {rate.missing.map(nameOf).join(", ")}</p>}
                       </div>
                     );
-                  })
-                )}
-              </div>
-            </div>
+                  })()}
+                </>
+              )}
+            </aside>
           )}
           </div>
         </div>
